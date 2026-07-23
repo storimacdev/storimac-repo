@@ -1,0 +1,31 @@
+# Firebase App Hosting config for this Next.js app.
+# Docs: https://firebase.google.com/docs/app-hosting/configure
+#
+# Set up once with (from repo root):
+#   firebase init apphosting
+#   firebase apphosting:secrets:set anthropic-api-key
+# App Hosting auto-runs the standard npm build (npm install / npm run build /
+# npm start), so the predev/prebuild sync-system-prompts.mjs hook fires the
+# same way it does locally and in the Dockerfile build.
+#
+# UNVERIFIED — check before first deploy: this repo has system-prompts/ as a
+# sibling of web/, not inside it. If App Hosting's buildpack build only
+# checks out the configured app root (web/) rather than the full repo, the
+# prebuild sync step will fail because ../system-prompts/ won't exist. If
+# that happens, point App Hosting at the Dockerfile in this directory instead
+# (App Hosting supports custom Docker builds) rather than buildpack
+# auto-detection — see Dockerfile, which already builds from the repo root
+# and copies both directories in explicitly.
+
+runConfig:
+  minInstances: 0
+  maxInstances: 2
+  concurrency: 40
+  cpuMillicores: 1000
+  memoryMiB: 512
+
+env:
+  - variable: ANTHROPIC_API_KEY
+    secret: anthropic-api-key
+    availability:
+      - RUNTIME

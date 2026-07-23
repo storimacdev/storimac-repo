@@ -1,0 +1,18 @@
+rules_version = '2';
+
+// Binary exports (.docx/.pdf — see ARCHITECTURE.md §4/§6) live at
+// stories/{storyId}/exports/{fileName}. Ownership is checked against the
+// same /stories/{storyId} Firestore doc used by firestore.rules, via
+// Storage's cross-service firestore.get(). This cross-service call is a
+// newer Storage Rules capability — verify it behaves as expected against the
+// Firebase emulator before relying on it in production; the syntax below is
+// unverified against a live/emulated project.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /stories/{storyId}/{allPaths=**} {
+      allow read, write: if request.auth != null
+        && firestore.get(/databases/(default)/documents/stories/$(storyId)).data.ownerUid == request.auth.uid;
+    }
+  }
+}
