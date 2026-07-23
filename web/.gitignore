@@ -17,9 +17,6 @@
 /.next/
 /out/
 
-# synced copy of ../system-prompts/ — see scripts/sync-system-prompts.mjs
-/generated/
-
 # production
 /build
 

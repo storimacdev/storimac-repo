@@ -19,6 +19,10 @@
 .DS_Store
 *.pem
 
+# PRDs are planning docs, not needed to build/run the app — kept locally only,
+# see storimac-prds-local in project memory/chat history for the current path
+/storimac-prds/
+
 # debug
 npm-debug.log*
 yarn-debug.log*
