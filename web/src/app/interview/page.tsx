@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import ChatInterview from "@/components/ChatInterview";
 
 export const metadata = {
@@ -5,5 +6,9 @@ export const metadata = {
 };
 
 export default function InterviewPage() {
-  return <ChatInterview />;
+  return (
+    <Suspense fallback={null}>
+      <ChatInterview />
+    </Suspense>
+  );
 }

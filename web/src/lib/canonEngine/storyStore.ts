@@ -27,6 +27,12 @@ export interface AuthorTypeAssessment {
   ts: string;
 }
 
+export interface StoryPendingConflict {
+  element_id: string;
+  old_value: unknown;
+  new_value: unknown;
+}
+
 export interface Story {
   id: string;
   ownerUid: string;
@@ -39,6 +45,13 @@ export interface Story {
   currentStage: number;
   currentElementId: string | null;
   authorTypeHistory: AuthorTypeAssessment[];
+  /**
+   * Set by /api/chat (issue #89) when a turn's proposed update conflicts
+   * with a Confirmed element, cleared once the author picks a resolution
+   * (issue #10's 3-way choice). Optional/nullable since Stories created
+   * before this field existed won't have it in Firestore.
+   */
+  pendingConflict?: StoryPendingConflict | null;
 }
 
 export interface StoryMessage {
@@ -107,6 +120,7 @@ export async function createStory(
     currentStage: 1,
     currentElementId: null,
     authorTypeHistory: [],
+    pendingConflict: null,
   };
   await ref.set(story);
   return story;
@@ -164,6 +178,16 @@ export async function touchStory(
   await storiesCollection()
     .doc(storyId)
     .update({ ...patch, updatedAt: new Date().toISOString() });
+}
+
+/** Records or clears the conflict awaiting the author's 3-way resolution choice (issue #10, wired in issue #89). */
+export async function setPendingConflict(
+  storyId: string,
+  conflict: StoryPendingConflict | null
+): Promise<void> {
+  await storiesCollection()
+    .doc(storyId)
+    .update({ pendingConflict: conflict, updatedAt: new Date().toISOString() });
 }
 
 /** Appends an author-type re-assessment (issue #8 calls this) without clobbering prior history. */
