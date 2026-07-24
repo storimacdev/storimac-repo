@@ -21,9 +21,16 @@ function getAdminApp(): App {
 
   const serviceAccountJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
 
+  // Build options conditionally rather than passing `credential: undefined` /
+  // `storageBucket: undefined` explicitly - the Admin SDK validates on key
+  // *presence*, not truthiness, so an explicit undefined value throws
+  // "Invalid Firebase app options" instead of falling back to Application
+  // Default Credentials the way omitting the key entirely does.
   return initializeApp({
-    credential: serviceAccountJson ? cert(JSON.parse(serviceAccountJson)) : undefined,
-    storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+    ...(serviceAccountJson ? { credential: cert(JSON.parse(serviceAccountJson)) } : {}),
+    ...(process.env.FIREBASE_STORAGE_BUCKET
+      ? { storageBucket: process.env.FIREBASE_STORAGE_BUCKET }
+      : {}),
   });
 }
 
