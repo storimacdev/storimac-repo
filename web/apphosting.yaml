@@ -27,3 +27,43 @@ runConfig:
 env:
   - variable: ANTHROPIC_API_KEY
     secret: anthropic-api-key
+
+  # Client-side Firebase config (issue #88 — Auth). Public by design (see
+  # web/.env.local.example) — safe as plain values, not secrets. Needed at
+  # BUILD time too: Next.js inlines NEXT_PUBLIC_ vars into the client bundle
+  # during `next build`, and /onboarding + /interview both statically
+  # prerender a client component that calls initializeApp() at module load
+  # (lib/firebaseClient.ts) — without these, that prerender throws and the
+  # whole Cloud Build fails. Deliberately NOT setting
+  # NEXT_PUBLIC_USE_FIREBASE_EMULATORS here — production must talk to real
+  # Firebase Auth, not a local emulator.
+  - variable: NEXT_PUBLIC_FIREBASE_API_KEY
+    value: AIzaSyBf7_sSUweM8mlaa8rEC7AEzNDyzGVz-C4
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+    value: storimac.firebaseapp.com
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+    value: storimac
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+    value: storimac.firebasestorage.app
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+    value: "84713589523"
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_APP_ID
+    value: "1:84713589523:web:218bfc27c7687dffac28e6"
+    availability:
+      - BUILD
+      - RUNTIME
