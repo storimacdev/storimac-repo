@@ -2,6 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+} from "firebase/auth";
+import { auth, googleProvider } from "@/lib/firebaseClient";
 import ScriptPreview from "@/components/ScriptPreview";
 
 /**
@@ -9,16 +15,14 @@ import ScriptPreview from "@/components/ScriptPreview";
  * (project 7b1a417c-9c3b-4f19-bfd9-50553314e724, Onboarding.dc.html) per
  * GitHub issue #88.
  *
- * This reproduces the design's own state machine and validation rules
- * faithfully, including its mocked social sign-in (sets a placeholder email,
- * no real OAuth) and localStorage autosave. Real auth (Firebase Auth),
- * workspace/canvas provisioning, tier enforcement, and invite delivery are
- * NOT wired up here — the source design is itself a frontend-only prototype
- * with no backend, and none of issue #88's AuthN/AuthZ/data-model/API
- * deliverables are in scope for "implement this file." One deliberate
- * deviation from the source: `enterWorkspace` navigates to /interview
- * (a real destination) instead of resetting back to step 0 (the prototype
- * had nowhere real to go).
+ * Reproduces the design's own state machine and validation rules, now wired
+ * to the real backend: Google/email sign-in against Firebase Auth, a session
+ * cookie via /api/auth/session, and workspace/canvas/invite creation via
+ * /api/workspaces/* on the final step. The source design had no password
+ * field for email sign-in; one was added here since real email/password
+ * auth requires it (Google sign-in needs no such field). `enterWorkspace`
+ * navigates to /interview with the new workspace/canvas ids instead of
+ * resetting to step 0 (the prototype had nowhere real to go).
  */
 
 const STORAGE_KEY = "storimac_onboarding_v1";
@@ -62,6 +66,15 @@ export default function OnboardingFlow() {
   const [showAutosave, setShowAutosave] = useState(false);
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
+
+  // Auth — kept out of `answers`/autosave since it's a credential, not form data.
+  const [password, setPassword] = useState("");
+  const [authenticated, setAuthenticated] = useState(false);
+  const [authBusy, setAuthBusy] = useState(false);
+
+  // Final workspace/canvas/invite provisioning on the "done" step.
+  const [submitBusy, setSubmitBusy] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Restore from localStorage on mount. This reads an external system
   // (browser storage, unavailable during SSR) rather than deriving from
@@ -140,8 +153,64 @@ export default function OnboardingFlow() {
     autosave(clamped, answers);
   }
 
-  function next() {
+  async function establishSession(idToken: string) {
+    const res = await fetch("/api/auth/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idToken }),
+    });
+    if (!res.ok) throw new Error("Could not start your session. Please try again.");
+  }
+
+  async function signInWithGoogle() {
+    setAuthBusy(true);
+    setErrors((e) => ({ ...e, email: undefined }));
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      await establishSession(await result.user.getIdToken());
+      setAuthenticated(true);
+      updateAnswer("email", result.user.email ?? "");
+    } catch {
+      setErrors({ email: "Google sign-in failed. Please try again or use email below." });
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function signInWithEmail(): Promise<boolean> {
+    if (!password) {
+      setErrors({ email: "Enter a password to continue with email." });
+      return false;
+    }
+    setAuthBusy(true);
+    try {
+      let credential;
+      try {
+        credential = await createUserWithEmailAndPassword(auth, answers.email, password);
+      } catch (err) {
+        if (err instanceof Error && "code" in err && err.code === "auth/email-already-in-use") {
+          credential = await signInWithEmailAndPassword(auth, answers.email, password);
+        } else {
+          throw err;
+        }
+      }
+      await establishSession(await credential.user.getIdToken());
+      setAuthenticated(true);
+      return true;
+    } catch {
+      setErrors({ email: "Sign-in failed. Check your email and password." });
+      return false;
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function next() {
     if (!validateCurrent()) return;
+    if (step === "signup" && !authenticated) {
+      const signedIn = await signInWithEmail();
+      if (!signedIn) return;
+    }
     goToStep(stepIndex + 1);
   }
 
@@ -164,13 +233,48 @@ export default function OnboardingFlow() {
     setInviteDraft("");
   }
 
-  function enterWorkspace() {
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      // best-effort cleanup
+  async function postJson<T>(url: string, body: unknown): Promise<T> {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data?.error ?? "Something went wrong. Please try again.");
     }
-    router.push("/interview");
+    return data as T;
+  }
+
+  async function enterWorkspace() {
+    setSubmitBusy(true);
+    setSubmitError(null);
+    try {
+      const { workspace } = await postJson<{ workspace: { id: string } }>("/api/workspaces", {
+        name: answers.workspaceName,
+        tier: answers.plan || "free",
+      });
+      const { canvas } = await postJson<{ canvas: { id: string } }>(
+        `/api/workspaces/${workspace.id}/canvases`,
+        { title: answers.canvasName || "Untitled Canvas" }
+      );
+      if (answers.plan === "premium" && answers.invites.length) {
+        await Promise.all(
+          answers.invites.map((email) =>
+            postJson(`/api/workspaces/${workspace.id}/invites`, { email })
+          )
+        );
+      }
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+      } catch {
+        // best-effort cleanup
+      }
+      router.push(`/interview?workspaceId=${workspace.id}&canvasId=${canvas.id}`);
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+      setSubmitBusy(false);
+    }
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
@@ -219,9 +323,14 @@ export default function OnboardingFlow() {
                 <button
                   type="button"
                   className="btn btn-secondary btn-block"
-                  onClick={() => updateAnswer("email", "you@gmail.com")}
+                  onClick={signInWithGoogle}
+                  disabled={authBusy || authenticated}
                 >
-                  Continue with Google
+                  {authenticated
+                    ? "Signed in with Google"
+                    : authBusy
+                      ? "Signing in…"
+                      : "Continue with Google"}
                 </button>
               </div>
               <div className="ob-field">
@@ -234,9 +343,25 @@ export default function OnboardingFlow() {
                   type="email"
                   placeholder="you@studio.com"
                   value={answers.email}
+                  disabled={authenticated}
                   onChange={(e) => updateAnswer("email", e.target.value)}
                 />
               </div>
+              {!authenticated && (
+                <div className="ob-field">
+                  <label className="field" htmlFor="password">
+                    Password
+                  </label>
+                  <input
+                    className="input"
+                    id="password"
+                    type="password"
+                    placeholder="At least 6 characters"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                </div>
+              )}
               {errors.email && <p className="ob-error">{errors.email}</p>}
             </>
           )}
@@ -403,8 +528,14 @@ export default function OnboardingFlow() {
                   <span>{inviteSummary}</span>
                 </div>
               </div>
-              <button type="button" className="btn btn-primary" onClick={enterWorkspace}>
-                Enter your workspace
+              {submitError && <p className="ob-error">{submitError}</p>}
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={enterWorkspace}
+                disabled={submitBusy}
+              >
+                {submitBusy ? "Setting up your workspace…" : "Enter your workspace"}
               </button>
             </>
           )}
@@ -416,8 +547,13 @@ export default function OnboardingFlow() {
                   Back
                 </button>
               )}
-              <button type="button" className="btn btn-primary" onClick={next}>
-                Continue
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={next}
+                disabled={step === "signup" && authBusy}
+              >
+                {step === "signup" && authBusy ? "Signing in…" : "Continue"}
               </button>
               {canSkip && (
                 <button type="button" className="btn btn-ghost" onClick={skip}>

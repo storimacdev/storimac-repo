@@ -1,6 +1,8 @@
 import { getDb } from "@/lib/firebaseAdmin";
 import { listElements } from "./canonStore";
 import type { CanonElement } from "./types";
+import { getWorkspace, TierLimitError } from "@/lib/workspace/workspaceStore";
+import { TIER_LIMITS } from "@/lib/workspace/types";
 
 /**
  * Story persistence — GitHub issue #12, reference implementation of the
@@ -28,6 +30,8 @@ export interface AuthorTypeAssessment {
 export interface Story {
   id: string;
   ownerUid: string;
+  /** The Workspace ("Story Workspace") this Canvas belongs to - see lib/workspace. */
+  workspaceId: string;
   title: string;
   createdAt: string;
   updatedAt: string;
@@ -60,16 +64,42 @@ function messagesCollection(storyId: string) {
   return storiesCollection().doc(storyId).collection("messages");
 }
 
+async function countStoriesInWorkspace(workspaceId: string): Promise<number> {
+  const snap = await storiesCollection().where("workspaceId", "==", workspaceId).get();
+  return snap.size;
+}
+
+/**
+ * Creates a Story ("Story Canvas" in issue #88's terminology) inside a
+ * Workspace. Enforces the workspace's tier canvas limit (Free: 1 canvas
+ * per workspace) before creating - issue #88's "1 Story Canvas" Free-tier
+ * limit, checked here rather than left to the caller/UI to remember.
+ */
 export async function createStory(
   ownerUid: string,
+  workspaceId: string,
   title: string,
   currentProject = "project1"
 ): Promise<Story> {
+  const workspace = await getWorkspace(workspaceId);
+  if (!workspace) throw new Error(`Workspace "${workspaceId}" not found.`);
+
+  const limits = TIER_LIMITS[workspace.tier];
+  if (limits.maxCanvasesPerWorkspace !== null) {
+    const existing = await countStoriesInWorkspace(workspaceId);
+    if (existing >= limits.maxCanvasesPerWorkspace) {
+      throw new TierLimitError(
+        `${workspace.tier} tier allows only ${limits.maxCanvasesPerWorkspace} Story Canvas per workspace; workspace "${workspaceId}" already has ${existing}.`
+      );
+    }
+  }
+
   const now = new Date().toISOString();
   const ref = storiesCollection().doc();
   const story: Story = {
     id: ref.id,
     ownerUid,
+    workspaceId,
     title,
     createdAt: now,
     updatedAt: now,
@@ -101,6 +131,14 @@ async function assertOwnership(storyId: string, ownerUid: string): Promise<Story
 export async function listStories(ownerUid: string): Promise<Story[]> {
   const snap = await storiesCollection()
     .where("ownerUid", "==", ownerUid)
+    .orderBy("updatedAt", "desc")
+    .get();
+  return snap.docs.map((d) => d.data() as Story);
+}
+
+export async function listStoriesInWorkspace(workspaceId: string): Promise<Story[]> {
+  const snap = await storiesCollection()
+    .where("workspaceId", "==", workspaceId)
     .orderBy("updatedAt", "desc")
     .get();
   return snap.docs.map((d) => d.data() as Story);
