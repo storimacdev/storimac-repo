@@ -1,6 +1,8 @@
+import { randomUUID } from "crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest, NextResponse } from "next/server";
 import { getSystemPrompt } from "@/lib/systemPrompt";
+import { logTurnHeuristics } from "@/lib/turnGuardrails";
 
 export const runtime = "nodejs";
 
@@ -58,6 +60,8 @@ export async function POST(req: NextRequest) {
       .map((block) => block.text)
       .join("\n")
       .trim();
+
+    logTurnHeuristics(reply, randomUUID());
 
     return NextResponse.json({ reply });
   } catch (err) {
