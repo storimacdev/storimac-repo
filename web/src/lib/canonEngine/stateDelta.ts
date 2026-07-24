@@ -43,6 +43,17 @@ export const StateDeltaSchema = z.object({
   updates: z.array(ElementUpdateSchema),
   conflict_detected: z.boolean(),
   stage_ready_to_advance: z.boolean(),
+  // Populated by the model only during a Conflict Resolution turn (issue
+  // #10) — the app injects conflict context via
+  // conflictResolution.buildConflictContextMessage() and expects these back.
+  // cascade_review here is a courtesy hint, not authoritative: the app
+  // computes the real downstream-impact list itself
+  // (conflictResolution.findCascadeReview, from actual stored depends_on /
+  // rationale data) rather than trusting the model to enumerate it
+  // correctly, so this field is optional even when resolution is
+  // "accept_and_update".
+  resolution: z.enum(["keep_canon", "accept_and_update", "park"]).optional(),
+  cascade_review: z.array(z.string()).optional(),
 });
 
 export type ElementUpdateInput = z.infer<typeof ElementUpdateSchema>;

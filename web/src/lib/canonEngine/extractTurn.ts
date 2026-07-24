@@ -53,6 +53,16 @@ const EMIT_TURN_TOOL: Anthropic.Tool = {
         type: "boolean",
         description: "True if all required elements for the current stage are Confirmed or Parked.",
       },
+      resolution: {
+        type: "string",
+        enum: ["keep_canon", "accept_and_update", "park"],
+        description: "Only set this during a Conflict Resolution turn (a system note will tell you when you're in one), after the author picks one of the three choices you presented.",
+      },
+      cascade_review: {
+        type: "array",
+        items: { type: "string" },
+        description: "Only relevant alongside resolution: accept_and_update. Element IDs you believe may be affected by the change - a hint only, the app computes the authoritative list itself.",
+      },
     },
     required: ["reply", "updates", "conflict_detected", "stage_ready_to_advance"],
   },
