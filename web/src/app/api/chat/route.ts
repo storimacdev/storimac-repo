@@ -9,11 +9,18 @@ import { getMembership } from "@/lib/workspace/workspaceStore";
 import {
   getStory,
   appendMessage,
+  appendAuthorTypeAssessment,
+  appendOutstandingQuestions,
   listMessages,
   touchStory,
   setPendingConflict,
+  setStage7Audit,
   type StoryPendingConflict,
 } from "@/lib/canonEngine/storyStore";
+import { runStage7Audit, formatAuditSummary } from "@/lib/canonEngine/stage7Audit";
+import { classifyAuthorType, shouldReassess, adjustDepthForAuthorType } from "@/lib/canonEngine/authorType";
+import { getDefaultDepthMode } from "@/lib/canonEngine/stageFsm";
+import { buildTurnContext } from "@/lib/canonEngine/contextBudget";
 import { listElements, applyStateDelta, CanonConflictError, type ElementUpdate } from "@/lib/canonEngine/canonStore";
 import { checkStageGate, advanceStage, getStageDefinition, PROJECT1_STAGES, type OutstandingQuestion } from "@/lib/canonEngine/stageFsm";
 import { detectConflict, buildConflictContextMessage, resolveConflict } from "@/lib/canonEngine/conflictResolution";
@@ -30,8 +37,6 @@ export const runtime = "nodejs";
  * advancement via stageFsm (#7), and runs the conflict-resolution 3-way
  * choice via conflictResolution (#10) when a turn touches a Confirmed element.
  */
-
-const CONTEXT_MESSAGE_LIMIT = 20;
 
 function toElementUpdate(u: ElementUpdateInput): ElementUpdate {
   const patch: ElementUpdate["patch"] = {};
@@ -80,19 +85,52 @@ export async function POST(req: NextRequest) {
     const now = new Date().toISOString();
     await appendMessage(storyId, { role: "user", content: message.trim(), ts: now, turnId });
 
-    const [elements, recentMessages] = await Promise.all([
+    const [elements, allMessages] = await Promise.all([
       listElements(storyId),
-      listMessages(storyId, CONTEXT_MESSAGE_LIMIT),
+      listMessages(storyId),
     ]);
 
-    const confirmedSnapshot = elements
-      .filter((e) => e.status === "Confirmed")
-      .map((e) => `- ${e.element_id}: ${JSON.stringify(e.value)}`)
-      .join("\n");
+    // Context budget (issue #13): short transcripts replay a raw window;
+    // long ones switch to a compact state summary + the last few raw turns.
+    const { window: recentMessages, stateSummary } = buildTurnContext(story, elements, allMessages);
+
+    // Author-type classification (issue #8, PRD §5.2): re-assess during the
+    // first ~3 author messages and on any later large unprompted dump. Never
+    // shown to the author — it only shapes internal depth defaults below.
+    const authorMessageCount = allMessages.filter((m) => m.role === "user").length;
+    let authorType = story.authorTypeHistory.at(-1)?.type ?? null;
+    if (shouldReassess({ message, authorMessageCount })) {
+      const assessment = classifyAuthorType({ message, authorMessageCount });
+      await appendAuthorTypeAssessment(storyId, assessment);
+      authorType = assessment.type;
+    }
 
     let system = getSystemPrompt();
-    if (confirmedSnapshot) {
-      system += `\n\n[Current Canon State — Confirmed elements only, for your grounding, never narrate this to the author]\n${confirmedSnapshot}`;
+    if (stateSummary) {
+      // Long transcript: the summary carries all Confirmed canon + stage.
+      system += `\n\n${stateSummary}`;
+    } else {
+      const confirmedSnapshot = elements
+        .filter((e) => e.status === "Confirmed")
+        .map((e) => `- ${e.element_id}: ${JSON.stringify(e.value)}`)
+        .join("\n");
+      if (confirmedSnapshot) {
+        system += `\n\n[Current Canon State — Confirmed elements only, for your grounding, never narrate this to the author]\n${confirmedSnapshot}`;
+      }
+    }
+
+    // Depth defaults for the current stage, adjusted by author type (issue
+    // #8). Internal guidance only — the classification itself is never
+    // stated to the author, and an explicit author request for more/less
+    // depth always overrides these defaults (the system prompt honors that).
+    if (authorType) {
+      const stageDef = getStageDefinition(story.currentStage);
+      const depthLines = stageDef.requiredElementIds
+        .map((id) => `- ${id}: ${adjustDepthForAuthorType(getDefaultDepthMode(story.currentStage, id), authorType)}`)
+        .join("\n");
+      if (depthLines) {
+        system += `\n\n[Depth defaults for the current stage — internal guidance, never narrate depth modes or author-type labels to the author. An explicit author request for more or less depth always overrides these.]\n${depthLines}`;
+      }
     }
     const pendingConflict = story.pendingConflict ?? null;
     if (pendingConflict) {
@@ -167,10 +205,20 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Stage 7 gate (issue #17): the author's first message after seeing the
+    // audit summary counts as their response and unlocks Stage 8.
+    let stage7Responded = story.stage7Audit?.authorResponded ?? false;
+    if (story.currentStage === 7 && story.stage7Audit && !stage7Responded) {
+      stage7Responded = true;
+      await setStage7Audit(storyId, { ...story.stage7Audit, authorResponded: true });
+    }
+
     let currentStage = story.currentStage;
     let outstandingQuestions: OutstandingQuestion[] = [];
+    let auditSummary: string | null = null;
     const isLastStage = story.currentStage >= PROJECT1_STAGES[PROJECT1_STAGES.length - 1].stage;
-    if (!nextPendingConflict && delta.stage_ready_to_advance && !isLastStage) {
+    const blockedByStage7 = story.currentStage === 7 && !stage7Responded;
+    if (!nextPendingConflict && delta.stage_ready_to_advance && !isLastStage && !blockedByStage7) {
       const freshElements = await listElements(storyId);
       const gate = checkStageGate(story.currentStage, freshElements);
       if (gate.canAdvance) {
@@ -178,14 +226,32 @@ export async function POST(req: NextRequest) {
         currentStage = result.nextStage;
         outstandingQuestions = result.outstandingQuestions;
         await touchStory(storyId, { currentStage });
+        // Persist Parked-element questions for the Stage 8 compiler (#18).
+        await appendOutstandingQuestions(storyId, outstandingQuestions);
+
+        // Entering Stage 7 triggers the system-run Creative Audit (#17).
+        if (currentStage === 7) {
+          const audit = runStage7Audit(freshElements);
+          await setStage7Audit(storyId, audit);
+          auditSummary = formatAuditSummary(audit);
+        }
       }
     }
 
     await appendMessage(storyId, { role: "assistant", content: delta.reply, ts: new Date().toISOString(), turnId });
+    if (auditSummary) {
+      await appendMessage(storyId, { role: "assistant", content: auditSummary, ts: new Date().toISOString(), turnId });
+    }
     logTurnHeuristics(delta.reply, turnId);
+
+    // Post-write element state so the Canon side panel (issue #11) updates
+    // after each turn without a second round-trip.
+    const elementsAfter = await listElements(storyId);
 
     return NextResponse.json({
       reply: delta.reply,
+      auditSummary,
+      elements: elementsAfter,
       currentStage,
       currentStageName: getStageDefinition(currentStage).name,
       stageAdvanced: currentStage !== story.currentStage,

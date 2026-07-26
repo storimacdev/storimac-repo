@@ -52,6 +52,12 @@ export interface Story {
    * before this field existed won't have it in Firestore.
    */
   pendingConflict?: StoryPendingConflict | null;
+  /**
+   * Stage 7 audit result (issue #17), written when the Project enters Stage
+   * 7. Stage 8 entry is gated on `authorResponded` becoming true (the
+   * author's next message after seeing the summary flips it).
+   */
+  stage7Audit?: import("./stage7Audit").Stage7AuditResult | null;
 }
 
 export interface StoryMessage {
@@ -188,6 +194,46 @@ export async function setPendingConflict(
   await storiesCollection()
     .doc(storyId)
     .update({ pendingConflict: conflict, updatedAt: new Date().toISOString() });
+}
+
+/** Stores/updates the Stage 7 audit (issue #17); pass null to clear on stage revisit. */
+export async function setStage7Audit(
+  storyId: string,
+  audit: import("./stage7Audit").Stage7AuditResult | null
+): Promise<void> {
+  await storiesCollection()
+    .doc(storyId)
+    .update({ stage7Audit: audit, updatedAt: new Date().toISOString() });
+}
+
+export interface StoredOutstandingQuestion {
+  item: string;
+  defer_to: "Project 2" | "Project 3" | "Project 4" | "Project 5" | null;
+  notes: string;
+  ts: string;
+}
+
+function outstandingQuestionsCollection(storyId: string) {
+  return storiesCollection().doc(storyId).collection("outstanding_questions");
+}
+
+/** Persists outstanding questions generated at stage advancement (ARCHITECTURE.md §6 subcollection). */
+export async function appendOutstandingQuestions(
+  storyId: string,
+  questions: Omit<StoredOutstandingQuestion, "ts">[]
+): Promise<void> {
+  if (questions.length === 0) return;
+  const ts = new Date().toISOString();
+  const batch = getDb().batch();
+  for (const q of questions) {
+    batch.set(outstandingQuestionsCollection(storyId).doc(), { ...q, ts });
+  }
+  await batch.commit();
+}
+
+export async function listOutstandingQuestions(storyId: string): Promise<StoredOutstandingQuestion[]> {
+  const snap = await outstandingQuestionsCollection(storyId).orderBy("ts", "asc").get();
+  return snap.docs.map((d) => d.data() as StoredOutstandingQuestion);
 }
 
 /** Appends an author-type re-assessment (issue #8 calls this) without clobbering prior history. */
