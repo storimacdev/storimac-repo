@@ -579,3 +579,310 @@
   border-radius: 50%;
   background: var(--color-accent);
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   Landing page (ld-) — full marketing page, spec 2026-07-27.
+   Ember is used only via .btn-ember; everything here stays on the
+   violet/neutral Nocturne palette.
+   ══════════════════════════════════════════════════════════════════════ */
+
+.nocturne-scope .ld-section {
+  padding: 72px 24px;
+}
+.nocturne-scope .ld-hero {
+  padding-top: 88px;
+}
+.nocturne-scope .ld-final {
+  border-top: 1px solid var(--color-divider);
+}
+.nocturne-scope .ld-inner {
+  max-width: 980px;
+  margin: 0 auto;
+}
+.nocturne-scope .ld-narrow {
+  max-width: 720px;
+}
+.nocturne-scope .ld-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.nocturne-scope .ld-h1 {
+  font-size: clamp(30px, 4.5vw, 46px);
+  line-height: 1.1;
+  max-width: 20ch;
+  margin: 0 0 var(--space-4);
+}
+.nocturne-scope .ld-h2 {
+  font-size: clamp(24px, 3.2vw, 34px);
+  margin: 0 0 var(--space-6);
+}
+.nocturne-scope .ld-h3 {
+  font-size: 20px;
+  margin: 0 0 var(--space-3);
+}
+.nocturne-scope .ld-kicker {
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+  margin: 0 0 var(--space-3);
+  font-weight: 500;
+}
+.nocturne-scope .ld-lede {
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--color-neutral-400);
+  max-width: 58ch;
+  margin: 0 0 var(--space-6);
+}
+.nocturne-scope .ld-body {
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--color-neutral-400);
+  margin: 0;
+}
+
+/* — grids & steps — */
+.nocturne-scope .ld-grid3,
+.nocturne-scope .ld-grid4 {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(3, 1fr);
+  text-align: left;
+}
+.nocturne-scope .ld-grid4 {
+  grid-template-columns: repeat(2, 1fr);
+}
+.nocturne-scope .ld-step {
+  background: var(--color-surface);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+}
+.nocturne-scope .ld-step-num {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--color-accent);
+  color: var(--color-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  margin-bottom: var(--space-3);
+}
+
+/* — deep-dive rows + product mocks — */
+.nocturne-scope .ld-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-8);
+  align-items: center;
+  margin-bottom: 56px;
+}
+.nocturne-scope .ld-row:last-child {
+  margin-bottom: 0;
+}
+.nocturne-scope .ld-row-flip > .ld-row-text {
+  order: 2;
+}
+.nocturne-scope .ld-mock {
+  border: 1px solid var(--color-neutral-800);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  padding: var(--space-5);
+}
+.nocturne-scope .ld-mock-title {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-neutral-500);
+  margin: 0 0 var(--space-4);
+}
+.nocturne-scope .ld-mock-caption {
+  font-size: 12px;
+  color: var(--color-neutral-500);
+  margin: var(--space-3) 0 0;
+}
+.nocturne-scope .ld-canon-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: 13.5px;
+  color: var(--color-neutral-300);
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-neutral-800);
+}
+.nocturne-scope .ld-canon-row:last-child {
+  border-bottom: none;
+}
+.nocturne-scope .ld-canon-conflict {
+  background: color-mix(in srgb, #e59a9a 8%, transparent);
+  margin-inline: calc(-1 * var(--space-3));
+  padding-inline: var(--space-3);
+  border-radius: var(--radius-sm);
+}
+.nocturne-scope .ld-state {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.nocturne-scope .ld-state-confirmed {
+  color: #7fd6a4;
+}
+.nocturne-scope .ld-state-exploring {
+  color: var(--color-neutral-500);
+}
+.nocturne-scope .ld-state-conflict {
+  color: #e59a9a;
+}
+.nocturne-scope .ld-stagebar {
+  display: flex;
+  gap: 4px;
+}
+.nocturne-scope .ld-stagebar span {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--color-neutral-800);
+}
+.nocturne-scope .ld-stagebar span[data-done="true"] {
+  background: var(--color-accent);
+}
+
+/* — FAQ — */
+.nocturne-scope .ld-faq {
+  border-bottom: 1px solid var(--color-divider);
+  padding: var(--space-4) 0;
+  text-align: left;
+}
+.nocturne-scope .ld-faq summary {
+  cursor: pointer;
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: 16px;
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.nocturne-scope .ld-faq summary::-webkit-details-marker {
+  display: none;
+}
+.nocturne-scope .ld-faq summary::after {
+  content: "+";
+  color: var(--color-accent);
+}
+.nocturne-scope .ld-faq[open] summary::after {
+  content: "–";
+}
+.nocturne-scope .ld-faq p {
+  margin: var(--space-3) 0 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--color-neutral-400);
+}
+
+/* — hero interview demo — */
+.nocturne-scope .ld-demo {
+  width: 100%;
+  max-width: 560px;
+  margin: var(--space-8) auto 0;
+  border: 1px solid var(--color-neutral-800);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  text-align: left;
+}
+.nocturne-scope .ld-demo-titlebar {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-neutral-500);
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--color-neutral-800);
+}
+.nocturne-scope .ld-demo-body {
+  padding: var(--space-5);
+  min-height: 240px;
+}
+.nocturne-scope .ld-bubble {
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0 0 var(--space-3);
+  max-width: 85%;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+.nocturne-scope .ld-bubble[data-shown="true"] {
+  opacity: 1;
+  transform: none;
+}
+.nocturne-scope .ld-bubble-editor {
+  background: var(--color-neutral-900);
+  border: 1px solid var(--color-neutral-800);
+  color: var(--color-neutral-200);
+}
+.nocturne-scope .ld-bubble-writer {
+  background: var(--color-accent-900);
+  color: var(--color-accent-200);
+  margin-left: auto;
+}
+.nocturne-scope .ld-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--color-neutral-700);
+  background: var(--color-neutral-900);
+  color: var(--color-neutral-400);
+  margin: 0;
+  transition: color 0.35s ease, border-color 0.35s ease,
+    background 0.35s ease, transform 0.35s ease;
+}
+.nocturne-scope .ld-chip[data-locked="true"] {
+  border-color: var(--color-accent);
+  background: var(--color-accent-900);
+  color: var(--color-accent-200);
+  transform: scale(1.04);
+}
+
+/* — responsive — */
+@media (max-width: 760px) {
+  .nocturne-scope .ld-section {
+    padding: 48px 20px;
+  }
+  .nocturne-scope .ld-grid3,
+  .nocturne-scope .ld-grid4 {
+    grid-template-columns: 1fr;
+  }
+  .nocturne-scope .ld-row {
+    grid-template-columns: 1fr;
+    gap: var(--space-5);
+    margin-bottom: 40px;
+  }
+  /* visual above text on mobile, both rows */
+  .nocturne-scope .ld-row > .ld-mock {
+    order: -1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nocturne-scope .ld-bubble,
+  .nocturne-scope .ld-chip {
+    transition: none;
+  }
+  .nocturne-scope .ld-bubble {
+    opacity: 1;
+    transform: none;
+  }
+}
