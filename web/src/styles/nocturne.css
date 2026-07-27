@@ -52,6 +52,13 @@
   --color-accent-2-700: #5c5783;
   --color-accent-2-800: #423e5d;
   --color-accent-2-900: #2b293a;
+  --color-ember-from: #b91c1c;
+  --color-ember-to: #ea580c;
+  --gradient-ember: linear-gradient(
+    90deg,
+    var(--color-ember-from),
+    var(--color-ember-to)
+  );
 
   --font-heading: var(--font-heading-family, "Libre Franklin", sans-serif);
   --font-heading-weight: 500;
@@ -165,6 +172,17 @@
 }
 .nocturne-scope .btn-ghost:active {
   background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+.nocturne-scope .btn-ember {
+  color: #fff;
+  background: var(--gradient-ember);
+  border-color: transparent;
+}
+.nocturne-scope .btn-ember:hover {
+  filter: brightness(1.12);
+}
+.nocturne-scope .btn-ember:active {
+  filter: brightness(0.95);
 }
 .nocturne-scope .btn-block {
   width: 100%;

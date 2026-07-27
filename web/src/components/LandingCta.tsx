@@ -16,7 +16,7 @@ export default function LandingCta() {
       <div className="flex items-center gap-4">
         <Link
           href={`/interview?workspaceId=${state.lastWorkspaceId}&canvasId=${state.lastCanvasId}`}
-          className="btn btn-primary"
+          className="btn btn-ember"
         >
           Continue your story
         </Link>
@@ -27,7 +27,7 @@ export default function LandingCta() {
 
   return (
     <div className="flex items-center gap-4">
-      <Link href="/onboarding" className="btn btn-primary">
+      <Link href="/onboarding" className="btn btn-ember">
         Get Started
       </Link>
       <span className="ob-hint">Takes under a minute to set up your workspace.</span>
