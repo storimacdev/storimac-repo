@@ -1,11 +1,11 @@
-import Link from "next/link";
+import SiteHeader from "@/components/SiteHeader";
+import SiteFooter from "@/components/SiteFooter";
+import LandingCta from "@/components/LandingCta";
 
 export default function Home() {
   return (
     <div className="nocturne-scope ob-root">
-      <div className="ob-topbar">
-        <div className="ob-brand">Storimac</div>
-      </div>
+      <SiteHeader />
 
       <main className="ob-stage" style={{ flexDirection: "column", textAlign: "center" }}>
         <div className="mx-auto flex max-w-2xl flex-col items-center">
@@ -19,14 +19,7 @@ export default function Home() {
             Document your future drafting depends on.
           </p>
 
-          <div className="flex items-center gap-4">
-            <Link href="/onboarding" className="btn btn-primary">
-              Get Started
-            </Link>
-            <span className="ob-hint">
-              Takes under a minute to set up your workspace.
-            </span>
-          </div>
+          <LandingCta />
 
           <ul className="mt-16 grid w-full gap-4 text-left sm:grid-cols-3">
             <Feature
@@ -44,6 +37,7 @@ export default function Home() {
           </ul>
         </div>
       </main>
+      <SiteFooter />
     </div>
   );
 }

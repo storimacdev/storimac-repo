@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminAuth } from "@/lib/firebaseAdmin";
 import { SESSION_COOKIE_NAME } from "@/lib/session";
+import { ensureUserProfile, recordTermsAcceptance } from "@/lib/userStore";
 
 export const runtime = "nodejs";
 
@@ -11,6 +12,11 @@ const SESSION_EXPIRES_IN_MS = 14 * 24 * 60 * 60 * 1000; // 14 days - Firebase's 
  * createUserWithEmailAndPassword, etc.) for an HttpOnly session cookie.
  * The ID token itself is short-lived and never stored; only the session
  * cookie persists, and only server-side API routes can read it.
+ *
+ * Issue #90: also ensures the /users/{uid} profile doc exists, and records
+ * terms acceptance when the sign-in surface passed `acceptedTerms: true`
+ * (onboarding/login both display the Terms + Privacy links beside the
+ * sign-in controls).
  */
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
@@ -22,10 +28,20 @@ export async function POST(req: NextRequest) {
 
   try {
     // Verify first so we never mint a session cookie for a token we haven't checked.
-    await getAdminAuth().verifyIdToken(idToken);
+    const decoded = await getAdminAuth().verifyIdToken(idToken);
     const sessionCookie = await getAdminAuth().createSessionCookie(idToken, {
       expiresIn: SESSION_EXPIRES_IN_MS,
     });
+
+    await ensureUserProfile({
+      uid: decoded.uid,
+      email: decoded.email ?? "",
+      displayName: decoded.name ?? null,
+      photoURL: decoded.picture ?? null,
+    });
+    if (body?.acceptedTerms === true) {
+      await recordTermsAcceptance(decoded.uid);
+    }
 
     const response = NextResponse.json({ ok: true });
     response.cookies.set(SESSION_COOKIE_NAME, sessionCookie, {

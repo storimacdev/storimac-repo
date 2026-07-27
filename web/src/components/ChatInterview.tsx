@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import CanonPanel, { type PanelElement } from "@/components/CanonPanel";
+import UserMenu from "@/components/UserMenu";
+import { useUser } from "@/components/UserProvider";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -48,10 +50,23 @@ const BORDER_GRADIENT =
   "linear-gradient(135deg, #f87171, #dc2626, #ea580c, #a855f7, #6366f1)";
 
 export default function ChatInterview() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const workspaceId = searchParams.get("workspaceId");
   const canvasId = searchParams.get("canvasId");
   const debug = searchParams.get("debug") === "1";
+  const { state: userState } = useUser();
+
+  // Bare /interview: route signed-in users to their last canvas (issue #90)
+  // instead of the dead-end empty state (which stays for guests).
+  useEffect(() => {
+    if (workspaceId && canvasId) return;
+    if (userState.status === "authed" && userState.lastWorkspaceId && userState.lastCanvasId) {
+      router.replace(
+        `/interview?workspaceId=${userState.lastWorkspaceId}&canvasId=${userState.lastCanvasId}`
+      );
+    }
+  }, [workspaceId, canvasId, userState, router]);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -219,7 +234,7 @@ export default function ChatInterview() {
             <div className="text-sm font-medium tracking-wide text-neutral-300">
               Story Foundation Interview{stageName ? ` · ${stageName}` : ""}
             </div>
-            <div className="w-10" />
+            <UserMenu />
           </header>
 
           <div className="flex min-h-0 flex-1">

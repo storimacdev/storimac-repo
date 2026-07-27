@@ -1,13 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  signInWithPopup,
-} from "firebase/auth";
-import { auth, googleProvider } from "@/lib/firebaseClient";
+import { useAuth } from "@/lib/useAuth";
+import { useUser } from "@/components/UserProvider";
 import ScriptPreview from "@/components/ScriptPreview";
 
 /**
@@ -70,7 +67,12 @@ export default function OnboardingFlow() {
   // Auth — kept out of `answers`/autosave since it's a credential, not form data.
   const [password, setPassword] = useState("");
   const [authenticated, setAuthenticated] = useState(false);
-  const [authBusy, setAuthBusy] = useState(false);
+  const { busy: authBusy, error: authError, signInWithGoogle, signInWithEmail } = useAuth();
+  const { state: userState, refresh: refreshUser } = useUser();
+
+  // Issue #90: reuse an existing empty workspace instead of creating a new
+  // one when a signed-in user with a workspace (but no canvas) lands here.
+  const [existingWorkspaceId, setExistingWorkspaceId] = useState<string | null>(null);
 
   // Final workspace/canvas/invite provisioning on the "done" step.
   const [submitBusy, setSubmitBusy] = useState(false);
@@ -153,63 +155,72 @@ export default function OnboardingFlow() {
     autosave(clamped, answers);
   }
 
-  async function establishSession(idToken: string) {
-    const res = await fetch("/api/auth/session", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ idToken }),
-    });
-    if (!res.ok) throw new Error("Could not start your session. Please try again.");
-  }
+  // Issue #90 — returning-user routing. Once the user state resolves:
+  // has a canvas → straight to the interview (never re-onboard); has an
+  // empty workspace → resume onboarding at the canvas step reusing it;
+  // authed with nothing yet → skip only the signup step.
+  useEffect(() => {
+    if (userState.status !== "authed") return;
 
-  async function signInWithGoogle() {
-    setAuthBusy(true);
-    setErrors((e) => ({ ...e, email: undefined }));
-    try {
-      const result = await signInWithPopup(auth, googleProvider);
-      await establishSession(await result.user.getIdToken());
+    if (userState.lastWorkspaceId && userState.lastCanvasId) {
+      router.replace(
+        `/interview?workspaceId=${userState.lastWorkspaceId}&canvasId=${userState.lastCanvasId}`
+      );
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      // Deferred past the synchronous effect body (react-hooks/set-state-in-effect).
+      await Promise.resolve();
+      if (cancelled) return;
       setAuthenticated(true);
-      updateAnswer("email", result.user.email ?? "");
-    } catch {
-      setErrors({ email: "Google sign-in failed. Please try again or use email below." });
-    } finally {
-      setAuthBusy(false);
-    }
-  }
+      setAnswers((a) => (a.email ? a : { ...a, email: userState.user.email }));
 
-  async function signInWithEmail(): Promise<boolean> {
-    if (!password) {
-      setErrors({ email: "Enter a password to continue with email." });
-      return false;
-    }
-    setAuthBusy(true);
-    try {
-      let credential;
-      try {
-        credential = await createUserWithEmailAndPassword(auth, answers.email, password);
-      } catch (err) {
-        if (err instanceof Error && "code" in err && err.code === "auth/email-already-in-use") {
-          credential = await signInWithEmailAndPassword(auth, answers.email, password);
-        } else {
-          throw err;
+      if (userState.workspaces.length > 0) {
+        const ws = userState.workspaces[0];
+        try {
+          const res = await fetch(`/api/workspaces/${ws.id}/canvases`);
+          const data = await res.json();
+          if (cancelled) return;
+          if (res.ok && Array.isArray(data.canvases) && data.canvases.length > 0) {
+            router.replace(`/interview?workspaceId=${ws.id}&canvasId=${data.canvases[0].id}`);
+            return;
+          }
+        } catch {
+          // fall through to onboarding with the existing workspace
         }
+        if (cancelled) return;
+        setExistingWorkspaceId(ws.id);
+        setAnswers((a) => ({ ...a, workspaceName: ws.name }));
+        setStepIndex((i) => Math.max(i, 2)); // canvas step
+      } else {
+        setStepIndex((i) => (i === 0 ? 1 : i)); // skip signup only
       }
-      await establishSession(await credential.user.getIdToken());
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userState.status]);
+
+  async function handleGoogleSignIn() {
+    setErrors((e) => ({ ...e, email: undefined }));
+    const result = await signInWithGoogle();
+    if (result) {
       setAuthenticated(true);
-      return true;
-    } catch {
-      setErrors({ email: "Sign-in failed. Check your email and password." });
-      return false;
-    } finally {
-      setAuthBusy(false);
+      updateAnswer("email", result.email);
+      await refreshUser(); // keep UserProvider (header/user menu) in sync
     }
   }
 
   async function next() {
     if (!validateCurrent()) return;
     if (step === "signup" && !authenticated) {
-      const signedIn = await signInWithEmail();
-      if (!signedIn) return;
+      const result = await signInWithEmail(answers.email, password);
+      if (!result) return;
+      setAuthenticated(true);
+      await refreshUser(); // keep UserProvider (header/user menu) in sync
     }
     goToStep(stepIndex + 1);
   }
@@ -250,10 +261,16 @@ export default function OnboardingFlow() {
     setSubmitBusy(true);
     setSubmitError(null);
     try {
-      const { workspace } = await postJson<{ workspace: { id: string } }>("/api/workspaces", {
-        name: answers.workspaceName,
-        tier: answers.plan || "free",
-      });
+      // Reuse the user's existing empty workspace when there is one
+      // (issue #90) instead of tripping the free-tier one-workspace limit.
+      const workspace = existingWorkspaceId
+        ? { id: existingWorkspaceId }
+        : (
+            await postJson<{ workspace: { id: string } }>("/api/workspaces", {
+              name: answers.workspaceName,
+              tier: answers.plan || "free",
+            })
+          ).workspace;
       const { canvas } = await postJson<{ canvas: { id: string } }>(
         `/api/workspaces/${workspace.id}/canvases`,
         { title: answers.canvasName || "Untitled Canvas" }
@@ -270,6 +287,7 @@ export default function OnboardingFlow() {
       } catch {
         // best-effort cleanup
       }
+      await refreshUser(); // pick up the new workspace/canvas as last-visited
       router.push(`/interview?workspaceId=${workspace.id}&canvasId=${canvas.id}`);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
@@ -323,7 +341,7 @@ export default function OnboardingFlow() {
                 <button
                   type="button"
                   className="btn btn-secondary btn-block"
-                  onClick={signInWithGoogle}
+                  onClick={handleGoogleSignIn}
                   disabled={authBusy || authenticated}
                 >
                   {authenticated
@@ -363,6 +381,18 @@ export default function OnboardingFlow() {
                 </div>
               )}
               {errors.email && <p className="ob-error">{errors.email}</p>}
+              {authError && <p className="ob-error">{authError}</p>}
+              <p className="ob-hint" style={{ marginTop: 12 }}>
+                By continuing you agree to the{" "}
+                <Link href="/terms" style={{ textDecoration: "underline" }}>
+                  Terms
+                </Link>{" "}
+                and{" "}
+                <Link href="/privacy" style={{ textDecoration: "underline" }}>
+                  Privacy Policy
+                </Link>
+                .
+              </p>
             </>
           )}
 

@@ -21,6 +21,13 @@ service cloud.firestore {
       }
     }
 
+    // User profiles — issue #90. Written server-side via the Admin SDK
+    // (session creation / last-visited tracking); owner-only for any
+    // direct client access.
+    match /users/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
     // Workspace model — issue #88. All writes actually go through the
     // Admin SDK (server-side API routes enforcing role/tier via
     // workspaceStore.ts), which bypasses these rules entirely; this is

@@ -4,6 +4,7 @@ import { errorResponse } from "@/lib/apiErrors";
 import { getMembership } from "@/lib/workspace/workspaceStore";
 import { getStory, listMessages } from "@/lib/canonEngine/storyStore";
 import { listElements } from "@/lib/canonEngine/canonStore";
+import { setLastVisited } from "@/lib/userStore";
 
 export const runtime = "nodejs";
 
@@ -35,6 +36,9 @@ export async function GET(
       listElements(canvasId),
       listMessages(canvasId),
     ]);
+
+    // Track last-visited so "/" and bare "/interview" resume here (issue #90).
+    await setLastVisited(user.uid, workspaceId, canvasId);
 
     return NextResponse.json({ story, elements, messages });
   } catch (err) {

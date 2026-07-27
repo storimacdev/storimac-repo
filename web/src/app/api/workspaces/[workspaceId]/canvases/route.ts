@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/session";
 import { errorResponse } from "@/lib/apiErrors";
 import { getMembership } from "@/lib/workspace/workspaceStore";
 import { createStory, listStoriesInWorkspace } from "@/lib/canonEngine/storyStore";
+import { setLastVisited } from "@/lib/userStore";
 
 export const runtime = "nodejs";
 
@@ -34,6 +35,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<"/api/workspaces/
     const title = typeof body?.title === "string" && body.title.trim() ? body.title.trim() : "Untitled Canvas";
 
     const canvas = await createStory(user.uid, workspaceId, title);
+    await setLastVisited(user.uid, workspaceId, canvas.id);
     return NextResponse.json({ canvas }, { status: 201 });
   } catch (err) {
     return errorResponse(err);
