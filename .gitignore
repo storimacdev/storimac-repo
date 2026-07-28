@@ -44,3 +44,6 @@ next-env.d.ts
 
 # Brainstorming visual companion sessions
 .superpowers/
+
+# Claude Code worktrees and other local session state
+.claude/
