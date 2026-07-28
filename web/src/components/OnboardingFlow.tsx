@@ -73,6 +73,13 @@ export default function OnboardingFlow() {
   // Issue #90: reuse an existing empty workspace instead of creating a new
   // one when a signed-in user with a workspace (but no canvas) lands here.
   const [existingWorkspaceId, setExistingWorkspaceId] = useState<string | null>(null);
+  // Guards the "done" step's submit button until the check above has had a
+  // chance to run. Without this, a "done" screen restored from localStorage
+  // (see the restore effect below) can render - and be clicked - before this
+  // async check resolves, so enterWorkspace() sees existingWorkspaceId still
+  // null and POSTs a workspace the user already owns, tripping the free-tier
+  // one-workspace limit.
+  const [existingWorkspaceChecked, setExistingWorkspaceChecked] = useState(false);
 
   // Final workspace/canvas/invite provisioning on the "done" step.
   const [submitBusy, setSubmitBusy] = useState(false);
@@ -160,7 +167,15 @@ export default function OnboardingFlow() {
   // empty workspace → resume onboarding at the canvas step reusing it;
   // authed with nothing yet → skip only the signup step.
   useEffect(() => {
-    if (userState.status !== "authed") return;
+    if (userState.status === "loading") return;
+    if (userState.status !== "authed") {
+      // Nothing to check for a guest - unblock the "done" step's button so
+      // it can still surface a normal auth error if reached (unchanged from
+      // before this fix).
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setExistingWorkspaceChecked(true);
+      return;
+    }
 
     if (userState.lastWorkspaceId && userState.lastCanvasId) {
       router.replace(
@@ -197,6 +212,8 @@ export default function OnboardingFlow() {
       } else {
         setStepIndex((i) => (i === 0 ? 1 : i)); // skip signup only
       }
+      if (cancelled) return;
+      setExistingWorkspaceChecked(true);
     })();
     return () => {
       cancelled = true;
@@ -271,6 +288,11 @@ export default function OnboardingFlow() {
               tier: answers.plan || "free",
             })
           ).workspace;
+      // Remember it immediately, before the next await. If canvas creation
+      // below throws, a retry must reuse this id instead of re-POSTing
+      // /api/workspaces - which would collide with the free-tier
+      // one-workspace limit since this workspace now already exists.
+      setExistingWorkspaceId(workspace.id);
       const { canvas } = await postJson<{ canvas: { id: string } }>(
         `/api/workspaces/${workspace.id}/canvases`,
         { title: answers.canvasName || "Untitled Canvas" }
@@ -563,9 +585,13 @@ export default function OnboardingFlow() {
                 type="button"
                 className="btn btn-primary"
                 onClick={enterWorkspace}
-                disabled={submitBusy}
+                disabled={submitBusy || !existingWorkspaceChecked}
               >
-                {submitBusy ? "Setting up your workspace…" : "Enter your workspace"}
+                {submitBusy
+                  ? "Setting up your workspace…"
+                  : !existingWorkspaceChecked
+                    ? "Checking your workspace…"
+                    : "Enter your workspace"}
               </button>
             </>
           )}
