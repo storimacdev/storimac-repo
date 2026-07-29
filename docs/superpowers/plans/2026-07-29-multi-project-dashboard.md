@@ -172,97 +172,19 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 
 ---
 
-### Task 3: Serve one document version's full content
+### Task 3: SKIPPED — single-version document endpoint already exists
 
-**Files:**
-- Modify: `web/src/app/api/workspaces/[workspaceId]/canvases/[canvasId]/document/route.ts`
-
-**Interfaces:**
-- Consumes: `getDocumentVersion(storyId, version): Promise<StoredDocumentVersion | null>` from `@/lib/canonEngine/foundationDoc` (`StoredDocumentVersion` has `version: number; date: string; summary_of_changes: string; json: FoundationDocument; markdown: string; elementsSnapshot: ...` — this function already exists but was previously unused by any route).
-- Produces: `GET .../document?version=N` → `200 { version, date, summary_of_changes, markdown, json }` (same shape the `POST` handler already returns) when version `N` exists, `404` when it doesn't, `400` when `version` isn't a positive integer. `GET .../document` (no query param) is unchanged — still returns `{ versions: [...] }` (lightweight list). This is what the dashboard's export feature calls for the highest version number returned by the lightweight list.
-
-- [ ] **Step 1: Extend the `GET` handler**
-
-Change the `GET` handler's signature to use the request (currently `_req`, now needed for its URL) and the import line, then branch on the `version` query param:
+**Discovery during Task 1's build verification (2026-07-29):** `web/src/app/api/workspaces/[workspaceId]/canvases/[canvasId]/document/[version]/route.ts` already exists on `main` (committed 2026-07-26, issue #19 — predates this plan; missed during this plan's brainstorming exploration, which only read `document/route.ts` and never listed its subdirectory). It already does exactly what this task set out to add:
 
 ```ts
-import { NextRequest, NextResponse } from "next/server";
-import { requireUser } from "@/lib/session";
-import { errorResponse } from "@/lib/apiErrors";
-import { getMembership } from "@/lib/workspace/workspaceStore";
-import { getStory } from "@/lib/canonEngine/storyStore";
-import { generateFoundationDocument, getDocumentVersion, listDocumentVersions } from "@/lib/canonEngine/foundationDoc";
-
-export const runtime = "nodejs";
-
-async function authorize(workspaceId: string, canvasId: string, uid: string) {
-  const membership = await getMembership(workspaceId, uid);
-  if (!membership) return { error: NextResponse.json({ error: "Not a member of this workspace." }, { status: 403 }) };
-  const story = await getStory(canvasId);
-  if (!story || story.workspaceId !== workspaceId) {
-    return { error: NextResponse.json({ error: "Story Canvas not found." }, { status: 404 }) };
-  }
-  return { story };
-}
-
-/**
- * List document versions (issue #19), or — with `?version=N` — fetch one
- * version's full content (issue #22's export needs this; previously only
- * the lightweight list was exposed even though `getDocumentVersion`
- * already existed at the store layer).
- */
-export async function GET(
-  req: NextRequest,
-  ctx: RouteContext<"/api/workspaces/[workspaceId]/canvases/[canvasId]/document">
-) {
-  try {
-    const user = await requireUser();
-    const { workspaceId, canvasId } = await ctx.params;
-    const auth = await authorize(workspaceId, canvasId, user.uid);
-    if (auth.error) return auth.error;
-
-    const versionParam = req.nextUrl.searchParams.get("version");
-    if (versionParam !== null) {
-      const versionNum = Number(versionParam);
-      if (!Number.isInteger(versionNum) || versionNum < 1) {
-        return NextResponse.json({ error: "Invalid version number." }, { status: 400 });
-      }
-      const full = await getDocumentVersion(canvasId, versionNum);
-      if (!full) {
-        return NextResponse.json({ error: `Version ${versionNum} not found.` }, { status: 404 });
-      }
-      return NextResponse.json({
-        version: full.version,
-        date: full.date,
-        summary_of_changes: full.summary_of_changes,
-        markdown: full.markdown,
-        json: full.json,
-      });
-    }
-
-    const versions = await listDocumentVersions(canvasId);
-    return NextResponse.json({ versions });
-  } catch (err) {
-    return errorResponse(err);
-  }
-}
+// GET /api/workspaces/{workspaceId}/canvases/{canvasId}/document/{version}
+// -> 200 { version, date, summary_of_changes, markdown, json }
+// -> 400 invalid version, 404 not found, 403 not a member
 ```
 
-Leave the existing `POST` handler in this file untouched.
+Same auth pattern (`getMembership` + `getStory`/workspace check), same `getDocumentVersion` call, same response shape. No new code is needed — this task is a no-op.
 
-- [ ] **Step 2: Lint and build**
-
-Run: `cd web && npm run lint && npm run build`
-Expected: both pass.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add web/src/app/api/workspaces/\[workspaceId\]/canvases/\[canvasId\]/document/route.ts
-git commit -m "Expose single-version document content for dashboard export (#22)
-
-Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
-```
+**Consequence for Task 4:** the dashboard's export feature calls `GET .../document/{version}` (path segment), **not** `.../document?version={version}` (query param) as originally planned. Task 4 below has been updated to use the path-segment form.
 
 ---
 
@@ -274,7 +196,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 - Modify: `web/src/components/UserMenu.tsx`
 
 **Interfaces:**
-- Consumes: `GET /api/projects` (Task 1's shape), `PATCH`/`DELETE /api/workspaces/{workspaceId}/canvases/{canvasId}` (Task 2's shapes), `GET /api/workspaces/{workspaceId}/canvases/{canvasId}/document` and `?version=N` (Task 3's shapes); `useUser()` from `@/components/UserProvider` (`UserState` — `{status:"guest"}` / `{status:"loading"}` / `{status:"authed", user, workspaces, lastWorkspaceId, lastCanvasId}`).
+- Consumes: `GET /api/projects` (Task 1's shape), `PATCH`/`DELETE /api/workspaces/{workspaceId}/canvases/{canvasId}` (Task 2's shapes), `GET /api/workspaces/{workspaceId}/canvases/{canvasId}/document` (lightweight version list) and `GET .../document/{version}` (full content of one version — pre-existing route, see Task 3); `useUser()` from `@/components/UserProvider` (`UserState` — `{status:"guest"}` / `{status:"loading"}` / `{status:"authed", user, workspaces, lastWorkspaceId, lastCanvasId}`).
 - Produces: route `/dashboard`, reachable directly and via a new "Dashboard" link in `UserMenu`.
 
 - [ ] **Step 1: Create the thin page wrapper**
@@ -458,7 +380,7 @@ export default function ProjectDashboard() {
     if (!versions || versions === "loading" || versions.length === 0) return;
     const latest = versions[versions.length - 1].version;
     try {
-      const res = await fetch(`/api/workspaces/${p.workspaceId}/canvases/${p.id}/document?version=${latest}`);
+      const res = await fetch(`/api/workspaces/${p.workspaceId}/canvases/${p.id}/document/${latest}`);
       const data = await res.json();
       if (!res.ok) {
         setRowError(data.error ?? "Export failed.");
