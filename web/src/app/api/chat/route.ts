@@ -26,7 +26,7 @@ import { checkStageGate, advanceStage, getStageDefinition, PROJECT1_STAGES, type
 import { detectConflict, buildConflictContextMessage, resolveConflict } from "@/lib/canonEngine/conflictResolution";
 import { extractTurn, StateDeltaValidationError } from "@/lib/canonEngine/extractTurn";
 import type { ElementUpdateInput } from "@/lib/canonEngine/stateDelta";
-import { isValidFormatCode } from "@/lib/canonEngine/formatIndex";
+import { isValidFormatCode, retrieveTopFormats } from "@/lib/canonEngine/formatIndex";
 
 export const runtime = "nodejs";
 
@@ -150,6 +150,28 @@ export async function POST(req: NextRequest) {
         system += `\n\n[Depth defaults for the current stage — internal guidance, never narrate depth modes or author-type labels to the author. An explicit author request for more or less depth always overrides these.]\n${depthLines}`;
       }
     }
+
+    // Stage 2 format-diagnosis grounding (issue #15). Retrieve top
+    // candidates from the 101 Story Formats index using Stage 1's answers,
+    // never the full 100-record set, never on any other stage.
+    if (story.currentStage === 2) {
+      const byId = new Map(elements.map((e) => [e.element_id, e]));
+      const stage1Text = ["concept", "inspiration", "target_audience", "emotional_engine"]
+        .map((id) => byId.get(id)?.value)
+        .filter((v): v is string => typeof v === "string")
+        .join(" ");
+      if (stage1Text) {
+        const candidates = retrieveTopFormats(stage1Text, 10);
+        const candidateLines = candidates
+          .map(
+            (f) =>
+              `- ${f.code}: ${f.coreDefinition} | Dramatic Question: ${f.coreDramaticQuestion} | Plot Engine: ${f.engines.plot} | Story Engine: ${f.engines.story} | Theme Engine: ${f.engines.theme} | Common Mistakes: ${f.commonMistakes.join("; ")}`
+          )
+          .join("\n");
+        system += `\n\n[Stage 2 format candidates — retrieved from the 101 Story Formats index, internal grounding only. Reason over these to diagnose 1 Primary Format + 0-2 Supporting Formats. Do NOT speak a format's name or code aloud in your conversational reply — only reference them internally and in the eventual Stage 8 document; discuss the story using its qualities (dramatic question, engines, common pitfalls), not its catalog label. Emit the diagnosed format(s)' codes via the retrieval_code field on your structured update.]\n${candidateLines}`;
+      }
+    }
+
     const pendingConflict = story.pendingConflict ?? null;
     if (pendingConflict) {
       system += `\n\n${buildConflictContextMessage(pendingConflict)}`;
