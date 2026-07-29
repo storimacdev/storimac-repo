@@ -26,6 +26,7 @@ import { checkStageGate, advanceStage, getStageDefinition, PROJECT1_STAGES, type
 import { detectConflict, buildConflictContextMessage, resolveConflict } from "@/lib/canonEngine/conflictResolution";
 import { extractTurn, StateDeltaValidationError } from "@/lib/canonEngine/extractTurn";
 import type { ElementUpdateInput } from "@/lib/canonEngine/stateDelta";
+import { isValidFormatCode } from "@/lib/canonEngine/formatIndex";
 
 export const runtime = "nodejs";
 
@@ -45,7 +46,24 @@ function toElementUpdate(u: ElementUpdateInput): ElementUpdate {
   if (u.rationale !== undefined) patch.rationale = u.rationale;
   if (u.depends_on !== undefined) patch.depends_on = u.depends_on;
   if (u.stage !== undefined) patch.stage = u.stage;
+  if (u.retrieval_code !== undefined) {
+    patch.retrieval_code = normalizeRetrievalCode(u.retrieval_code, u.element_id);
+  }
   return { element_id: u.element_id, patch };
+}
+
+/** Validates retrieval_code(s) against the real format index; logs and
+ * drops anything that doesn't match a real code instead of persisting a
+ * hallucinated one. Never surfaced to the author. */
+function normalizeRetrievalCode(raw: unknown, elementId: string): string | string[] | null {
+  const codes = Array.isArray(raw) ? raw : [raw];
+  const valid = codes.filter((c): c is string => typeof c === "string" && isValidFormatCode(c));
+  const invalid = codes.filter((c) => !(typeof c === "string" && isValidFormatCode(c)));
+  if (invalid.length > 0) {
+    console.warn(`[chat] element "${elementId}" cited invalid retrieval_code(s):`, invalid);
+  }
+  if (valid.length === 0) return null;
+  return Array.isArray(raw) ? valid : valid[0];
 }
 
 export async function POST(req: NextRequest) {
