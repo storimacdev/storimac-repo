@@ -1,15 +1,16 @@
-# Character Development Reference Manual (CDRM) v1.0
+# P2-R2-Character Development Reference Manual (CDRM) v1.3
 
 1. CENTRAL PHILOSOPHY
-- The Engine of Narrative: Characters are the emotional engines of the story. They do not merely execute a plot; their choices, internal wounds, and conflicting values actively generate the plot under narrative pressure.
-- Inside-Out Construction: Build characters strictly from internal architecture down to external features. The mandatory structural taxonomy is: Story Function → Core Psychology → Motivation & Values → Relationship Dynamics → External Identity & Voice → Character Arc Integration.
+
+The Engine of Narrative: Characters are the emotional engines of the story. They do not merely execute a plot; their choices, internal wounds, and conflicting values actively generate the plot under narrative pressure.
+
 1. CHARACTER ARCHITECTURE & THE TRIAD
 
 Every character profile must anchor onto the three pillars of The Character Triad:
 
-1. Motivation (Want): The concrete, external, consciously pursued narrative objective.
-2. Personality (How): Observable behavioral tendencies, risk tolerances, and social communication mechanics.
-3. Values (Why): The internal moral code that establishes lines the character will never cross.
+- Motivation (Want): The concrete, external, consciously pursued narrative objective.
+- Personality (How): Observable behavioral tendencies, risk tolerances, and social communication mechanics.
+- Values (Why): The internal moral code that establishes lines the character will never cross.
 - Want vs. Need Matrix: The Want is the deceptive external goal the character believes will solve their problems. The Need is the unacknowledged internal transformation (healing a wound, shedding a false belief) required for genuine fulfillment. The dramatic engine triggers when pursuing the Want systematically forces the character to confront the Need.
 1. CORE PSYCHOLOGY CHAIN
 
@@ -27,7 +28,7 @@ $$\text{Life Experience} \rightarrow \text{Core Wound} \rightarrow \text{False B
 - Habits & Rituals: Observable, recurring, lived-in behaviors. Rituals must carry explicit emotional weight linked to past wounds (e.g., objects preserved, unwritten letters).
 - Distinctive Dialogue Voice: A character's dialogue must be instantly recognizable without tags. Define their unique profiles for: Vocabulary, Sentence Structure, Conflict Style (withdraw vs. intimidate), Persuasion Method, and Lying/Apologizing tendencies.
 - Visuals & Competence: Appearance and skills are never decorative. Physical traits, scars, and professional skills must directly reflect internal psychology or enforce narrative limitations.
-1. cast RELATIONSHIPS & ENSEMBLE SYSTEM
+1. CAST RELATIONSHIPS & ENSEMBLE SYSTEM
 
 The cast is an interconnected ecosystem, not an isolated roster. Characters must adapt their social masks based on relational dynamics:
 
@@ -36,7 +37,7 @@ The cast is an interconnected ecosystem, not an isolated roster. Characters must
 - Relational Shifts: Relationships cannot remain static. Track trajectories through clear structural transitions: *Allies $\rightarrow$ Rivals*, *Distrust $\rightarrow$ Vulnerability*, *Dependence $\rightarrow$ Structural Autonomy*.
 1. STORY INTEGRATION & TRANSFORMATIONAL ARCS
 
-Characters must align directly with the Project 1 Story Foundation and its chosen Story Format. Map evolution across one of these specific vectors:
+Characters must align directly with the Project 1 Story Foundation Document and its chosen Story Format. Map evolution across one of these specific vectors:
 
 - Positive Change Arc: Systematically dismantles the False Belief to accept the thematic Need.
 - Negative Change/Fall Arc: The character rejects growth opportunities; flaws harden into self-destruction.

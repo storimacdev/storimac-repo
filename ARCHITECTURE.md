@@ -4,17 +4,19 @@
 
 ## 1. One pipeline product, not five separate tools
 
-Projects 1–4 (Story Foundation → Character Bible → World Bible → Story Architecture) are one connected web app, sharing a single Next.js codebase (`web/`), a single database, and a single canon engine (§2). A **Story** is the top-level entity an author works on; each project is a session scoped to that Story, consuming the prior stage's machine-readable export.
+Projects 1–5 (Story Foundation → Character Bible → World Bible → Screenplay Architecture → Draft Writing) are one connected web app, sharing a single Next.js codebase (`web/`), a single database, and a single canon engine (§2). A **Story** is the top-level entity an author works on; each project is a session scoped to that Story, consuming the prior stage's machine-readable export.
 
-Project 5 (Draft Writing) is not part of this app. It's a Claude Code repo scaffold (`CLAUDE.md` + `canon/`/`state/`/`manuscript/` files) — a fundamentally different interaction model (no chat UI of its own, driven by Claude Code directly). It's an **export target**: once Project 4 is Confirmed, the app generates a downloadable repo scaffold pre-filled from Projects 1–4's JSON/docx exports. It is not built as a page inside `web/`.
+**Revised 2026-07-28:** Project 5 (Draft Writing) **is** part of this app — a chat-based, scene-by-scene screenplay drafting session inside the Story workspace, sharing the same Canon Engine pattern as Projects 1–4 (see issues #92–102). This supersedes the original decision below, which was based on an earlier "Cycle of Stories" spec (a Claude Code repo-scaffold for one specific novel, not a generalized Project 5). That spec's issues (#73–87) were closed as superseded; the repo-scaffold/novel-export concept may return later as a separate, optional export target, but it is not the active Project 5 build.
+
+Also as of 2026-07-28: Project 4 narrowed from a medium-flexible "Story Architecture" to an explicitly **screenplay**-exclusive "Screenplay Architecture" tool (Screenplay Structural Architecture Framework v3.0, superseding v2.0) — see issues #56–58, #60, #66, #70, #91.
 
 ```
 Story (top-level entity, e.g. "Identity Swap")
- ├─ Foundation session       → story-foundation-v{n}.json    (Project 1)
- ├─ Character Bible session  → consumes P1 JSON               (Project 2)
- ├─ World Bible session      → consumes P1 JSON               (Project 3)
- ├─ Architecture session     → consumes P1 + P2 + P3           (Project 4)
- └─ Draft repo export (zip)  → generated from P1-4 once Confirmed  (Project 5)
+ ├─ Foundation session        → story-foundation-v{n}.json    (Project 1)
+ ├─ Character Bible session   → consumes P1 JSON               (Project 2)
+ ├─ World Bible session       → consumes P1 JSON               (Project 3)
+ ├─ Architecture session      → consumes P1 + P2 + P3           (Project 4, screenplay-exclusive)
+ └─ Draft Writing session     → consumes P1 + P2 + P3 + P4, scene-by-scene (Project 5)
 ```
 
 ## 2. Shared Canon Engine

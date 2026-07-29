@@ -1,0 +1,7 @@
+# StoriMac-Project Docs
+
+[P1-R1- 101 Story Formats](P1-R1-%20101%20Story%20Formats%203ab7acc8d303801ba963e92f3a101dd3.md)
+
+[**P2-R2-Character Development Reference Manual (CDRM) v1.3**](P2-R2-Character%20Development%20Reference%20Manual%20(CDRM%203a67acc8d3038024a6bdd12c226bab3e.md)
+
+[**P4-R4-SCREENPLAY STRUCTURAL ARCHITECTURE FRAMEWORK (v3.0)**](P4-R4-SCREENPLAY%20STRUCTURAL%20ARCHITECTURE%20FRAMEWORK%203ab7acc8d303809ba6a4d8b84577c473.md)
