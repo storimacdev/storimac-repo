@@ -25,6 +25,11 @@ export interface CanonElement {
   value: unknown;
   rationale: string;
   depends_on: string[];
+  /** 101 Story Formats catalog code(s) this element cites - single string for
+   * primary_format, string array for supporting_formats. Internal
+   * retrieval-grounding metadata only; never crosses the export boundary
+   * (see ARCHITECTURE.md §3). */
+  retrieval_code: string | string[] | null;
   history: CanonHistoryEntry[];
 }
 
@@ -35,5 +40,6 @@ export interface CanonElementPatch {
   value?: unknown;
   rationale?: string;
   depends_on?: string[];
+  retrieval_code?: string | string[] | null;
   stage?: number;
 }

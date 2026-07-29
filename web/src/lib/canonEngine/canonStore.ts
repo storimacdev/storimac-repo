@@ -125,6 +125,7 @@ export async function applyStateDelta(
         value: nextValue,
         rationale: update.patch.rationale ?? existing?.rationale ?? "",
         depends_on: update.patch.depends_on ?? existing?.depends_on ?? [],
+        retrieval_code: update.patch.retrieval_code ?? existing?.retrieval_code ?? null,
         history: [...(existing?.history ?? []), historyEntry],
       };
 
