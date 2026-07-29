@@ -116,6 +116,8 @@ export interface ResolveConflictParams {
   turnId: string;
   /** Only used when choice === "accept_and_update"; falls back to conflict.new_value. */
   newValue?: unknown;
+  /** Only used when choice === "accept_and_update". Not persisted (left as-is) if omitted — e.g. the resolution turn changed the value without re-diagnosing a format. */
+  newRetrievalCode?: string | string[] | null;
 }
 
 export interface ResolveConflictResult {
@@ -165,7 +167,11 @@ export async function resolveConflict(params: ResolveConflictParams): Promise<Re
   const updatedElement = await upsertElement(
     storyId,
     conflict.element_id,
-    { status: "Confirmed", value: params.newValue ?? conflict.new_value },
+    {
+      status: "Confirmed",
+      value: params.newValue ?? conflict.new_value,
+      ...(params.newRetrievalCode !== undefined ? { retrieval_code: params.newRetrievalCode } : {}),
+    },
     turnId,
     true
   );

@@ -69,8 +69,11 @@ function normalizeRetrievalCode(raw: unknown, elementId: string): string | strin
 
 /** Pulls Common Mistakes for the currently-Confirmed primary_format and
  * supporting_formats, fresh from the in-memory format index (issue #16).
- * No persistence needed - always reflects the current confirmed format(s),
- * so it can't go stale if the format changes later via Conflict Resolution. */
+ * The Common Mistakes *text* itself is never persisted and is always looked
+ * up fresh from the format index, so the text can't go stale. The lookup
+ * *key* (`retrieval_code`) IS persisted state on the element, and must be
+ * kept in sync whenever the format changes via Conflict Resolution — see
+ * the `newRetrievalCode` threading in resolveConflict/POST above. */
 function collectCommonMistakes(elements: CanonElement[]): string[] {
   const byId = new Map(elements.map((e) => [e.element_id, e]));
   const codes: string[] = [];
@@ -80,8 +83,11 @@ function collectCommonMistakes(elements: CanonElement[]): string[] {
     codes.push(primary.retrieval_code);
   }
   const supporting = byId.get("supporting_formats");
-  if (supporting?.status === "Confirmed" && Array.isArray(supporting.retrieval_code)) {
-    codes.push(...supporting.retrieval_code);
+  if (supporting?.status === "Confirmed" && supporting.retrieval_code) {
+    const supportingCodes = Array.isArray(supporting.retrieval_code)
+      ? supporting.retrieval_code
+      : [supporting.retrieval_code];
+    codes.push(...supportingCodes);
   }
 
   const mistakes: string[] = [];
@@ -184,7 +190,8 @@ export async function POST(req: NextRequest) {
       const byId = new Map(elements.map((e) => [e.element_id, e]));
       const stage1Text = ["concept", "inspiration", "target_audience", "emotional_engine"]
         .map((id) => byId.get(id)?.value)
-        .filter((v): v is string => typeof v === "string")
+        .filter((v) => v !== undefined && v !== null)
+        .map((v) => (typeof v === "string" ? v : JSON.stringify(v)))
         .join(" ");
       if (stage1Text) {
         const candidates = retrieveTopFormats(stage1Text, 10);
@@ -195,6 +202,8 @@ export async function POST(req: NextRequest) {
           )
           .join("\n");
         system += `\n\n[Stage 2 format candidates — retrieved from the 101 Story Formats index, internal grounding only. Reason over these to diagnose 1 Primary Format + 0-2 Supporting Formats. Do NOT speak a format's name or code aloud in your conversational reply — only reference them internally and in the eventual Stage 8 document; discuss the story using its qualities (dramatic question, engines, common pitfalls), not its catalog label. Emit the diagnosed format(s)' codes via the retrieval_code field on your structured update.]\n${candidateLines}`;
+      } else {
+        console.warn(`[chat] Stage 2 reached with no usable Stage 1 answers for story ${storyId} - format retrieval skipped, no grounding injected this turn.`);
       }
     }
 
@@ -233,13 +242,14 @@ export async function POST(req: NextRequest) {
 
     if (pendingConflict) {
       if (delta.resolution) {
-        const resolvedUpdate = delta.updates.find((u) => u.element_id === pendingConflict.element_id);
+        const resolvedUpdate = updates.find((u) => u.element_id === pendingConflict.element_id);
         await resolveConflict({
           storyId,
           conflict: pendingConflict,
           choice: delta.resolution,
           turnId,
-          newValue: resolvedUpdate?.value,
+          newValue: resolvedUpdate?.patch.value,
+          newRetrievalCode: resolvedUpdate?.patch.retrieval_code,
         });
         nextPendingConflict = null;
         await setPendingConflict(storyId, null);
