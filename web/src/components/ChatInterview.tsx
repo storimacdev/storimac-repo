@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import CanonPanel, { type PanelElement } from "@/components/CanonPanel";
+import Markdown from "@/components/Markdown";
 import UserMenu from "@/components/UserMenu";
 import { useUser } from "@/components/UserProvider";
 
@@ -406,9 +407,9 @@ export default function ChatInterview() {
                             ))}
                           </div>
                         )}
-                        <pre className="mt-4 max-h-[50vh] overflow-y-auto whitespace-pre-wrap rounded-lg bg-neutral-900/80 p-4 text-[12px] leading-relaxed text-neutral-300">
-                          {doc.markdown}
-                        </pre>
+                        <div className="mt-4 max-h-[50vh] overflow-y-auto rounded-lg bg-neutral-900/80 p-4">
+                          <Markdown className="text-[13px] leading-relaxed text-neutral-300">{doc.markdown}</Markdown>
+                        </div>
                       </>
                     )}
                   </div>
@@ -424,8 +425,8 @@ export default function ChatInterview() {
                 {!loading && !doc && lastAssistant && (
                   <div data-testid="latest-response" className="mx-auto max-w-3xl">
                     <p className="mb-3 text-[11px] uppercase tracking-widest text-neutral-500">Latest from your editor</p>
-                    <div className="whitespace-pre-wrap rounded-xl border border-neutral-800 bg-neutral-900/50 px-6 py-5 text-[15px] leading-relaxed text-neutral-200">
-                      {lastAssistant.content}
+                    <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 px-6 py-5">
+                      <Markdown className="text-[15px] leading-relaxed text-neutral-200">{lastAssistant.content}</Markdown>
                     </div>
                   </div>
                 )}
@@ -475,16 +476,17 @@ function Bubble({
   pending?: boolean;
 }) {
   const isUser = role === "user";
+  const renderMarkdown = !isUser && !pending;
   return (
     <div className={`mb-3 flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[90%] whitespace-pre-wrap rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
+        className={`max-w-[90%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
           isUser
-            ? "bg-gradient-to-r from-red-600 to-orange-600 text-white"
+            ? "whitespace-pre-wrap bg-gradient-to-r from-red-600 to-orange-600 text-white"
             : "bg-neutral-800 text-neutral-100"
-        } ${pending ? "animate-pulse" : ""}`}
+        } ${pending ? "whitespace-pre-wrap animate-pulse" : ""}`}
       >
-        {content}
+        {renderMarkdown ? <Markdown className="text-[13px] leading-relaxed text-neutral-100">{content}</Markdown> : content}
       </div>
     </div>
   );
