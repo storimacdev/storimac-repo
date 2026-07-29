@@ -22,11 +22,12 @@ import { classifyAuthorType, shouldReassess, adjustDepthForAuthorType } from "@/
 import { getDefaultDepthMode } from "@/lib/canonEngine/stageFsm";
 import { buildTurnContext } from "@/lib/canonEngine/contextBudget";
 import { listElements, applyStateDelta, CanonConflictError, type ElementUpdate } from "@/lib/canonEngine/canonStore";
+import type { CanonElement } from "@/lib/canonEngine/types";
 import { checkStageGate, advanceStage, getStageDefinition, PROJECT1_STAGES, type OutstandingQuestion } from "@/lib/canonEngine/stageFsm";
 import { detectConflict, buildConflictContextMessage, resolveConflict } from "@/lib/canonEngine/conflictResolution";
 import { extractTurn, StateDeltaValidationError } from "@/lib/canonEngine/extractTurn";
 import type { ElementUpdateInput } from "@/lib/canonEngine/stateDelta";
-import { isValidFormatCode, retrieveTopFormats } from "@/lib/canonEngine/formatIndex";
+import { isValidFormatCode, retrieveTopFormats, getFormatByCode } from "@/lib/canonEngine/formatIndex";
 
 export const runtime = "nodejs";
 
@@ -64,6 +65,31 @@ function normalizeRetrievalCode(raw: unknown, elementId: string): string | strin
   }
   if (valid.length === 0) return null;
   return Array.isArray(raw) ? valid : valid[0];
+}
+
+/** Pulls Common Mistakes for the currently-Confirmed primary_format and
+ * supporting_formats, fresh from the in-memory format index (issue #16).
+ * No persistence needed - always reflects the current confirmed format(s),
+ * so it can't go stale if the format changes later via Conflict Resolution. */
+function collectCommonMistakes(elements: CanonElement[]): string[] {
+  const byId = new Map(elements.map((e) => [e.element_id, e]));
+  const codes: string[] = [];
+
+  const primary = byId.get("primary_format");
+  if (primary?.status === "Confirmed" && typeof primary.retrieval_code === "string") {
+    codes.push(primary.retrieval_code);
+  }
+  const supporting = byId.get("supporting_formats");
+  if (supporting?.status === "Confirmed" && Array.isArray(supporting.retrieval_code)) {
+    codes.push(...supporting.retrieval_code);
+  }
+
+  const mistakes: string[] = [];
+  for (const code of codes) {
+    const format = getFormatByCode(code);
+    if (format) mistakes.push(...format.commonMistakes);
+  }
+  return mistakes;
 }
 
 export async function POST(req: NextRequest) {
@@ -271,7 +297,8 @@ export async function POST(req: NextRequest) {
 
         // Entering Stage 7 triggers the system-run Creative Audit (#17).
         if (currentStage === 7) {
-          const audit = runStage7Audit(freshElements);
+          const commonMistakes = collectCommonMistakes(freshElements);
+          const audit = runStage7Audit(freshElements, commonMistakes);
           await setStage7Audit(storyId, audit);
           auditSummary = formatAuditSummary(audit);
         }
