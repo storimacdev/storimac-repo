@@ -47,3 +47,6 @@ next-env.d.ts
 
 # Claude Code worktrees and other local session state
 .claude/
+
+# scripts/dev-server.mjs runtime state (PID + log)
+/scripts/.run/
