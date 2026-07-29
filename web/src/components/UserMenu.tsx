@@ -55,6 +55,15 @@ export default function UserMenu() {
               {state.workspaces.length} workspace{state.workspaces.length === 1 ? "" : "s"}
             </p>
           </div>
+          <button
+            onClick={() => {
+              setOpen(false);
+              router.push("/dashboard");
+            }}
+            className="block w-full px-4 py-2.5 text-left text-xs text-neutral-300 hover:bg-neutral-800"
+          >
+            My Projects
+          </button>
           {hasCanvas && (
             <button
               onClick={() => {
