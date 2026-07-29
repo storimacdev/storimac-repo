@@ -20,17 +20,22 @@ The reference document lives at
 2026-07-28 doc reconciliation; content unchanged — verified via git's rename detection,
 99% similarity to the version already analyzed).
 
-**100 of the intended 101 formats are usable.** Direct inspection (a script scanning
-every `**Core Definition**` block and tracing it back to its code) found:
+**All 101 intended formats are present and usable** — corrected from an earlier
+"100 of 101, C20 absent" finding. Direct inspection (a script scanning every
+`**Core Definition**` block and tracing it back to its code, later verified by actually
+running the pre-processing parser end-to-end against the real file) found:
 
 - 98 formats cleanly labeled.
 - `B19` and `C10` are present with full records but mislabeled — written as bare "19"
   and "10" without their volume letter. Fixed during parsing by inferring the letter
-  from surrounding context (both sit correctly ordered between their volume's other
-  entries).
-- `C20` is genuinely absent — no mention anywhere in the source, not even a stub. This
-  matches the BA's own spec (confirmed with the user directly). Proceed with 100
-  formats; `C20` stays absent from the index until supplied later.
+  from the volume section the entry is physically found in.
+- The apparent "missing C20" is not actually missing: a complete, well-formed record
+  titled "THE TRANSFORMATIVE JOURNEY" (bare code "21") sits misplaced at the end of
+  Volume B's section (right after B20, before Volume 3 begins) instead of in Volume C
+  where its content fits thematically. Confirmed with the user directly (2026-07-28):
+  this is the missing C20 record, not a genuine 21st Volume-B entry or unrelated
+  content. The parser recodes it via an explicit title-keyed override (not positional
+  inference, since its physical position is in the wrong volume entirely) — see Task 1.
 
 ### Structured record schema
 
@@ -187,4 +192,3 @@ No test framework exists in `web/` (scripts: dev/build/lint only). Verification 
 - The non-linear stage-order change (see companion task above) — separate follow-up.
 - Re-running the pre-processing script automatically on deploy (see pipeline-shape
   rationale above).
-- Backfilling the missing `C20` format.
