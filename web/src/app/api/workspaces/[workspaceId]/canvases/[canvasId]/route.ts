@@ -60,6 +60,11 @@ export async function PATCH(
       return NextResponse.json({ error: "Not a member of this workspace." }, { status: 403 });
     }
 
+    const story = await getStory(canvasId);
+    if (!story || story.workspaceId !== workspaceId) {
+      return NextResponse.json({ error: "Story Canvas not found." }, { status: 404 });
+    }
+
     const body = await req.json().catch(() => null);
     const title = typeof body?.title === "string" ? body.title.trim() : "";
     if (!title) {
@@ -85,6 +90,11 @@ export async function DELETE(
     const membership = await getMembership(workspaceId, user.uid);
     if (!membership) {
       return NextResponse.json({ error: "Not a member of this workspace." }, { status: 403 });
+    }
+
+    const story = await getStory(canvasId);
+    if (!story || story.workspaceId !== workspaceId) {
+      return NextResponse.json({ error: "Story Canvas not found." }, { status: 404 });
     }
 
     await deleteStory(canvasId, user.uid);

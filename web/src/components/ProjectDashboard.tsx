@@ -18,6 +18,11 @@ type Project = {
 
 type VersionRow = { version: number; date: string; summary_of_changes: string };
 
+// GET /api/projects reserves this exact string for Stories whose workspace doc
+// no longer exists (deleteWorkspace doesn't cascade to Stories). Dashboard-side
+// only — see route.ts's fallback.
+const UNKNOWN_WORKSPACE_LABEL = "Unknown workspace";
+
 // Same tokens as ChatInterview.tsx — the dashboard is a sibling screen, not a new visual system.
 const AMBIENT_GRADIENT =
   "linear-gradient(115deg, #2a0707 0%, #7f1d1d 18%, #dc2626 38%, #ea580c 52%, #7e22ce 76%, #312e81 100%)";
@@ -49,13 +54,16 @@ export default function ProjectDashboard() {
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
   const [exportOpenId, setExportOpenId] = useState<string | null>(null);
-  const [exportVersions, setExportVersions] = useState<Record<string, VersionRow[] | "loading">>({});
+  const [exportVersions, setExportVersions] = useState<Record<string, VersionRow[] | "loading" | "error">>({});
+
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   useEffect(() => {
     if (userState.status === "guest") router.replace("/login");
   }, [userState, router]);
 
   useEffect(() => {
+    if (userState.status !== "authed") return;
     let cancelled = false;
     (async () => {
       try {
@@ -74,7 +82,7 @@ export default function ProjectDashboard() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [userState.status]);
 
   function startRename(p: Project) {
     setRenamingId(p.id);
@@ -99,7 +107,12 @@ export default function ProjectDashboard() {
         setRowError(data.error ?? "Rename failed.");
         return;
       }
-      setProjects((prev) => prev?.map((row) => (row.id === p.id ? { ...row, title } : row)) ?? prev);
+      setProjects(
+        (prev) =>
+          prev?.map((row) =>
+            row.id === p.id ? { ...row, title: data.canvas.title, updatedAt: data.canvas.updatedAt } : row
+          ) ?? prev
+      );
     } catch {
       setRowError("Couldn't reach the server.");
     } finally {
@@ -115,6 +128,7 @@ export default function ProjectDashboard() {
   async function confirmDelete(p: Project) {
     if (deleteConfirmText !== p.title) return;
     setRowError(null);
+    setDeleteBusy(true);
     try {
       const res = await fetch(`/api/workspaces/${p.workspaceId}/canvases/${p.id}`, { method: "DELETE" });
       if (!res.ok) {
@@ -127,6 +141,7 @@ export default function ProjectDashboard() {
       setRowError("Couldn't reach the server.");
     } finally {
       setDeletingId(null);
+      setDeleteBusy(false);
     }
   }
 
@@ -136,22 +151,28 @@ export default function ProjectDashboard() {
       return;
     }
     setExportOpenId(p.id);
-    if (!exportVersions[p.id]) {
+    const existing = exportVersions[p.id];
+    if (!existing || existing === "error") {
       setExportVersions((prev) => ({ ...prev, [p.id]: "loading" }));
       try {
         const res = await fetch(`/api/workspaces/${p.workspaceId}/canvases/${p.id}/document`);
         const data = await res.json();
-        setExportVersions((prev) => ({ ...prev, [p.id]: res.ok && Array.isArray(data.versions) ? data.versions : [] }));
+        if (res.ok && Array.isArray(data.versions)) {
+          setExportVersions((prev) => ({ ...prev, [p.id]: data.versions }));
+        } else {
+          setExportVersions((prev) => ({ ...prev, [p.id]: "error" }));
+        }
       } catch {
-        setExportVersions((prev) => ({ ...prev, [p.id]: [] }));
+        setExportVersions((prev) => ({ ...prev, [p.id]: "error" }));
       }
     }
   }
 
   async function exportVersion(p: Project, format: "md" | "json") {
     const versions = exportVersions[p.id];
-    if (!versions || versions === "loading" || versions.length === 0) return;
+    if (!versions || versions === "loading" || versions === "error" || versions.length === 0) return;
     const latest = versions[versions.length - 1].version;
+    setRowError(null);
     try {
       const res = await fetch(`/api/workspaces/${p.workspaceId}/canvases/${p.id}/document/${latest}`);
       const data = await res.json();
@@ -237,7 +258,8 @@ export default function ProjectDashboard() {
                           </button>
                         )}
                         <p className="mt-1 text-xs text-neutral-500">
-                          {p.workspaceName} · {p.stageName} · Updated {new Date(p.updatedAt).toLocaleDateString()}
+                          {p.workspaceName === UNKNOWN_WORKSPACE_LABEL ? "Workspace deleted" : p.workspaceName} ·{" "}
+                          {p.stageName} · Updated {new Date(p.updatedAt).toLocaleDateString()}
                         </p>
                       </div>
 
@@ -261,7 +283,12 @@ export default function ProjectDashboard() {
                               {versions === "loading" && (
                                 <div className="px-3 py-2 text-xs text-neutral-500">Loading…</div>
                               )}
-                              {versions !== "loading" && !hasDoc && (
+                              {versions === "error" && (
+                                <div className="px-3 py-2 text-xs text-red-300">
+                                  Couldn&apos;t load — click Export to retry
+                                </div>
+                              )}
+                              {versions !== "loading" && versions !== "error" && !hasDoc && (
                                 <div className="px-3 py-2 text-xs text-neutral-500" title="Generate a document first">
                                   No document yet
                                 </div>
@@ -315,14 +342,15 @@ export default function ProjectDashboard() {
                           />
                           <button
                             onClick={() => confirmDelete(p)}
-                            disabled={deleteConfirmText !== p.title}
+                            disabled={deleteConfirmText !== p.title || deleteBusy}
                             className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-40"
                           >
-                            Delete permanently
+                            {deleteBusy ? "Deleting…" : "Delete permanently"}
                           </button>
                           <button
                             onClick={() => setDeletingId(null)}
-                            className="rounded-lg border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:border-neutral-500"
+                            disabled={deleteBusy}
+                            className="rounded-lg border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:border-neutral-500 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             Cancel
                           </button>
