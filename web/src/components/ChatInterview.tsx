@@ -9,7 +9,6 @@ import StorySoFar from "@/components/StorySoFar";
 import UserMenu from "@/components/UserMenu";
 import { useUser } from "@/components/UserProvider";
 import { downloadText, downloadBlob } from "@/lib/download";
-import { generateFoundationPdfBlob } from "@/lib/pdf/FoundationPdfDocument";
 import type { FoundationDocument } from "@/lib/canonEngine/foundationDoc";
 
 type ChatMessage = {
@@ -204,6 +203,7 @@ export default function ChatInterview() {
     setPdfGenerating(true);
     setError(null);
     try {
+      const { generateFoundationPdfBlob } = await import("@/lib/pdf/FoundationPdfDocument");
       const blob = await generateFoundationPdfBlob(doc.json);
       downloadBlob(`story-foundation-v${doc.version}.pdf`, blob);
     } catch {

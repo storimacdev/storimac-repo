@@ -6,7 +6,6 @@ import Link from "next/link";
 import UserMenu from "@/components/UserMenu";
 import { useUser } from "@/components/UserProvider";
 import { downloadText, downloadBlob } from "@/lib/download";
-import { generateFoundationPdfBlob } from "@/lib/pdf/FoundationPdfDocument";
 import type { FoundationDocument } from "@/lib/canonEngine/foundationDoc";
 
 type Project = {
@@ -48,6 +47,7 @@ export default function ProjectDashboard() {
 
   const [exportOpenId, setExportOpenId] = useState<string | null>(null);
   const [exportVersions, setExportVersions] = useState<Record<string, VersionRow[] | "loading" | "error">>({});
+  const [exportBusyId, setExportBusyId] = useState<string | null>(null);
 
   const [deleteBusy, setDeleteBusy] = useState(false);
 
@@ -162,10 +162,12 @@ export default function ProjectDashboard() {
   }
 
   async function exportVersion(p: Project, format: "md" | "json" | "pdf") {
+    if (exportBusyId === p.id) return;
     const versions = exportVersions[p.id];
     if (!versions || versions === "loading" || versions === "error" || versions.length === 0) return;
     const latest = versions[versions.length - 1].version;
     setRowError(null);
+    setExportBusyId(p.id);
     try {
       const res = await fetch(`/api/workspaces/${p.workspaceId}/canvases/${p.id}/document/${latest}`);
       const data = await res.json();
@@ -178,11 +180,14 @@ export default function ProjectDashboard() {
       } else if (format === "json") {
         downloadText(`${p.title}-v${latest}.json`, JSON.stringify(data.json, null, 2), "application/json");
       } else {
+        const { generateFoundationPdfBlob } = await import("@/lib/pdf/FoundationPdfDocument");
         const blob = await generateFoundationPdfBlob(data.json as FoundationDocument);
         downloadBlob(`${p.title}-v${latest}.pdf`, blob);
       }
     } catch {
       setRowError("Export failed.");
+    } finally {
+      setExportBusyId(null);
     }
   }
 
@@ -305,10 +310,10 @@ export default function ProjectDashboard() {
                               </button>
                               <button
                                 onClick={() => exportVersion(p, "pdf")}
-                                disabled={!hasDoc}
+                                disabled={!hasDoc || exportBusyId === p.id}
                                 className="block w-full px-3 py-2 text-left text-xs text-neutral-300 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
                               >
-                                PDF (.pdf)
+                                {exportBusyId === p.id ? "Exporting…" : "PDF (.pdf)"}
                               </button>
                             </div>
                           )}

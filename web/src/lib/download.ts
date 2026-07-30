@@ -8,5 +8,5 @@ export function downloadBlob(filename: string, blob: Blob): void {
   a.href = url;
   a.download = filename;
   a.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
