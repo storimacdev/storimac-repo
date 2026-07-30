@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import CanonPanel, { type PanelElement } from "@/components/CanonPanel";
 import Markdown from "@/components/Markdown";
+import StorySoFar from "@/components/StorySoFar";
 import UserMenu from "@/components/UserMenu";
 import { useUser } from "@/components/UserProvider";
 
@@ -222,8 +223,6 @@ export default function ChatInterview() {
     );
   }
 
-  const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant") ?? null;
-
   return (
     <div className="min-h-dvh p-2 sm:p-4" style={{ background: AMBIENT_GRADIENT }}>
       <div className="mx-auto h-[calc(100dvh-1rem)] max-w-[1600px] rounded-2xl p-[1.5px] sm:h-[calc(100dvh-2rem)]" style={{ background: BORDER_GRADIENT }}>
@@ -422,40 +421,8 @@ export default function ChatInterview() {
                   </div>
                 )}
 
-                {!loading && !doc && lastAssistant && (
-                  <div data-testid="latest-response" className="mx-auto max-w-3xl">
-                    <p className="mb-3 text-[11px] uppercase tracking-widest text-neutral-500">Latest from your editor</p>
-                    <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 px-6 py-5">
-                      <Markdown className="text-[15px] leading-relaxed text-neutral-200">{lastAssistant.content}</Markdown>
-                    </div>
-                  </div>
-                )}
-
-                {!loading && !doc && !lastAssistant && !resuming && (
-                  <div className="flex h-full flex-col items-center justify-center gap-6 text-center">
-                    <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-red-600/30 via-orange-500/20 to-purple-600/30">
-                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-                        <path
-                          d="M12 21s-7-4.5-9.5-9C.9 8.5 2.5 5 6 5c2.2 0 3.5 1.2 4 2 .5-.8 1.8-2 4-2 3.5 0 5.1 3.5 3.5 7-2.5 4.5-9.5 9-9.5 9z"
-                          stroke="url(#g)"
-                          strokeWidth="1.5"
-                          strokeLinejoin="round"
-                        />
-                        <defs>
-                          <linearGradient id="g" x1="0" y1="0" x2="24" y2="24">
-                            <stop stopColor="#f87171" />
-                            <stop offset="1" stopColor="#a855f7" />
-                          </linearGradient>
-                        </defs>
-                      </svg>
-                    </div>
-                    <p className="text-sm text-neutral-500">Your editor&apos;s responses will appear here…</p>
-                    <div className="space-y-2 text-left text-xs text-neutral-500">
-                      <p>💬 &nbsp;Answer in the chat on the left</p>
-                      <p>📖 &nbsp;Responses, audits, and canon updates render here</p>
-                      <p>📄 &nbsp;Stage 8 compiles your Story Foundation Document here</p>
-                    </div>
-                  </div>
+                {!loading && !doc && (
+                  <StorySoFar elements={elements} currentStage={currentStage} />
                 )}
               </div>
             </div>
