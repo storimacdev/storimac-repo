@@ -64,8 +64,8 @@ export function evaluateTurn(reply: string): TurnHeuristics {
   };
 }
 
-/** Logs flags for prompt-tuning review. Never throws, never blocks. */
-export function logTurnHeuristics(reply: string, turnId: string): void {
+/** Logs flags for prompt-tuning review. Never throws, never blocks. Returns the computed heuristics so callers can act on them (issue #23). */
+export function logTurnHeuristics(reply: string, turnId: string): TurnHeuristics {
   const h = evaluateTurn(reply);
 
   if (h.isQuestionnaireDump) {
@@ -83,4 +83,6 @@ export function logTurnHeuristics(reply: string, turnId: string): void {
       `[turn-guardrail] system-prompt leak turn ${turnId}: matched ${h.promptLeakMatches.join(", ")}`
     );
   }
+
+  return h;
 }

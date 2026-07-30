@@ -236,6 +236,32 @@ export async function listOutstandingQuestions(storyId: string): Promise<StoredO
   return snap.docs.map((d) => d.data() as StoredOutstandingQuestion);
 }
 
+export interface StoredGuardrailFlag {
+  turnId: string;
+  questionCount: number;
+  ts: string;
+}
+
+function guardrailFlagsCollection(storyId: string) {
+  return storiesCollection().doc(storyId).collection("guardrail_flags");
+}
+
+/** Persists a questionnaire-dump flag for prompt-tuning review (issue #23). Only flagged turns get a doc. */
+export async function appendGuardrailFlag(
+  storyId: string,
+  flag: Omit<StoredGuardrailFlag, "ts">
+): Promise<StoredGuardrailFlag> {
+  const ts = new Date().toISOString();
+  const full: StoredGuardrailFlag = { ...flag, ts };
+  await guardrailFlagsCollection(storyId).add(full);
+  return full;
+}
+
+export async function listGuardrailFlags(storyId: string): Promise<StoredGuardrailFlag[]> {
+  const snap = await guardrailFlagsCollection(storyId).orderBy("ts", "asc").get();
+  return snap.docs.map((d) => d.data() as StoredGuardrailFlag);
+}
+
 /** Appends an author-type re-assessment (issue #8 calls this) without clobbering prior history. */
 export async function appendAuthorTypeAssessment(
   storyId: string,

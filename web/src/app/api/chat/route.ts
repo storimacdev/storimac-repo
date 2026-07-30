@@ -11,11 +11,13 @@ import {
   appendMessage,
   appendAuthorTypeAssessment,
   appendOutstandingQuestions,
+  appendGuardrailFlag,
   listMessages,
   touchStory,
   setPendingConflict,
   setStage7Audit,
   type StoryPendingConflict,
+  type StoredGuardrailFlag,
 } from "@/lib/canonEngine/storyStore";
 import { runStage7Audit, formatAuditSummary } from "@/lib/canonEngine/stage7Audit";
 import { classifyAuthorType, shouldReassess, adjustDepthForAuthorType } from "@/lib/canonEngine/authorType";
@@ -319,7 +321,15 @@ export async function POST(req: NextRequest) {
     if (auditSummary) {
       await appendMessage(storyId, { role: "assistant", content: auditSummary, ts: new Date().toISOString(), turnId });
     }
-    logTurnHeuristics(delta.reply, turnId);
+    const heuristics = logTurnHeuristics(delta.reply, turnId);
+    let guardrailFlag: StoredGuardrailFlag | null = null;
+    if (heuristics.isQuestionnaireDump) {
+      try {
+        guardrailFlag = await appendGuardrailFlag(storyId, { turnId, questionCount: heuristics.questionCount });
+      } catch (err) {
+        console.error(`[chat] failed to persist guardrail flag for turn ${turnId}:`, err);
+      }
+    }
 
     // Post-write element state so the Canon side panel (issue #11) updates
     // after each turn without a second round-trip.
@@ -334,6 +344,7 @@ export async function POST(req: NextRequest) {
       stageAdvanced: currentStage !== story.currentStage,
       outstandingQuestions,
       conflict: nextPendingConflict,
+      guardrailFlag,
     });
   } catch (err) {
     if (err instanceof Anthropic.APIError) {
