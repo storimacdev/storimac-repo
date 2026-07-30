@@ -18,6 +18,8 @@ export type PanelElement = {
   value?: unknown;
 };
 
+export type GuardrailFlag = { turnId: string; questionCount: number; ts: string };
+
 const STATUS_STYLES: Record<PanelElement["status"], string> = {
   Exploring: "bg-neutral-700 text-neutral-300",
   Working: "bg-amber-500/20 text-amber-300 border border-amber-500/40",
@@ -29,15 +31,35 @@ export default function CanonPanel({
   elements,
   currentStage,
   debug = false,
+  guardrailFlags,
 }: {
   elements: PanelElement[];
   currentStage: number;
   debug?: boolean;
+  guardrailFlags?: GuardrailFlag[];
 }) {
   const byId = new Map(elements.map((e) => [e.element_id, e]));
 
   return (
     <div className="h-full overflow-y-auto px-3 py-3">
+      {debug && (
+        <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-300">
+            Questionnaire-dump flags this session: {guardrailFlags?.length ?? 0}
+          </p>
+          {guardrailFlags && guardrailFlags.length > 0 && (
+            <ul className="mt-1 space-y-0.5">
+              {guardrailFlags.map((f, i) => (
+                <li key={`${f.turnId}-${i}`} className="flex items-center justify-between gap-2 text-[10px] text-neutral-400">
+                  <span className="truncate font-mono">{f.turnId.slice(0, 8)}</span>
+                  <span>{f.questionCount} questions</span>
+                  <span>{new Date(f.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       {PROJECT1_STAGES.map((stage) => {
         const isCurrent = stage.stage === currentStage;
         const isPast = stage.stage < currentStage;

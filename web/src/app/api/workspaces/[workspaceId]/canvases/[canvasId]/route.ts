@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/session";
 import { errorResponse } from "@/lib/apiErrors";
 import { getMembership } from "@/lib/workspace/workspaceStore";
-import { getStory, listMessages, renameStory, deleteStory } from "@/lib/canonEngine/storyStore";
+import { getStory, listMessages, renameStory, deleteStory, listGuardrailFlags } from "@/lib/canonEngine/storyStore";
 import { listElements } from "@/lib/canonEngine/canonStore";
 import { setLastVisited } from "@/lib/userStore";
 
@@ -32,15 +32,16 @@ export async function GET(
       return NextResponse.json({ error: "Story Canvas not found." }, { status: 404 });
     }
 
-    const [elements, messages] = await Promise.all([
+    const [elements, messages, guardrailFlags] = await Promise.all([
       listElements(canvasId),
       listMessages(canvasId),
+      listGuardrailFlags(canvasId),
     ]);
 
     // Track last-visited so "/" and bare "/interview" resume here (issue #90).
     await setLastVisited(user.uid, workspaceId, canvasId);
 
-    return NextResponse.json({ story, elements, messages });
+    return NextResponse.json({ story, elements, messages, guardrailFlags });
   } catch (err) {
     return errorResponse(err);
   }

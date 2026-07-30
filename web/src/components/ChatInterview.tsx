@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import CanonPanel, { type PanelElement } from "@/components/CanonPanel";
+import CanonPanel, { type PanelElement, type GuardrailFlag } from "@/components/CanonPanel";
 import Markdown from "@/components/Markdown";
 import StorySoFar from "@/components/StorySoFar";
 import UserMenu from "@/components/UserMenu";
@@ -78,6 +78,7 @@ export default function ChatInterview() {
   const [stageName, setStageName] = useState<string | null>(null);
   const [currentStage, setCurrentStage] = useState(1);
   const [elements, setElements] = useState<PanelElement[]>([]);
+  const [guardrailFlags, setGuardrailFlags] = useState<GuardrailFlag[]>([]);
   const [conflict, setConflict] = useState<PendingConflict | null>(null);
   const [doc, setDoc] = useState<GeneratedDoc | null>(null);
   const [versions, setVersions] = useState<VersionRow[]>([]);
@@ -108,6 +109,7 @@ export default function ChatInterview() {
           setStageName(`Stage ${data.story.currentStage}`);
         }
         if (Array.isArray(data.elements)) setElements(data.elements);
+        if (Array.isArray(data.guardrailFlags)) setGuardrailFlags(data.guardrailFlags);
         if (data.story?.pendingConflict) setConflict(data.story.pendingConflict);
       } catch {
         if (!cancelled) setError("Couldn't reach the server. Is the dev server running?");
@@ -150,6 +152,7 @@ export default function ChatInterview() {
       if (data.currentStageName) setStageName(data.currentStageName);
       if (typeof data.currentStage === "number") setCurrentStage(data.currentStage);
       if (Array.isArray(data.elements)) setElements(data.elements);
+      if (data.guardrailFlag) setGuardrailFlags((prev) => [...prev, data.guardrailFlag]);
       setConflict(data.conflict ?? null);
     } catch {
       setError("Couldn't reach the server. Is the dev server running?");
@@ -313,7 +316,7 @@ export default function ChatInterview() {
                 </div>
               ) : (
                 <div className="min-h-0 flex-1">
-                  <CanonPanel elements={elements} currentStage={currentStage} debug={debug} />
+                  <CanonPanel elements={elements} currentStage={currentStage} debug={debug} guardrailFlags={guardrailFlags} />
                 </div>
               )}
 
