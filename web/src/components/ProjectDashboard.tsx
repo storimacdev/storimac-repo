@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import UserMenu from "@/components/UserMenu";
 import { useUser } from "@/components/UserProvider";
+import { downloadText, downloadBlob } from "@/lib/download";
+import { generateFoundationPdfBlob } from "@/lib/pdf/FoundationPdfDocument";
+import type { FoundationDocument } from "@/lib/canonEngine/foundationDoc";
 
 type Project = {
   id: string;
@@ -28,16 +31,6 @@ const AMBIENT_GRADIENT =
   "linear-gradient(115deg, #2a0707 0%, #7f1d1d 18%, #dc2626 38%, #ea580c 52%, #7e22ce 76%, #312e81 100%)";
 const BORDER_GRADIENT =
   "linear-gradient(135deg, #f87171, #dc2626, #ea580c, #a855f7, #6366f1)";
-
-function download(filename: string, content: string, type: string) {
-  const blob = new Blob([content], { type });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
 
 export default function ProjectDashboard() {
   const router = useRouter();
@@ -168,7 +161,7 @@ export default function ProjectDashboard() {
     }
   }
 
-  async function exportVersion(p: Project, format: "md" | "json") {
+  async function exportVersion(p: Project, format: "md" | "json" | "pdf") {
     const versions = exportVersions[p.id];
     if (!versions || versions === "loading" || versions === "error" || versions.length === 0) return;
     const latest = versions[versions.length - 1].version;
@@ -181,12 +174,15 @@ export default function ProjectDashboard() {
         return;
       }
       if (format === "md") {
-        download(`${p.title}-v${latest}.md`, data.markdown, "text/markdown");
+        downloadText(`${p.title}-v${latest}.md`, data.markdown, "text/markdown");
+      } else if (format === "json") {
+        downloadText(`${p.title}-v${latest}.json`, JSON.stringify(data.json, null, 2), "application/json");
       } else {
-        download(`${p.title}-v${latest}.json`, JSON.stringify(data.json, null, 2), "application/json");
+        const blob = await generateFoundationPdfBlob(data.json as FoundationDocument);
+        downloadBlob(`${p.title}-v${latest}.pdf`, blob);
       }
     } catch {
-      setRowError("Couldn't reach the server.");
+      setRowError("Export failed.");
     }
   }
 
@@ -308,11 +304,11 @@ export default function ProjectDashboard() {
                                 JSON (.json)
                               </button>
                               <button
-                                disabled
-                                title="Coming soon"
-                                className="block w-full cursor-not-allowed border-t border-neutral-800 px-3 py-2 text-left text-xs text-neutral-600"
+                                onClick={() => exportVersion(p, "pdf")}
+                                disabled={!hasDoc}
+                                className="block w-full px-3 py-2 text-left text-xs text-neutral-300 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
                               >
-                                PDF (Coming soon)
+                                PDF (.pdf)
                               </button>
                             </div>
                           )}
