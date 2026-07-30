@@ -26,8 +26,29 @@ export interface PriorityMatrixEntry {
 // actually governs the live interview.
 const MAJOR_ROLES = ["love interest", "mentor", "primary ally", "secondary antagonist"];
 
+// The P2 system prompt's Critical roles - "protagonist" and "antagonist" as
+// substrings of story_role. "secondary antagonist" is deliberately excluded
+// here (see matchesCriticalRole below) since that specific phrase must stay
+// in MAJOR_ROLES above.
+const CRITICAL_ROLE_KEYWORDS = ["protagonist", "antagonist"];
+
+// Supporting requires *some* real substance in primary_function or
+// description, not mere non-emptiness - Project 1's model almost always
+// writes something into primary_function, so a bare "> 0" check makes Minor
+// nearly unreachable. 15 chars distinguishes real content (e.g. "delivers
+// messages", 18 chars) from a placeholder-ish one-or-two-word stub (e.g.
+// "helper", 6 chars) without being so high it demands prose.
+const SUPPORTING_CONTENT_MIN_LENGTH = 15;
+
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Returns true if story_role matches a Critical role ("protagonist" or "antagonist"), excluding "secondary antagonist" (a Major role). */
+function matchesCriticalRole(storyRole: string): string | null {
+  const lower = storyRole.toLowerCase();
+  if (lower.includes("secondary antagonist")) return null;
+  return CRITICAL_ROLE_KEYWORDS.find((role) => lower.includes(role)) ?? null;
 }
 
 // Excluded from the first-name fallback below - a name like "The Harbor
@@ -36,14 +57,21 @@ function escapeRegExp(s: string): string {
 // to Critical via spurious spine-appearance counts.
 const NAME_MATCH_STOPWORDS = new Set(["the", "a", "an", "mr", "mrs", "ms", "dr"]);
 
+/** Builds a Unicode-aware "word"-boundary pattern - `\b` in JS regex is ASCII-only (`\w`) and never
+ * forms a boundary next to CJK, Cyrillic, Arabic, or other non-Latin characters, so a plain `\b...\b`
+ * pattern silently fails to match non-Latin names even against exact substring hits. */
+function boundaryPattern(token: string): RegExp {
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(token)}(?![\\p{L}\\p{N}])`, "iu");
+}
+
 /** Case-insensitive, word-boundary match of a character's full name or first name inside free text. */
 function nameAppearsIn(name: string, text: string): boolean {
-  const fullNamePattern = new RegExp(`\\b${escapeRegExp(name)}\\b`, "i");
+  const fullNamePattern = boundaryPattern(name);
   if (fullNamePattern.test(text)) return true;
 
   const firstName = name.split(/\s+/)[0];
   if (firstName && firstName !== name && !NAME_MATCH_STOPWORDS.has(firstName.toLowerCase())) {
-    const firstNamePattern = new RegExp(`\\b${escapeRegExp(firstName)}\\b`, "i");
+    const firstNamePattern = boundaryPattern(firstName);
     if (firstNamePattern.test(text)) return true;
   }
   return false;
@@ -51,13 +79,13 @@ function nameAppearsIn(name: string, text: string): boolean {
 
 function countSpineAppearances(name: string, spine: FoundationDocument["11_story_spine"]): number {
   const beats = [
-    spine.opening_image,
-    spine.inciting_incident,
-    spine.first_turning_point,
-    spine.midpoint,
-    spine.second_turning_point,
-    spine.climax,
-    spine.closing_image,
+    spine.opening_image ?? "",
+    spine.inciting_incident ?? "",
+    spine.first_turning_point ?? "",
+    spine.midpoint ?? "",
+    spine.second_turning_point ?? "",
+    spine.climax ?? "",
+    spine.closing_image ?? "",
   ];
   return beats.filter((beat) => nameAppearsIn(name, beat)).length;
 }
@@ -69,14 +97,23 @@ function matchesMajorRole(storyRole: string): string | null {
 }
 
 function classifyMember(member: CastMember, foundation: IngestedFoundation): PriorityMatrixEntry {
-  const { name, story_role, primary_function } = member;
+  const { name, story_role, primary_function, description } = member;
   const { dramaticEngine, storySpine } = foundation;
+  // dramaticEngine is an unguarded passthrough of unvalidated Firestore data
+  // upstream (ingestFoundation.ts's IngestedFoundation type claims it's
+  // non-null, but that's not enforced at runtime) - guard here so this
+  // function stays genuinely total.
+  const de: Partial<FoundationDocument["8_dramatic_engine"]> = dramaticEngine ?? {};
 
-  if (nameAppearsIn(name, dramaticEngine.protagonist)) {
-    return { character: name, tier: "Critical", justification: "Matches dramatic_engine.protagonist" };
+  const criticalRole = matchesCriticalRole(story_role);
+  if (criticalRole) {
+    return { character: name, tier: "Critical", justification: `story_role '${story_role.trim()}' is a Critical role` };
   }
-  if (nameAppearsIn(name, dramaticEngine.antagonistic_force)) {
-    return { character: name, tier: "Critical", justification: "Matches dramatic_engine.antagonistic_force" };
+  if (nameAppearsIn(name, de.protagonist ?? "")) {
+    return { character: name, tier: "Critical", justification: "Named in dramatic_engine.protagonist" };
+  }
+  if (nameAppearsIn(name, de.antagonistic_force ?? "")) {
+    return { character: name, tier: "Critical", justification: "Named in dramatic_engine.antagonistic_force" };
   }
   const spineCount = countSpineAppearances(name, storySpine);
   if (spineCount >= 3) {
@@ -91,7 +128,7 @@ function classifyMember(member: CastMember, foundation: IngestedFoundation): Pri
     return { character: name, tier: "Major", justification: `Appears in ${spineCount} of 7 Story Spine beats` };
   }
 
-  if (primary_function.trim().length > 0) {
+  if (primary_function.trim().length > SUPPORTING_CONTENT_MIN_LENGTH || description.trim().length > SUPPORTING_CONTENT_MIN_LENGTH) {
     return { character: name, tier: "Supporting", justification: "No Story Spine presence; functional role only" };
   }
 
