@@ -45,10 +45,10 @@ export default function CanonPanel({
       {debug && (
         <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-300">
-            Questionnaire-dump flags this session: {guardrailFlags?.length ?? 0}
+            Questionnaire-dump flags: {guardrailFlags?.length ?? 0}
           </p>
           {guardrailFlags && guardrailFlags.length > 0 && (
-            <ul className="mt-1 space-y-0.5">
+            <ul className="mt-1 space-y-0.5 max-h-32 overflow-y-auto">
               {guardrailFlags.map((f, i) => (
                 <li key={`${f.turnId}-${i}`} className="flex items-center justify-between gap-2 text-[10px] text-neutral-400">
                   <span className="truncate font-mono">{f.turnId.slice(0, 8)}</span>
