@@ -421,7 +421,7 @@ export default function ChatInterview() {
                   </div>
                 )}
 
-                {!loading && !doc && (
+                {!loading && !doc && !resuming && (
                   <StorySoFar elements={elements} currentStage={currentStage} />
                 )}
               </div>
