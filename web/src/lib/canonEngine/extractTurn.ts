@@ -100,7 +100,13 @@ export async function extractTurn(params: ExtractTurnParams): Promise<StateDelta
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const response = await params.anthropic.messages.create({
       model: params.model,
-      max_tokens: params.maxTokens ?? 1536,
+      // 1536 was too tight for a substantial natural-language reply plus the
+      // structured updates payload in the same forced tool call - the model
+      // would truncate mid-JSON (reply complete, updates/conflict_detected/
+      // stage_ready_to_advance left undefined), failing schema validation on
+      // both retry attempts and surfacing as a slow 502 in production
+      // (2026-07-30: 4 failures, ~44-48s each, same session).
+      max_tokens: params.maxTokens ?? 4096,
       system: params.system,
       messages: params.messages,
       tools: [EMIT_TURN_TOOL],
