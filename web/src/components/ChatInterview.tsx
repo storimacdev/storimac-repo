@@ -8,6 +8,9 @@ import Markdown from "@/components/Markdown";
 import StorySoFar from "@/components/StorySoFar";
 import UserMenu from "@/components/UserMenu";
 import { useUser } from "@/components/UserProvider";
+import { downloadText, downloadBlob } from "@/lib/download";
+import { generateFoundationPdfBlob } from "@/lib/pdf/FoundationPdfDocument";
+import type { FoundationDocument } from "@/lib/canonEngine/foundationDoc";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -25,7 +28,7 @@ type GeneratedDoc = {
   date: string;
   summary_of_changes: string;
   markdown: string;
-  json: unknown;
+  json: FoundationDocument;
 };
 
 type VersionRow = { version: number; date: string; summary_of_changes: string };
@@ -83,6 +86,7 @@ export default function ChatInterview() {
   const [doc, setDoc] = useState<GeneratedDoc | null>(null);
   const [versions, setVersions] = useState<VersionRow[]>([]);
   const [generating, setGenerating] = useState(false);
+  const [pdfGenerating, setPdfGenerating] = useState(false);
   const [leftTab, setLeftTab] = useState<"chat" | "canon">("chat");
   const listEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -195,14 +199,18 @@ export default function ChatInterview() {
     }
   }
 
-  function download(filename: string, content: string, type: string) {
-    const blob = new Blob([content], { type });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
+  async function downloadPdf() {
+    if (!doc || pdfGenerating) return;
+    setPdfGenerating(true);
+    setError(null);
+    try {
+      const blob = await generateFoundationPdfBlob(doc.json);
+      downloadBlob(`story-foundation-v${doc.version}.pdf`, blob);
+    } catch {
+      setError("Couldn't generate the PDF.");
+    } finally {
+      setPdfGenerating(false);
+    }
   }
 
   if (!workspaceId || !canvasId) {
@@ -381,16 +389,23 @@ export default function ChatInterview() {
                         </p>
                         <div className="mt-3 flex flex-wrap gap-2">
                           <button
-                            onClick={() => download(`story-foundation-v${doc.version}.md`, doc.markdown, "text/markdown")}
+                            onClick={() => downloadText(`story-foundation-v${doc.version}.md`, doc.markdown, "text/markdown")}
                             className="rounded-lg bg-gradient-to-r from-red-600 to-orange-500 px-3 py-2 text-xs font-semibold text-white hover:from-red-500 hover:to-orange-400"
                           >
                             Download .md
                           </button>
                           <button
-                            onClick={() => download(`story-foundation-v${doc.version}.json`, JSON.stringify(doc.json, null, 2), "application/json")}
+                            onClick={() => downloadText(`story-foundation-v${doc.version}.json`, JSON.stringify(doc.json, null, 2), "application/json")}
                             className="rounded-lg bg-gradient-to-r from-red-600 to-orange-500 px-3 py-2 text-xs font-semibold text-white hover:from-red-500 hover:to-orange-400"
                           >
                             Download .json
+                          </button>
+                          <button
+                            onClick={downloadPdf}
+                            disabled={pdfGenerating}
+                            className="rounded-lg bg-gradient-to-r from-red-600 to-orange-500 px-3 py-2 text-xs font-semibold text-white hover:from-red-500 hover:to-orange-400 disabled:opacity-40"
+                          >
+                            {pdfGenerating ? "Generating…" : "Download .pdf"}
                           </button>
                           <button
                             onClick={generateDocument}
