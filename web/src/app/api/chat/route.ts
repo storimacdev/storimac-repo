@@ -214,10 +214,19 @@ export async function POST(req: NextRequest) {
       system += `\n\n${buildConflictContextMessage(pendingConflict)}`;
     }
 
+    // Stage 7 audit grounding (issue #17): the model responding to the
+    // author's first message after the Creative Audit needs to actually see
+    // what the audit said, not just a boolean. Internal grounding only - the
+    // audit summary is also shown to the author separately, so don't restate
+    // it verbatim, respond to it.
+    if (story.currentStage === 7 && story.stage7Audit) {
+      system += `\n\n[Stage 7 Creative Audit summary — internal grounding only, already shown to the author separately. Don't restate it verbatim; respond to it.]\n${formatAuditSummary(story.stage7Audit)}`;
+    }
+
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     const messages: Anthropic.MessageParam[] = recentMessages.map((m) => ({
       role: m.role,
-      content: m.content,
+      content: m.context ? `${m.content}\n\n[Your internal reasoning for that turn]\n${m.context}` : m.content,
     }));
 
     let delta;
@@ -324,7 +333,7 @@ export async function POST(req: NextRequest) {
       turnId,
       context: delta.context,
     });
-    const heuristics = logTurnHeuristics(delta.reply, turnId);
+    const heuristics = logTurnHeuristics(delta.reply, delta.context, turnId);
     let guardrailFlag: StoredGuardrailFlag | null = null;
     if (heuristics.isQuestionnaireDump) {
       try {

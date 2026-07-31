@@ -28,10 +28,6 @@ const EMIT_TURN_TOOL: Anthropic.Tool = {
         type: "string",
         description: "The chat-facing reply, ALWAYS formatted as a short numbered list (even a single item) of italicized questions/directives only - no framing prose, no explanation, no reasoning. Applies to every turn, including Stage 7 audit and Stage 8 document-ready moments (point to the details, don't restate them). Never narrate internal stage/depth/canon bookkeeping here.",
       },
-      context: {
-        type: "string",
-        description: "Your reasoning, story analysis, and creative rationale for this turn - everything that used to go in reply's prose now goes here instead. Shown to the author separately from chat, never inside the numbered reply list. Required every turn, even if brief.",
-      },
       updates: {
         type: "array",
         description: "Canon element changes proposed this turn. Empty array if none.",
@@ -57,6 +53,10 @@ const EMIT_TURN_TOOL: Anthropic.Tool = {
         type: "boolean",
         description: "True if all required elements for the current stage are Confirmed or Parked.",
       },
+      context: {
+        type: "string",
+        description: "Your reasoning, story analysis, and creative rationale for this turn - everything that used to go in reply's prose now goes here instead. Shown to the author separately from chat, never inside the numbered reply list. Required every turn, even if brief. Keep it to a few short paragraphs at most - this is internal reasoning, not a transcript.",
+      },
       resolution: {
         type: "string",
         enum: ["keep_canon", "accept_and_update", "park"],
@@ -68,7 +68,7 @@ const EMIT_TURN_TOOL: Anthropic.Tool = {
         description: "Only relevant alongside resolution: accept_and_update. Element IDs you believe may be affected by the change - a hint only, the app computes the authoritative list itself.",
       },
     },
-    required: ["reply", "context", "updates", "conflict_detected", "stage_ready_to_advance"],
+    required: ["reply", "updates", "conflict_detected", "stage_ready_to_advance", "context"],
   },
 };
 
@@ -109,7 +109,11 @@ export async function extractTurn(params: ExtractTurnParams): Promise<StateDelta
       // would truncate mid-JSON (reply complete, updates/conflict_detected/
       // stage_ready_to_advance left undefined), failing schema validation on
       // both retry attempts and surfacing as a slow 502 in production
-      // (2026-07-30: 4 failures, ~44-48s each, same session).
+      // (2026-07-30: 4 failures, ~44-48s each, same session). `context` (the
+      // long-form reasoning field) is deliberately ordered last in
+      // EMIT_TURN_TOOL's properties/required, after updates/conflict_detected/
+      // stage_ready_to_advance, so a similar mid-JSON truncation drops the
+      // free-text field instead of the short required ones again.
       max_tokens: params.maxTokens ?? 4096,
       system: params.system,
       messages: params.messages,

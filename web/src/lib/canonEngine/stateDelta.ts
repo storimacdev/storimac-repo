@@ -40,10 +40,14 @@ export const ElementUpdateSchema = z
 
 export const StateDeltaSchema = z.object({
   reply: z.string().min(1),
-  context: z.string().min(1),
   updates: z.array(ElementUpdateSchema),
   conflict_detected: z.boolean(),
   stage_ready_to_advance: z.boolean(),
+  // Kept after the fields above (mirrors EMIT_TURN_TOOL's property order in
+  // extractTurn.ts, which is ordered deliberately for truncation-risk
+  // reasons - see the comment there). Zod object key order doesn't affect
+  // validation; this is for readability parity only.
+  context: z.string().min(1),
   // Populated by the model only during a Conflict Resolution turn (issue
   // #10) — the app injects conflict context via
   // conflictResolution.buildConflictContextMessage() and expects these back.

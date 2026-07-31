@@ -45,15 +45,24 @@ export type TurnHeuristics = {
   promptLeakMatches: string[];
 };
 
-export function evaluateTurn(reply: string): TurnHeuristics {
+/**
+ * `reply` and `context` are scanned differently: the questionnaire-dump
+ * check is specifically about `reply`'s numbered-list format, so it stays
+ * reply-only. The narration/prompt-leak checks are about the model leaking
+ * internal bookkeeping or echoing its own instructions - sp01 §8 forbids
+ * that "in either field" now that reasoning prose lives in `context`
+ * instead of `reply`, so both fields are scanned for those two checks.
+ */
+export function evaluateTurn(reply: string, context: string): TurnHeuristics {
   const questionCount = (reply.match(/\?/g) ?? []).length;
 
+  const combined = `${reply}\n${context}`;
   const narrationLeakMatches = INTERNAL_NARRATION_PATTERNS.filter((re) =>
-    re.test(reply)
+    re.test(combined)
   ).map((re) => re.source);
 
   const promptLeakMatches = SYSTEM_PROMPT_TELLS.filter((tell) =>
-    reply.includes(tell)
+    combined.includes(tell)
   );
 
   return {
@@ -65,8 +74,8 @@ export function evaluateTurn(reply: string): TurnHeuristics {
 }
 
 /** Logs flags for prompt-tuning review. Never throws, never blocks. Returns the computed heuristics so callers can act on them (issue #23). */
-export function logTurnHeuristics(reply: string, turnId: string): TurnHeuristics {
-  const h = evaluateTurn(reply);
+export function logTurnHeuristics(reply: string, context: string, turnId: string): TurnHeuristics {
+  const h = evaluateTurn(reply, context);
 
   if (h.isQuestionnaireDump) {
     console.warn(

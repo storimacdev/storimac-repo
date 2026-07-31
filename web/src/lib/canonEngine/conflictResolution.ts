@@ -60,8 +60,8 @@ export function buildConflictContextMessage(conflict: PendingConflict): string {
     "[CONFLICT DETECTED — system note, not from the author]",
     `The element "${conflict.element_id}" is already Confirmed as: ${JSON.stringify(conflict.old_value)}`,
     `The author's latest input implies a different value: ${JSON.stringify(conflict.new_value)}`,
-    "Stop the interview and state this contradiction explicitly, in plain language, before anything else.",
-    "Present exactly three choices: (A) Keep Canon, (B) Accept the new idea and update Canon, (C) Park it for later.",
+    "Stop the interview. State this contradiction explicitly, in plain language, in `context` - that's where the full explanation belongs.",
+    "In `reply`, present exactly three choices as the short numbered list: (A) Keep Canon, (B) Accept the new idea and update Canon, (C) Park it for later. Point to the contradiction, don't restate it there.",
     "Your next structured output must set resolution to one of keep_canon | accept_and_update | park, matching the author's pick.",
   ].join("\n");
 }
