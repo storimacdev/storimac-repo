@@ -178,6 +178,7 @@ export default function ChatInterview() {
   }
 
   function handleResizeStart(e: React.PointerEvent) {
+    if (e.button !== 0 || !e.isPrimary) return;
     e.preventDefault();
     const startX = e.clientX;
     const startWidth = leftWidth;
@@ -360,12 +361,12 @@ export default function ChatInterview() {
                       onKeyDown={onKeyDown}
                       rows={2}
                       placeholder="Type your answer… (Enter to send)"
-                      className="flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none"
+                      className="min-w-0 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none"
                     />
                     <button
                       onClick={() => sendMessage()}
                       disabled={loading || resuming || !input.trim()}
-                      className="rounded-lg bg-gradient-to-r from-red-600 to-orange-500 px-4 py-2 text-sm font-semibold text-white transition hover:from-red-500 hover:to-orange-400 disabled:cursor-not-allowed disabled:opacity-40"
+                      className="shrink-0 rounded-lg bg-gradient-to-r from-red-600 to-orange-500 px-4 py-2 text-sm font-semibold text-white transition hover:from-red-500 hover:to-orange-400 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       Send
                     </button>
