@@ -40,6 +40,7 @@ export const ElementUpdateSchema = z
 
 export const StateDeltaSchema = z.object({
   reply: z.string().min(1),
+  context: z.string().min(1),
   updates: z.array(ElementUpdateSchema),
   conflict_detected: z.boolean(),
   stage_ready_to_advance: z.boolean(),

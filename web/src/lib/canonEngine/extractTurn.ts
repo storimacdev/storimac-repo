@@ -26,7 +26,11 @@ const EMIT_TURN_TOOL: Anthropic.Tool = {
     properties: {
       reply: {
         type: "string",
-        description: "The natural-language reply shown to the author. Never narrate internal stage/depth/canon bookkeeping here.",
+        description: "The chat-facing reply, ALWAYS formatted as a short numbered list (even a single item) of italicized questions/directives only - no framing prose, no explanation, no reasoning. Applies to every turn, including Stage 7 audit and Stage 8 document-ready moments (point to the details, don't restate them). Never narrate internal stage/depth/canon bookkeeping here.",
+      },
+      context: {
+        type: "string",
+        description: "Your reasoning, story analysis, and creative rationale for this turn - everything that used to go in reply's prose now goes here instead. Shown to the author separately from chat, never inside the numbered reply list. Required every turn, even if brief.",
       },
       updates: {
         type: "array",
@@ -64,7 +68,7 @@ const EMIT_TURN_TOOL: Anthropic.Tool = {
         description: "Only relevant alongside resolution: accept_and_update. Element IDs you believe may be affected by the change - a hint only, the app computes the authoritative list itself.",
       },
     },
-    required: ["reply", "updates", "conflict_detected", "stage_ready_to_advance"],
+    required: ["reply", "context", "updates", "conflict_detected", "stage_ready_to_advance"],
   },
 };
 

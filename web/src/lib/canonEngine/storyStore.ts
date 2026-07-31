@@ -66,6 +66,7 @@ export interface StoryMessage {
   content: string;
   ts: string;
   turnId: string;
+  context?: string;
 }
 
 export class StoryAccessError extends Error {
