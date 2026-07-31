@@ -82,6 +82,8 @@ export default function ChatInterview() {
   const [elements, setElements] = useState<PanelElement[]>([]);
   const [guardrailFlags, setGuardrailFlags] = useState<GuardrailFlag[]>([]);
   const [conflict, setConflict] = useState<PendingConflict | null>(null);
+  const [context, setContext] = useState<string | null>(null);
+  const [auditSummary, setAuditSummary] = useState<string | null>(null);
   const [doc, setDoc] = useState<GeneratedDoc | null>(null);
   const [versions, setVersions] = useState<VersionRow[]>([]);
   const [generating, setGenerating] = useState(false);
@@ -101,12 +103,14 @@ export default function ChatInterview() {
           setError(data.error ?? "Couldn't load this Story Canvas.");
           return;
         }
-        setMessages(
-          (data.messages as { role: "user" | "assistant"; content: string }[]).map((m) => ({
-            role: m.role,
-            content: m.content,
-          }))
-        );
+        const rawMessages = data.messages as {
+          role: "user" | "assistant";
+          content: string;
+          context?: string;
+        }[];
+        setMessages(rawMessages.map((m) => ({ role: m.role, content: m.content })));
+        const lastWithContext = [...rawMessages].reverse().find((m) => m.role === "assistant" && m.context);
+        if (lastWithContext) setContext(lastWithContext.context ?? null);
         if (data.story?.currentStage) {
           setCurrentStage(data.story.currentStage);
           setStageName(`Stage ${data.story.currentStage}`);
@@ -147,11 +151,9 @@ export default function ChatInterview() {
         return;
       }
 
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: data.reply },
-        ...(data.auditSummary ? [{ role: "assistant" as const, content: data.auditSummary }] : []),
-      ]);
+      setMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
+      setContext(data.context ?? null);
+      setAuditSummary(data.auditSummary ?? null);
       if (data.currentStageName) setStageName(data.currentStageName);
       if (typeof data.currentStage === "number") setCurrentStage(data.currentStage);
       if (Array.isArray(data.elements)) setElements(data.elements);
@@ -440,7 +442,24 @@ export default function ChatInterview() {
                 )}
 
                 {!loading && !doc && !resuming && (
-                  <StorySoFar elements={elements} currentStage={currentStage} />
+                  <>
+                    {(auditSummary || context) && (
+                      <div
+                        data-testid="notes-card"
+                        className="mb-6 rounded-xl border border-red-500/30 bg-gradient-to-br from-red-950/40 to-neutral-900/40 px-5 py-5"
+                      >
+                        <p className="bg-gradient-to-r from-red-400 to-orange-300 bg-clip-text text-xs font-bold uppercase tracking-widest text-transparent">
+                          {auditSummary ? "Creative Audit" : "Notes"}
+                        </p>
+                        <div className="mt-3">
+                          <Markdown className="text-[13px] leading-relaxed text-neutral-300">
+                            {auditSummary ?? context ?? ""}
+                          </Markdown>
+                        </div>
+                      </div>
+                    )}
+                    <StorySoFar elements={elements} currentStage={currentStage} />
+                  </>
                 )}
               </div>
             </div>
