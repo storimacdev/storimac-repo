@@ -317,10 +317,13 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    await appendMessage(storyId, { role: "assistant", content: delta.reply, ts: new Date().toISOString(), turnId });
-    if (auditSummary) {
-      await appendMessage(storyId, { role: "assistant", content: auditSummary, ts: new Date().toISOString(), turnId });
-    }
+    await appendMessage(storyId, {
+      role: "assistant",
+      content: delta.reply,
+      ts: new Date().toISOString(),
+      turnId,
+      context: delta.context,
+    });
     const heuristics = logTurnHeuristics(delta.reply, turnId);
     let guardrailFlag: StoredGuardrailFlag | null = null;
     if (heuristics.isQuestionnaireDump) {
@@ -337,6 +340,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       reply: delta.reply,
+      context: delta.context,
       auditSummary,
       elements: elementsAfter,
       currentStage,
