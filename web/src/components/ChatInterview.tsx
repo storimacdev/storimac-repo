@@ -89,6 +89,7 @@ export default function ChatInterview() {
   const [generating, setGenerating] = useState(false);
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const [leftTab, setLeftTab] = useState<"chat" | "canon">("chat");
+  const [leftWidth, setLeftWidth] = useState(380);
   const listEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -176,6 +177,25 @@ export default function ChatInterview() {
     }
   }
 
+  function handleResizeStart(e: React.PointerEvent) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = leftWidth;
+
+    function handlePointerMove(ev: PointerEvent) {
+      const next = Math.min(800, Math.max(280, startWidth + (ev.clientX - startX)));
+      setLeftWidth(next);
+    }
+
+    function handlePointerUp() {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+  }
+
   async function generateDocument() {
     if (!workspaceId || !canvasId || generating) return;
     setGenerating(true);
@@ -254,7 +274,8 @@ export default function ChatInterview() {
             {/* ---------- Left panel: chat / canon tabs + input ---------- */}
             <div
               data-testid="left-panel"
-              className="flex w-[380px] shrink-0 flex-col border-r border-red-900/40 bg-neutral-900/40"
+              className="flex shrink-0 flex-col border-r border-red-900/40 bg-neutral-900/40"
+              style={{ width: leftWidth }}
             >
               <div className="flex shrink-0 gap-1 border-b border-red-900/40 p-2">
                 <button
@@ -352,6 +373,13 @@ export default function ChatInterview() {
                 </div>
               </div>
             </div>
+
+            {/* ---------- Drag handle: resize left panel ---------- */}
+            <div
+              data-testid="resize-handle"
+              onPointerDown={handleResizeStart}
+              className="w-1 shrink-0 cursor-col-resize bg-neutral-800 transition hover:bg-gradient-to-b hover:from-red-500 hover:to-orange-500 active:bg-gradient-to-b active:from-red-500 active:to-orange-500"
+            />
 
             {/* ---------- Right panel: response generation / preview ---------- */}
             <div data-testid="right-panel" className="flex min-w-0 flex-1 flex-col bg-neutral-950">
