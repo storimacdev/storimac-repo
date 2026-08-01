@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { StateDeltaSchema, type StateDelta } from "./stateDelta";
+import { acquireAnthropicSlot, recordAnthropicUsage, estimateInputTokens } from "@/lib/rateLimit/anthropicGate";
 
 /**
  * Structured state-delta extraction — GitHub issue #9, reference
@@ -102,6 +103,12 @@ export async function extractTurn(params: ExtractTurnParams): Promise<StateDelta
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const maxOutputTokens = params.maxTokens ?? 4096;
+    const reservation = await acquireAnthropicSlot({
+      inputTokens: estimateInputTokens(params.system, params.messages),
+      maxOutputTokens,
+    });
+
     const response = await params.anthropic.messages.create({
       model: params.model,
       // 1536 was too tight for a substantial natural-language reply plus the
@@ -114,12 +121,14 @@ export async function extractTurn(params: ExtractTurnParams): Promise<StateDelta
       // EMIT_TURN_TOOL's properties/required, after updates/conflict_detected/
       // stage_ready_to_advance, so a similar mid-JSON truncation drops the
       // free-text field instead of the short required ones again.
-      max_tokens: params.maxTokens ?? 4096,
+      max_tokens: maxOutputTokens,
       system: params.system,
       messages: params.messages,
       tools: [EMIT_TURN_TOOL],
       tool_choice: { type: "tool", name: "emit_turn" },
     });
+
+    recordAnthropicUsage(reservation, response.usage.output_tokens);
 
     const toolUse = response.content.find((b) => b.type === "tool_use");
     if (!toolUse) {
