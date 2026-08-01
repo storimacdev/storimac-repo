@@ -28,6 +28,7 @@ import type { CanonElement } from "@/lib/canonEngine/types";
 import { checkStageGate, advanceStage, getStageDefinition, PROJECT1_STAGES, type OutstandingQuestion } from "@/lib/canonEngine/stageFsm";
 import { detectConflict, buildConflictContextMessage, resolveConflict } from "@/lib/canonEngine/conflictResolution";
 import { extractTurn, StateDeltaValidationError } from "@/lib/canonEngine/extractTurn";
+import { RateLimitTimeoutError } from "@/lib/rateLimit/anthropicGate";
 import type { ElementUpdateInput } from "@/lib/canonEngine/stateDelta";
 import { isValidFormatCode, retrieveTopFormats, getFormatByCode } from "@/lib/canonEngine/formatIndex";
 
@@ -238,6 +239,13 @@ export async function POST(req: NextRequest) {
         messages,
       });
     } catch (err) {
+      if (err instanceof RateLimitTimeoutError) {
+        console.warn("Anthropic rate-limit gate timed out:", err);
+        return NextResponse.json(
+          { error: "StoriMac is handling a lot of requests right now — please try again in a moment." },
+          { status: 503 }
+        );
+      }
       if (err instanceof StateDeltaValidationError) {
         console.error("State delta extraction failed:", err);
         return NextResponse.json(
