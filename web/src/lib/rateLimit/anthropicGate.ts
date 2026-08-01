@@ -15,16 +15,34 @@ import type Anthropic from "@anthropic-ai/sdk";
  * first place; the SDK's reactive retry remains a safety net underneath it.
  */
 
+function envNumber(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined) return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    console.warn(`[anthropicGate] ${name}="${raw}" is not a valid positive number - using default ${fallback}.`);
+    return fallback;
+  }
+  return parsed;
+}
+
 // Placeholder defaults pending real numbers from the Anthropic Console —
 // override via env vars once confirmed, no code change needed.
-const RPM_LIMIT = Number(process.env.ANTHROPIC_RPM_LIMIT ?? 40);
-const ITPM_LIMIT = Number(process.env.ANTHROPIC_ITPM_LIMIT ?? 30000);
-const OTPM_LIMIT = Number(process.env.ANTHROPIC_OTPM_LIMIT ?? 6000);
-const MAX_WAIT_MS = Number(process.env.ANTHROPIC_GATE_MAX_WAIT_MS ?? 8000);
-const POLL_MS = Number(process.env.ANTHROPIC_GATE_POLL_MS ?? 250);
+const RPM_LIMIT = envNumber("ANTHROPIC_RPM_LIMIT", 40);
+const ITPM_LIMIT = envNumber("ANTHROPIC_ITPM_LIMIT", 30000);
+// 32000 gives ~7 concurrent 4096-token (the current extractTurn.ts default
+// max_tokens) reservations headroom before this gate itself becomes the
+// binding constraint - reconciliation/pruning take 45-60s to free capacity
+// (see the max_tokens comment in extractTurn.ts), far longer than
+// ANTHROPIC_GATE_MAX_WAIT_MS, so the *ratio* between this ceiling and
+// max_tokens matters more than the absolute number until real Anthropic
+// Console limits are confirmed.
+const OTPM_LIMIT = envNumber("ANTHROPIC_OTPM_LIMIT", 32000);
+const MAX_WAIT_MS = envNumber("ANTHROPIC_GATE_MAX_WAIT_MS", 8000);
+const POLL_MS = envNumber("ANTHROPIC_GATE_POLL_MS", 250);
 // Overridable only so the Task 1 fixture script can verify pruning without
 // a real 60s wait — production always runs on the 60_000 default.
-const WINDOW_MS = Number(process.env.ANTHROPIC_GATE_WINDOW_MS ?? 60_000);
+const WINDOW_MS = envNumber("ANTHROPIC_GATE_WINDOW_MS", 60_000);
 
 interface WindowEntry {
   id: number;
@@ -91,6 +109,7 @@ export async function acquireAnthropicSlot(
   estimate: AnthropicSlotEstimate
 ): Promise<AnthropicSlotReservation> {
   const deadline = Date.now() + MAX_WAIT_MS;
+  let hasWarned = false;
 
   for (;;) {
     const now = Date.now();
@@ -104,6 +123,15 @@ export async function acquireAnthropicSlot(
       inputTokenWindow.add(estimate.inputTokens, now);
       const outputEntryId = outputTokenWindow.add(estimate.maxOutputTokens, now);
       return { outputEntryId };
+    }
+
+    if (!hasWarned) {
+      hasWarned = true;
+      console.warn(
+        `[anthropicGate] waiting for capacity - requests: ${requestWindow.sum(now)}/${RPM_LIMIT}, ` +
+          `input tokens: ${inputTokenWindow.sum(now)}/${ITPM_LIMIT}, ` +
+          `output tokens: ${outputTokenWindow.sum(now)}/${OTPM_LIMIT}`
+      );
     }
 
     if (Date.now() >= deadline) {

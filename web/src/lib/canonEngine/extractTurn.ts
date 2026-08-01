@@ -104,6 +104,11 @@ export async function extractTurn(params: ExtractTurnParams): Promise<StateDelta
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const maxOutputTokens = params.maxTokens ?? 4096;
+    // Each retry attempt gates independently, so worst-case added latency is
+    // roughly (maxRetries + 1) * ANTHROPIC_GATE_MAX_WAIT_MS on top of model
+    // latency - worth checking this against whatever request timeout the
+    // deployment platform enforces if maxRetries or the gate's wait bound
+    // ever change.
     const reservation = await acquireAnthropicSlot({
       inputTokens: estimateInputTokens(params.system, params.messages),
       maxOutputTokens,
