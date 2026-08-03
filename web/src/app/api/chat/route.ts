@@ -27,9 +27,9 @@ import { listElements, applyStateDelta, CanonConflictError, type ElementUpdate }
 import type { CanonElement } from "@/lib/canonEngine/types";
 import { checkStageGate, advanceStage, getStageDefinition, PROJECT1_STAGES, type OutstandingQuestion } from "@/lib/canonEngine/stageFsm";
 import { detectConflict, buildConflictContextMessage, resolveConflict } from "@/lib/canonEngine/conflictResolution";
-import { extractTurn, StateDeltaValidationError } from "@/lib/canonEngine/extractTurn";
+import { extractTurn, TurnValidationError } from "@/lib/canonEngine/extractTurn";
 import { RateLimitTimeoutError } from "@/lib/rateLimit/anthropicGate";
-import type { ElementUpdateInput } from "@/lib/canonEngine/stateDelta";
+import { EMIT_TURN_TOOL, StateDeltaSchema, type ElementUpdateInput } from "@/lib/canonEngine/stateDelta";
 import { isValidFormatCode, retrieveTopFormats, getFormatByCode } from "@/lib/canonEngine/formatIndex";
 
 export const runtime = "nodejs";
@@ -237,6 +237,8 @@ export async function POST(req: NextRequest) {
         model: "claude-sonnet-5",
         system,
         messages,
+        tool: EMIT_TURN_TOOL,
+        schema: StateDeltaSchema,
       });
     } catch (err) {
       if (err instanceof RateLimitTimeoutError) {
@@ -246,7 +248,7 @@ export async function POST(req: NextRequest) {
           { status: 503 }
         );
       }
-      if (err instanceof StateDeltaValidationError) {
+      if (err instanceof TurnValidationError) {
         console.error("State delta extraction failed:", err);
         return NextResponse.json(
           { error: "The interview couldn't produce a valid response. Please try again." },

@@ -1,11 +1,71 @@
 import { z } from "zod";
+import type Anthropic from "@anthropic-ai/sdk";
 
 /**
  * Structured state-delta schema — GitHub issue #9, PRD §6.2. Validated
  * independently of Anthropic's own tool-schema enforcement (defense in
  * depth per PRD §13's flagged risk: "Model may not reliably emit clean
  * structured state deltas").
+ *
+ * EMIT_TURN_TOOL lives here (not extractTurn.ts, which is now generic
+ * across projects — see issue #26/#27) since it's Project 1's own tool
+ * definition, colocated with the Zod schema it must match exactly.
  */
+
+export const EMIT_TURN_TOOL: Anthropic.Tool = {
+  name: "emit_turn",
+  description:
+    "Emit your natural-language reply to the author together with the structured canon state delta for this turn. Call this exactly once per turn, even if updates is empty (e.g. a pure clarifying question with no canon change).",
+  input_schema: {
+    type: "object",
+    properties: {
+      reply: {
+        type: "string",
+        description: "The chat-facing reply, ALWAYS formatted as a short numbered list (even a single item) of italicized questions/directives only - no framing prose, no explanation, no reasoning. Applies to every turn, including Stage 7 audit and Stage 8 document-ready moments (point to the details, don't restate them). Never narrate internal stage/depth/canon bookkeeping here.",
+      },
+      updates: {
+        type: "array",
+        description: "Canon element changes proposed this turn. Empty array if none.",
+        items: {
+          type: "object",
+          properties: {
+            element_id: { type: "string" },
+            status: { type: "string", enum: ["Exploring", "Working", "Confirmed", "Parked"] },
+            value: { description: "Author-facing value. Never a catalog/retrieval code - see retrieval_code." },
+            retrieval_code: { description: "Internal-only catalog code (e.g. a 101 Story Formats code like A05), if applicable. Never author-facing." },
+            rationale: { type: "string" },
+            depends_on: { type: "array", items: { type: "string" } },
+            stage: { type: "number" },
+          },
+          required: ["element_id"],
+        },
+      },
+      conflict_detected: {
+        type: "boolean",
+        description: "True if this turn's proposed update(s) contradict a Confirmed element.",
+      },
+      stage_ready_to_advance: {
+        type: "boolean",
+        description: "True if all required elements for the current stage are Confirmed or Parked.",
+      },
+      context: {
+        type: "string",
+        description: "Your reasoning, story analysis, and creative rationale for this turn - everything that used to go in reply's prose now goes here instead. Shown to the author separately from chat, never inside the numbered reply list. Required every turn, even if brief. Keep it to a few short paragraphs at most - this is internal reasoning, not a transcript.",
+      },
+      resolution: {
+        type: "string",
+        enum: ["keep_canon", "accept_and_update", "park"],
+        description: "Only set this during a Conflict Resolution turn (a system note will tell you when you're in one), after the author picks one of the three choices you presented.",
+      },
+      cascade_review: {
+        type: "array",
+        items: { type: "string" },
+        description: "Only relevant alongside resolution: accept_and_update. Element IDs you believe may be affected by the change - a hint only, the app computes the authoritative list itself.",
+      },
+    },
+    required: ["reply", "updates", "conflict_detected", "stage_ready_to_advance", "context"],
+  },
+};
 
 const CATALOG_CODE_PATTERN = /\b[A-E]\d{2}\b/;
 
