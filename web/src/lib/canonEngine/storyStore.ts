@@ -67,6 +67,11 @@ export interface StoryMessage {
   ts: string;
   turnId: string;
   context?: string;
+  /** Project 2 only (issues #26/#27) — the character/stage this assistant
+   * turn reported as current. Optional since Project 1 messages, and every
+   * user-role message, never set these. */
+  current_character?: string;
+  current_stage?: number;
 }
 
 export class StoryAccessError extends Error {
@@ -80,8 +85,8 @@ function storiesCollection() {
   return getDb().collection("stories");
 }
 
-function messagesCollection(storyId: string) {
-  return storiesCollection().doc(storyId).collection("messages");
+function messagesCollection(storyId: string, collection: string = "messages") {
+  return storiesCollection().doc(storyId).collection(collection);
 }
 
 async function countStoriesInWorkspace(workspaceId: string): Promise<number> {
@@ -283,18 +288,25 @@ export async function appendAuthorTypeAssessment(
 
 export async function appendMessage(
   storyId: string,
-  message: Omit<StoryMessage, "id">
+  message: Omit<StoryMessage, "id">,
+  collection: string = "messages"
 ): Promise<StoryMessage> {
-  const ref = messagesCollection(storyId).doc();
+  const ref = messagesCollection(storyId, collection).doc();
   const full: StoryMessage = { id: ref.id, ...message };
   await ref.set(full);
   await touchStory(storyId);
   return full;
 }
 
-/** All messages, oldest first. Pass `limit` to get only the most recent N. */
-export async function listMessages(storyId: string, limit?: number): Promise<StoryMessage[]> {
-  const snap = await messagesCollection(storyId).orderBy("ts", "asc").get();
+/** All messages, oldest first. Pass `limit` to get only the most recent N.
+ * Pass `collection` (issue #26/#27) to target a project-specific message
+ * subcollection instead of Project 1's default "messages". */
+export async function listMessages(
+  storyId: string,
+  limit?: number,
+  collection: string = "messages"
+): Promise<StoryMessage[]> {
+  const snap = await messagesCollection(storyId, collection).orderBy("ts", "asc").get();
   const all = snap.docs.map((d) => d.data() as StoryMessage);
   if (limit && all.length > limit) {
     return all.slice(all.length - limit);
