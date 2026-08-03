@@ -41,7 +41,7 @@ export default function CharacterInterview() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/api/workspaces/${workspaceId}/canvases/${canvasId}`);
+        const res = await fetch(`/api/workspaces/${workspaceId}/canvases/${canvasId}?characterMessages=1`);
         const data = await res.json();
         if (cancelled) return;
         if (!res.ok) {
@@ -72,6 +72,16 @@ export default function CharacterInterview() {
       cancelled = true;
     };
   }, [workspaceId, canvasId]);
+
+  // Fires the opening turn (sp02 §8: structural cast/priority-matrix
+  // evaluation + first Protagonist questions) automatically, once, the
+  // first time a genuinely new session loads - otherwise the session sits
+  // waiting for the author to type something before the model ever speaks.
+  useEffect(() => {
+    if (resuming || messages.length > 0 || !canvasId) return;
+    sendMessage("Let's begin.");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resuming, canvasId]);
 
   async function sendMessage(preset?: string) {
     const text = (preset ?? input).trim();

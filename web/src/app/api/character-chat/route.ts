@@ -6,7 +6,7 @@ import { logTurnHeuristics } from "@/lib/turnGuardrails";
 import { requireUser } from "@/lib/session";
 import { errorResponse } from "@/lib/apiErrors";
 import { getMembership } from "@/lib/workspace/workspaceStore";
-import { getStory, appendMessage, listMessages } from "@/lib/canonEngine/storyStore";
+import { getStory, appendMessage, listMessages, CHARACTER_MESSAGES_COLLECTION } from "@/lib/canonEngine/storyStore";
 import { extractTurn, TurnValidationError } from "@/lib/canonEngine/extractTurn";
 import { RateLimitTimeoutError } from "@/lib/rateLimit/anthropicGate";
 import { ingestFoundation } from "@/lib/characterEngine/ingestFoundation";
@@ -16,7 +16,13 @@ import { CharacterTurnSchema, EMIT_CHARACTER_TURN_TOOL } from "@/lib/characterEn
 
 export const runtime = "nodejs";
 
-const CHARACTER_MESSAGES_COLLECTION = "characterMessages";
+// Bounds the replayed transcript so a long multi-character, multi-stage
+// session can't grow the per-turn Anthropic call past the shared
+// rate-limit gate's ITPM ceiling (unlike unbounded replay, which can
+// eventually make every subsequent turn's estimate permanently exceed the
+// ceiling with no in-app recovery). Matches the order of magnitude of
+// Project 1's own short-transcript window (contextBudget.ts).
+const CHARACTER_MESSAGE_WINDOW = 20;
 
 /**
  * The live Character Bible interview turn — issues #26/#27, reference:
@@ -80,7 +86,7 @@ export async function POST(req: NextRequest) {
       CHARACTER_MESSAGES_COLLECTION
     );
 
-    const recentMessages = await listMessages(storyId, undefined, CHARACTER_MESSAGES_COLLECTION);
+    const recentMessages = await listMessages(storyId, CHARACTER_MESSAGE_WINDOW, CHARACTER_MESSAGES_COLLECTION);
 
     // Cast & priority matrix grounding (issues #26/#27) - recomputed every
     // turn (cheap: one Firestore read + pure functions) so the model always

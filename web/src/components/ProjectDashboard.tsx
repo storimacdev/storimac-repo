@@ -271,14 +271,12 @@ export default function ProjectDashboard() {
                         >
                           Resume
                         </Link>
-                        {hasDoc && (
-                          <Link
-                            href={`/character-bible?workspaceId=${p.workspaceId}&canvasId=${p.id}`}
-                            className="rounded-lg border border-red-500/50 px-3 py-1.5 text-xs font-semibold text-red-200 hover:bg-red-500/10"
-                          >
-                            Character Bible
-                          </Link>
-                        )}
+                        <Link
+                          href={`/character-bible?workspaceId=${p.workspaceId}&canvasId=${p.id}`}
+                          className="rounded-lg border border-red-500/50 px-3 py-1.5 text-xs font-semibold text-red-200 hover:bg-red-500/10"
+                        >
+                          Character Bible
+                        </Link>
 
                         <div className="relative">
                           <button

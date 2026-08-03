@@ -74,6 +74,12 @@ export interface StoryMessage {
   current_stage?: number;
 }
 
+/** Project 2's message subcollection name (issues #26/#27) - exported so
+ * every consumer references the same literal instead of duplicating the
+ * string across files, which would let a typo silently split reads and
+ * writes across two different subcollections with no compile error. */
+export const CHARACTER_MESSAGES_COLLECTION = "characterMessages";
+
 export class StoryAccessError extends Error {
   constructor(message: string) {
     super(message);

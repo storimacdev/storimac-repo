@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/session";
 import { errorResponse } from "@/lib/apiErrors";
 import { getMembership } from "@/lib/workspace/workspaceStore";
-import { getStory, listMessages, renameStory, deleteStory, listGuardrailFlags } from "@/lib/canonEngine/storyStore";
+import { getStory, listMessages, renameStory, deleteStory, listGuardrailFlags, CHARACTER_MESSAGES_COLLECTION } from "@/lib/canonEngine/storyStore";
 import { listElements } from "@/lib/canonEngine/canonStore";
 import { setLastVisited } from "@/lib/userStore";
 
@@ -15,12 +15,16 @@ export const runtime = "nodejs";
  * (which predate real auth/workspaces and are too strict for a shared Premium canvas).
  */
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   ctx: RouteContext<"/api/workspaces/[workspaceId]/canvases/[canvasId]">
 ) {
   try {
     const user = await requireUser();
     const { workspaceId, canvasId } = await ctx.params;
+    // Project 1's resume never reads this field - only fetch/include it
+    // when the Character Bible client explicitly asks, so P1's canvas load
+    // doesn't pay for an unused Firestore read and a larger payload.
+    const includeCharacterMessages = req.nextUrl.searchParams.get("characterMessages") === "1";
 
     const membership = await getMembership(workspaceId, user.uid);
     if (!membership) {
@@ -35,7 +39,7 @@ export async function GET(
     const [elements, messages, characterMessages, guardrailFlags] = await Promise.all([
       listElements(canvasId),
       listMessages(canvasId),
-      listMessages(canvasId, undefined, "characterMessages"),
+      includeCharacterMessages ? listMessages(canvasId, undefined, CHARACTER_MESSAGES_COLLECTION) : Promise.resolve([]),
       listGuardrailFlags(canvasId),
     ]);
 
