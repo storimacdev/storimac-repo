@@ -32,16 +32,17 @@ export async function GET(
       return NextResponse.json({ error: "Story Canvas not found." }, { status: 404 });
     }
 
-    const [elements, messages, guardrailFlags] = await Promise.all([
+    const [elements, messages, characterMessages, guardrailFlags] = await Promise.all([
       listElements(canvasId),
       listMessages(canvasId),
+      listMessages(canvasId, undefined, "characterMessages"),
       listGuardrailFlags(canvasId),
     ]);
 
     // Track last-visited so "/" and bare "/interview" resume here (issue #90).
     await setLastVisited(user.uid, workspaceId, canvasId);
 
-    return NextResponse.json({ story, elements, messages, guardrailFlags });
+    return NextResponse.json({ story, elements, messages, characterMessages, guardrailFlags });
   } catch (err) {
     return errorResponse(err);
   }
