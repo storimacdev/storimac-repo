@@ -158,7 +158,7 @@ export async function POST(req: NextRequest) {
       authorType = assessment.type;
     }
 
-    let system = getSystemPrompt();
+    let system = getSystemPrompt("sp01-sdos-systemprompt.md");
     if (stateSummary) {
       // Long transcript: the summary carries all Confirmed canon + stage.
       system += `\n\n${stateSummary}`;
