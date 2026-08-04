@@ -17,7 +17,7 @@
  * (deciding Parked-vs-Confirmed, writing honest rationale for anything with
  * no real captured content) isn't something this script should automate.
  *
- * Usage (from repo root): npx tsx web/scripts/audit-stage-drift.ts
+ * Usage (from web/): npx tsx scripts/audit-stage-drift.ts
  * Requires the same Firestore credentials the running app needs - see
  * web/src/lib/firebaseAdmin.ts's header comment.
  */

@@ -41,7 +41,10 @@ export const EMIT_TURN_TOOL: Anthropic.Tool = {
             retrieval_code: { description: "Internal-only catalog code (e.g. a 101 Story Formats code like A05), if applicable. Never author-facing." },
             rationale: { type: "string" },
             depends_on: { type: "array", items: { type: "string" } },
-            stage: { type: "number" },
+            stage: {
+              type: "number",
+              description: "The stage number (1-8) this element belongs to - the stage where the author actually settled this fact, not necessarily the current stage.",
+            },
           },
           required: ["element_id"],
         },
