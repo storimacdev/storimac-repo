@@ -321,27 +321,39 @@ export async function POST(req: NextRequest) {
     let currentStage = story.currentStage;
     let outstandingQuestions: OutstandingQuestion[] = [];
     let auditSummary: string | null = null;
-    const isLastStage = story.currentStage >= PROJECT1_STAGES[PROJECT1_STAGES.length - 1].stage;
-    const blockedByStage7 = story.currentStage === 7 && !stage7Responded;
-    if (!nextPendingConflict && delta.stage_ready_to_advance && !isLastStage && !blockedByStage7) {
-      const freshElements = await listElements(storyId);
-      const gate = checkStageGate(story.currentStage, freshElements);
-      if (gate.canAdvance) {
-        const result = advanceStage(story.currentStage, freshElements);
+    if (!nextPendingConflict && delta.stage_ready_to_advance) {
+      // No writes happen to elements between iterations below, so one
+      // snapshot is valid for every gate check this turn - no re-listing
+      // needed. This is what lets one qualifying turn catch the stage
+      // pointer up through every stage whose gate already, objectively
+      // passes, instead of being capped at one stage per turn.
+      const elements = await listElements(storyId);
+      const allOutstanding: OutstandingQuestion[] = [];
+
+      while (true) {
+        const isLastStage = currentStage >= PROJECT1_STAGES[PROJECT1_STAGES.length - 1].stage;
+        const blockedByStage7 = currentStage === 7 && !stage7Responded;
+        if (isLastStage || blockedByStage7) break;
+
+        const gate = checkStageGate(currentStage, elements);
+        if (!gate.canAdvance) break;
+
+        const result = advanceStage(currentStage, elements);
         currentStage = result.nextStage;
-        outstandingQuestions = result.outstandingQuestions;
+        allOutstanding.push(...result.outstandingQuestions);
         await touchStory(storyId, { currentStage });
         // Persist Parked-element questions for the Stage 8 compiler (#18).
-        await appendOutstandingQuestions(storyId, outstandingQuestions);
+        await appendOutstandingQuestions(storyId, result.outstandingQuestions);
 
         // Entering Stage 7 triggers the system-run Creative Audit (#17).
         if (currentStage === 7) {
-          const commonMistakes = collectCommonMistakes(freshElements);
-          const audit = runStage7Audit(freshElements, commonMistakes);
+          const commonMistakes = collectCommonMistakes(elements);
+          const audit = runStage7Audit(elements, commonMistakes);
           await setStage7Audit(storyId, audit);
           auditSummary = formatAuditSummary(audit);
         }
       }
+      outstandingQuestions = allOutstanding;
     }
 
     await appendMessage(storyId, {
