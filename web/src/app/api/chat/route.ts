@@ -30,6 +30,7 @@ import { detectConflict, buildConflictContextMessage, resolveConflict } from "@/
 import { extractTurn, TurnValidationError } from "@/lib/canonEngine/extractTurn";
 import { RateLimitTimeoutError } from "@/lib/rateLimit/anthropicGate";
 import { EMIT_TURN_TOOL, StateDeltaSchema, type ElementUpdateInput } from "@/lib/canonEngine/stateDelta";
+import { isKnownElementId } from "@/lib/canonEngine/elementRegistry";
 import { isValidFormatCode, retrieveTopFormats, getFormatByCode } from "@/lib/canonEngine/formatIndex";
 
 export const runtime = "nodejs";
@@ -259,6 +260,13 @@ export async function POST(req: NextRequest) {
     }
 
     const updates = delta.updates.map(toElementUpdate);
+    for (const update of updates) {
+      if (!isKnownElementId(update.element_id)) {
+        console.warn(
+          `[chat] unknown element_id "${update.element_id}" on turn ${turnId} - not in the Project 1 canonical registry, writing as-is`
+        );
+      }
+    }
     let nextPendingConflict: StoryPendingConflict | null = pendingConflict;
 
     if (pendingConflict) {
