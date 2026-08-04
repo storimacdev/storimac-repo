@@ -25,6 +25,21 @@ const INTERNAL_NARRATION_PATTERNS: RegExp[] = [
   /\bsetting status to\b/i,
 ];
 
+// Phrases meaning the model named its own internal author-type
+// classification (sp01 §3) or referenced its own tool/schema mechanics
+// (sp01 §8) — both explicitly forbidden, in either field, as of the
+// 2026-08-04 fix. Phrase-level, not bare-word matches, so legitimate story
+// text using words like "architect" or "discoverer" doesn't false-positive.
+const AUTHOR_TYPE_AND_SCHEMA_LEAK_PATTERNS: RegExp[] = [
+  /\bis an? (?:Explorer|Discoverer|Architect|Reviser)\b/i,
+  /\bleaning (?:Explorer|Discoverer|Architect|Reviser)\b/i,
+  /\bType [ABCD]\b/i,
+  /\bemit_turn\b/i,
+  /\b(?:the\s+)?reply\s+(?:field|must (?:stay|be))\b/i,
+  /\b(?:the\s+)?context\s+field\b/i,
+  /\btool_choice\b/i,
+];
+
 // A handful of distinctive phrases lifted from sp01 itself — if a reply
 // contains one of these near-verbatim, the model is echoing its own
 // instructions rather than conversing. Cheap substring check, not a full
@@ -43,15 +58,17 @@ export type TurnHeuristics = {
   isQuestionnaireDump: boolean;
   narrationLeakMatches: string[];
   promptLeakMatches: string[];
+  authorTypeOrSchemaLeakMatches: string[];
 };
 
 /**
  * `reply` and `context` are scanned differently: the questionnaire-dump
  * check is specifically about `reply`'s numbered-list format, so it stays
- * reply-only. The narration/prompt-leak checks are about the model leaking
- * internal bookkeeping or echoing its own instructions - sp01 §8 forbids
- * that "in either field" now that reasoning prose lives in `context`
- * instead of `reply`, so both fields are scanned for those two checks.
+ * reply-only. The narration/prompt-leak/author-type-or-schema-leak checks
+ * are about the model leaking internal bookkeeping or echoing its own
+ * instructions - sp01 §8 forbids that "in either field" now that reasoning
+ * prose lives in `context` instead of `reply`, so all three are scanned
+ * for both fields.
  */
 export function evaluateTurn(reply: string, context: string): TurnHeuristics {
   const questionCount = (reply.match(/\?/g) ?? []).length;
@@ -65,11 +82,16 @@ export function evaluateTurn(reply: string, context: string): TurnHeuristics {
     combined.includes(tell)
   );
 
+  const authorTypeOrSchemaLeakMatches = AUTHOR_TYPE_AND_SCHEMA_LEAK_PATTERNS.filter((re) =>
+    re.test(combined)
+  ).map((re) => re.source);
+
   return {
     questionCount,
     isQuestionnaireDump: questionCount > 3,
     narrationLeakMatches,
     promptLeakMatches,
+    authorTypeOrSchemaLeakMatches,
   };
 }
 
@@ -90,6 +112,11 @@ export function logTurnHeuristics(reply: string, context: string, turnId: string
   if (h.promptLeakMatches.length > 0) {
     console.warn(
       `[turn-guardrail] system-prompt leak turn ${turnId}: matched ${h.promptLeakMatches.join(", ")}`
+    );
+  }
+  if (h.authorTypeOrSchemaLeakMatches.length > 0) {
+    console.warn(
+      `[turn-guardrail] author-type or schema leak turn ${turnId}: matched ${h.authorTypeOrSchemaLeakMatches.join(", ")}`
     );
   }
 
