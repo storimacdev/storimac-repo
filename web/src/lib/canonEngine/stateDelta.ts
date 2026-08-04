@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
+import { PROJECT1_ELEMENT_IDS } from "./elementRegistry";
 
 /**
  * Structured state-delta schema — GitHub issue #9, PRD §6.2. Validated
@@ -29,7 +30,12 @@ export const EMIT_TURN_TOOL: Anthropic.Tool = {
         items: {
           type: "object",
           properties: {
-            element_id: { type: "string" },
+            element_id: {
+              type: "string",
+              enum: PROJECT1_ELEMENT_IDS,
+              description:
+                "The canonical element ID this update is for - always pick the closest match from the enum. Never invent a new key; every fact captured during the interview belongs in one of these fixed slots.",
+            },
             status: { type: "string", enum: ["Exploring", "Working", "Confirmed", "Parked"] },
             value: { description: "Author-facing value. Never a catalog/retrieval code - see retrieval_code." },
             retrieval_code: { description: "Internal-only catalog code (e.g. a 101 Story Formats code like A05), if applicable. Never author-facing." },
