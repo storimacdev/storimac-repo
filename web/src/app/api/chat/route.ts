@@ -204,7 +204,7 @@ export async function POST(req: NextRequest) {
               `- ${f.code}: ${f.coreDefinition} | Dramatic Question: ${f.coreDramaticQuestion} | Plot Engine: ${f.engines.plot} | Story Engine: ${f.engines.story} | Theme Engine: ${f.engines.theme} | Common Mistakes: ${f.commonMistakes.join("; ")}`
           )
           .join("\n");
-        system += `\n\n[Stage 2 format candidates — retrieved from the 101 Story Formats index, internal grounding only. Reason over these to diagnose 1 Primary Format + 0-2 Supporting Formats. Do NOT speak a format's name or code aloud in your conversational reply — only reference them internally and in the eventual Stage 8 document; discuss the story using its qualities (dramatic question, engines, common pitfalls), not its catalog label. Emit the diagnosed format(s)' codes via the retrieval_code field on your structured update.]\n${candidateLines}`;
+        system += `\n\n[Stage 2 format candidates — retrieved from the 101 Story Formats index, internal grounding only. Reason over these to diagnose 1 Primary Format + 0-2 Supporting Formats. Do NOT speak a format's name or code aloud in your conversational reply — only reference them internally and in the app-generated Story Foundation Document; discuss the story using its qualities (dramatic question, engines, common pitfalls), not its catalog label. Emit the diagnosed format(s)' codes via the retrieval_code field on your structured update.]\n${candidateLines}`;
       } else {
         console.warn(`[chat] Stage 2 reached with no usable Stage 1 answers for story ${storyId} - format retrieval skipped, no grounding injected this turn.`);
       }

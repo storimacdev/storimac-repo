@@ -9,7 +9,7 @@
 
 // Phrases that would mean the model is narrating its own internal
 // stage/depth/canon bookkeeping instead of just conversing naturally — the
-// system prompt (sp01 §7 "OPERATIONAL RESPONSE WRITING RULE") forbids this,
+// system prompt (sp01 §8 "OPERATIONAL RESPONSE WRITING RULE") forbids this,
 // this is the app-side detector for when it slips through anyway.
 const INTERNAL_NARRATION_PATTERNS: RegExp[] = [
   /\bDevelop depth\b/i,
@@ -30,13 +30,25 @@ const INTERNAL_NARRATION_PATTERNS: RegExp[] = [
 // (sp01 §8) — both explicitly forbidden, in either field, as of the
 // 2026-08-04 fix. Phrase-level, not bare-word matches, so legitimate story
 // text using words like "architect" or "discoverer" doesn't false-positive.
-const AUTHOR_TYPE_AND_SCHEMA_LEAK_PATTERNS: RegExp[] = [
-  /\bis an? (?:Explorer|Discoverer|Architect|Reviser)\b/i,
-  /\bleaning (?:Explorer|Discoverer|Architect|Reviser)\b/i,
-  /\bType [ABCD]\b/i,
+const AUTHOR_TYPE_OR_SCHEMA_LEAK_PATTERNS: RegExp[] = [
+  // Case-sensitive on purpose: the leaked label is always capitalized as a
+  // proper category name ("a Discoverer", "leaning Architect"); the
+  // lowercase common noun ("an architect", "a reviser of old maps") is
+  // ordinary story prose and must not match.
+  /\bis an? (?:Explorer|Discoverer|Architect|Reviser)\b/,
+  /\bleaning (?:Explorer|Discoverer|Architect|Reviser)\b/,
+  // Case-sensitive, and excludes the common "Type A personality" idiom,
+  // which shows up in legitimate character description.
+  /\bType [ABCD]\b(?!\s+personality)/,
   /\bemit_turn\b/i,
-  /\b(?:the\s+)?reply\s+(?:field|must (?:stay|be))\b/i,
-  /\b(?:the\s+)?context\s+field\b/i,
+  // Narrowed to the schema self-reference itself ("the reply field", or
+  // the exact leaked phrasing "reply must stay a short..."), not any
+  // ordinary sentence about a character's reply ("his reply must be curt").
+  /\bthe reply field\b/i,
+  /\breply(?:'s)? must stay a short\b/i,
+  // Excludes "the context field of the story/narrative" - a legitimate way
+  // to describe narrative context, not the schema field.
+  /\bthe context field\b(?!\s+of\s+the\s+(?:story|narrative))/i,
   /\btool_choice\b/i,
 ];
 
@@ -82,7 +94,7 @@ export function evaluateTurn(reply: string, context: string): TurnHeuristics {
     combined.includes(tell)
   );
 
-  const authorTypeOrSchemaLeakMatches = AUTHOR_TYPE_AND_SCHEMA_LEAK_PATTERNS.filter((re) =>
+  const authorTypeOrSchemaLeakMatches = AUTHOR_TYPE_OR_SCHEMA_LEAK_PATTERNS.filter((re) =>
     re.test(combined)
   ).map((re) => re.source);
 

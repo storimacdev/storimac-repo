@@ -50,7 +50,7 @@ export const EMIT_TURN_TOOL: Anthropic.Tool = {
       },
       context: {
         type: "string",
-        description: "Your reasoning, story analysis, and creative rationale for this turn - everything that used to go in reply's prose now goes here instead. Shown to the author separately from chat, never inside the numbered reply list. Required every turn, even if brief. Keep it to a few short paragraphs at most - this is internal reasoning, not a transcript.",
+        description: "Your reasoning and analysis about the STORY - character psychology, thematic tension, structural craft, what you noticed, why you're asking what you're asking. Shown to the author separately from chat, never inside the numbered reply list. Required every turn, even if brief. Keep it to a few short paragraphs at most. Never name your internal author-type classification, reference field/tool names, or compile/output the Story Foundation Document here - see the system prompt's Operational Response Writing Rule.",
       },
       resolution: {
         type: "string",
