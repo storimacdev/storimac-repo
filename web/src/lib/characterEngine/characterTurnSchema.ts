@@ -1,14 +1,28 @@
 import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
+import { CHARACTER_FIELD_IDS } from "./factRegistry";
 
 /**
- * Project 2 turn schema/tool — GitHub issues #26/#27, reference: Project
- * 1's stateDelta.ts + extractTurn.ts's now-generic StructuredDeltaExtractor
- * (ARCHITECTURE.md §2). Deliberately minimal: no per-fact canon-tracking
- * field yet (that's issue #29's job, milestone M2) — just enough structured
- * output to drive sequential-character enforcement and the reply/context UI
- * split already proven on Project 1.
+ * Project 2 turn schema/tool — GitHub issues #26/#27 (base turn shape) and
+ * #29 (per-fact canon-tracking `updates`). Reference: Project 1's
+ * stateDelta.ts + extractTurn.ts's now-generic StructuredDeltaExtractor
+ * (ARCHITECTURE.md §2). Issue #29's architecture note: configure the
+ * shared Canon Engine with Project 2's own field vocabulary, not an
+ * independent state store - same pattern as Project 1's stateDelta.ts.
+ * `updates`' `field` enum is deliberately scoped to only the Psychological
+ * Engine's 11 known fields (factRegistry.ts) - see that file's own comment
+ * for why the other 5 interview stages aren't covered yet.
  */
+
+export const FactUpdateSchema = z.object({
+  field: z.string().min(1),
+  value: z.unknown().optional(),
+  state: z.enum(["Exploring", "Working", "Confirmed", "Deferred"]).optional(),
+  rationale: z.string().optional(),
+  depends_on: z.array(z.string()).optional(),
+});
+
+export type FactUpdateInput = z.infer<typeof FactUpdateSchema>;
 
 export const CharacterTurnSchema = z.object({
   reply: z.string().min(1),
@@ -16,6 +30,7 @@ export const CharacterTurnSchema = z.object({
   current_stage: z.number().int().min(1).max(6),
   character_signed_off: z.boolean(),
   context: z.string().min(1),
+  updates: z.array(FactUpdateSchema),
 });
 
 export type CharacterTurn = z.infer<typeof CharacterTurnSchema>;
@@ -52,7 +67,38 @@ export const EMIT_CHARACTER_TURN_TOOL: Anthropic.Tool = {
         description:
           "Your reasoning, psychological analysis, and creative rationale for this turn - everything that used to go in reply's prose now goes here instead. Shown to the author separately from chat, never inside the numbered reply list. Required every turn, even if brief. Keep it to a few short paragraphs at most - this is internal reasoning, not a transcript.",
       },
+      updates: {
+        type: "array",
+        description:
+          "Canon fact changes proposed this turn, for current_character only. Empty array if none - most turns during Stages 1, 3, 4, 5, and 6 will have none, since only the Psychological Engine's fields (Stage 2) are tracked as facts today.",
+        items: {
+          type: "object",
+          properties: {
+            field: {
+              type: "string",
+              enum: CHARACTER_FIELD_IDS,
+              description:
+                "The canonical fact field this update is for - always pick the closest match from the enum. Never invent a new key.",
+            },
+            value: { description: "Author-facing value for this fact." },
+            state: {
+              type: "string",
+              enum: ["Exploring", "Working", "Confirmed", "Deferred"],
+              description:
+                "This fact's canon state. Only Confirmed facts will ever appear in the compiled Character Bible.",
+            },
+            rationale: { type: "string" },
+            depends_on: {
+              type: "array",
+              items: { type: "string", enum: CHARACTER_FIELD_IDS },
+              description:
+                "Other field names (from this same character) this fact causally depends on - e.g. core_flaw depends on core_wound or false_belief. Used to verify the psychological chain stays traceable.",
+            },
+          },
+          required: ["field"],
+        },
+      },
     },
-    required: ["reply", "current_character", "current_stage", "character_signed_off", "context"],
+    required: ["reply", "current_character", "current_stage", "character_signed_off", "context", "updates"],
   },
 };
