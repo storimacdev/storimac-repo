@@ -47,6 +47,32 @@ function slugifyCharacterName(name: string): string {
     .replace(/^_+|_+$/g, "");
 }
 
+// current_character is model-emitted free text, not a closed enum (unlike
+// P1's element_id) - two turns naming the same character slightly
+// differently ("Deva" vs "Deva Okonkwo-Price") would otherwise fragment
+// that character's facts across two unrelated charIds. Resolve against the
+// Story Foundation's cast list (already loaded in-route) as the source of
+// truth: exact match first, then a unique prefix match either direction,
+// falling back to raw slugify (logged) only when the cast list can't
+// disambiguate - e.g. a character the model introduced that isn't in the
+// Foundation yet.
+function resolveCharId(currentCharacter: string, cast: { name: string }[], turnId: string): string {
+  const normalized = currentCharacter.trim().toLowerCase();
+  const exact = cast.find((m) => m.name.trim().toLowerCase() === normalized);
+  if (exact) return slugifyCharacterName(exact.name);
+
+  const prefixMatches = cast.filter((m) => {
+    const castName = m.name.trim().toLowerCase();
+    return castName.startsWith(normalized) || normalized.startsWith(castName);
+  });
+  if (prefixMatches.length === 1) return slugifyCharacterName(prefixMatches[0].name);
+
+  console.warn(
+    `[character-chat] current_character "${currentCharacter}" on turn ${turnId} didn't match a unique cast member (${prefixMatches.length} candidates) - falling back to raw slugify`
+  );
+  return slugifyCharacterName(currentCharacter);
+}
+
 function toFactUpdate(u: FactUpdateInput, charId: string): ElementUpdate {
   const patch: ElementUpdate["patch"] = {};
   if (u.value !== undefined) patch.value = u.value;
@@ -163,16 +189,15 @@ export async function POST(req: NextRequest) {
       throw err;
     }
 
-    const charId = slugifyCharacterName(delta.current_character);
-    const factUpdates = delta.updates.map((u) => toFactUpdate(u, charId));
-    for (const update of factUpdates) {
-      const field = update.element_id.slice(charId.length + 1);
-      if (!isKnownFieldId(field)) {
+    const charId = resolveCharId(delta.current_character, foundation.cast, turnId);
+    for (const u of delta.updates) {
+      if (!isKnownFieldId(u.field)) {
         console.warn(
-          `[character-chat] unknown field "${field}" on turn ${turnId} - not in the Project 2 canonical registry, writing as-is`
+          `[character-chat] unknown field "${u.field}" on turn ${turnId} - not in the Project 2 canonical registry, writing as-is`
         );
       }
     }
+    const factUpdates = delta.updates.map((u) => toFactUpdate(u, charId));
     if (factUpdates.length > 0) {
       try {
         await applyStateDelta(storyId, factUpdates, turnId, CHARACTER_FACTS_COLLECTION);
