@@ -7,12 +7,18 @@ import { requireUser } from "@/lib/session";
 import { errorResponse } from "@/lib/apiErrors";
 import { getMembership } from "@/lib/workspace/workspaceStore";
 import { getStory, appendMessage, listMessages, CHARACTER_MESSAGES_COLLECTION } from "@/lib/canonEngine/storyStore";
+import { applyStateDelta, CanonConflictError, CHARACTER_FACTS_COLLECTION, type ElementUpdate } from "@/lib/canonEngine/canonStore";
 import { extractTurn, TurnValidationError } from "@/lib/canonEngine/extractTurn";
 import { RateLimitTimeoutError } from "@/lib/rateLimit/anthropicGate";
 import { ingestFoundation } from "@/lib/characterEngine/ingestFoundation";
 import { computePriorityMatrix } from "@/lib/characterEngine/priorityMatrix";
 import { getDepthLabel } from "@/lib/characterEngine/depthLabels";
-import { CharacterTurnSchema, EMIT_CHARACTER_TURN_TOOL } from "@/lib/characterEngine/characterTurnSchema";
+import { isKnownFieldId } from "@/lib/characterEngine/factRegistry";
+import {
+  CharacterTurnSchema,
+  EMIT_CHARACTER_TURN_TOOL,
+  type FactUpdateInput,
+} from "@/lib/characterEngine/characterTurnSchema";
 
 export const runtime = "nodejs";
 
@@ -33,6 +39,23 @@ const CHARACTER_MESSAGE_WINDOW = 20;
  * sequential-character enforcement (prompt-driven) and the reply/context
  * turn contract already proven on Project 1.
  */
+function slugifyCharacterName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function toFactUpdate(u: FactUpdateInput, charId: string): ElementUpdate {
+  const patch: ElementUpdate["patch"] = {};
+  if (u.value !== undefined) patch.value = u.value;
+  if (u.state !== undefined) patch.status = u.state === "Deferred" ? "Parked" : u.state;
+  if (u.rationale !== undefined) patch.rationale = u.rationale;
+  if (u.depends_on !== undefined) patch.depends_on = u.depends_on.map((f) => `${charId}.${f}`);
+  return { element_id: `${charId}.${u.field}`, patch };
+}
+
 export async function POST(req: NextRequest) {
   if (!process.env.ANTHROPIC_API_KEY) {
     return NextResponse.json(
@@ -138,6 +161,25 @@ export async function POST(req: NextRequest) {
         );
       }
       throw err;
+    }
+
+    const charId = slugifyCharacterName(delta.current_character);
+    const factUpdates = delta.updates.map((u) => toFactUpdate(u, charId));
+    for (const update of factUpdates) {
+      const field = update.element_id.slice(charId.length + 1);
+      if (!isKnownFieldId(field)) {
+        console.warn(
+          `[character-chat] unknown field "${field}" on turn ${turnId} - not in the Project 2 canonical registry, writing as-is`
+        );
+      }
+    }
+    if (factUpdates.length > 0) {
+      try {
+        await applyStateDelta(storyId, factUpdates, turnId, CHARACTER_FACTS_COLLECTION);
+      } catch (err) {
+        if (!(err instanceof CanonConflictError)) throw err;
+        console.warn(`[character-chat] unscreened conflict applying fact updates on turn ${turnId}:`, err.message);
+      }
     }
 
     await appendMessage(
