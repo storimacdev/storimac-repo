@@ -15,20 +15,27 @@ export class CanonConflictError extends Error {
   }
 }
 
-function elementsCollection(storyId: string) {
-  return getDb().collection("stories").doc(storyId).collection("elements");
+/** Project 2's per-character fact subcollection name (issue #29) - a
+ * sibling to Project 1's default "elements" collection, sharing the same
+ * transactional store/status-transition logic via the `collection`
+ * parameter added to every function below. */
+export const CHARACTER_FACTS_COLLECTION = "characterFacts";
+
+function elementsCollection(storyId: string, collection: string = "elements") {
+  return getDb().collection("stories").doc(storyId).collection(collection);
 }
 
 export async function getElement(
   storyId: string,
-  elementId: string
+  elementId: string,
+  collection: string = "elements"
 ): Promise<CanonElement | null> {
-  const snap = await elementsCollection(storyId).doc(elementId).get();
+  const snap = await elementsCollection(storyId, collection).doc(elementId).get();
   return snap.exists ? (snap.data() as CanonElement) : null;
 }
 
-export async function listElements(storyId: string): Promise<CanonElement[]> {
-  const snap = await elementsCollection(storyId).get();
+export async function listElements(storyId: string, collection: string = "elements"): Promise<CanonElement[]> {
+  const snap = await elementsCollection(storyId, collection).get();
   return snap.docs.map((d) => d.data() as CanonElement);
 }
 
@@ -67,15 +74,16 @@ export type ElementUpdate = {
 export async function applyStateDelta(
   storyId: string,
   updates: ElementUpdate[],
-  turnId: string
+  turnId: string,
+  collection: string = "elements"
 ): Promise<CanonElement[]> {
   if (updates.length === 0) return [];
 
   const db = getDb();
-  const collection = elementsCollection(storyId);
+  const elementsRef = elementsCollection(storyId, collection);
 
   return db.runTransaction(async (tx) => {
-    const refs = updates.map((u) => collection.doc(u.element_id));
+    const refs = updates.map((u) => elementsRef.doc(u.element_id));
     const snaps = await Promise.all(refs.map((ref) => tx.get(ref)));
 
     const results: CanonElement[] = [];
