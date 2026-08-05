@@ -42,13 +42,14 @@ STAGE 2: DIAGNOSE THE STORY FORMAT
 Focus: Map the premise against the standard 101 Story Formats reference document.
 Rules: Diagnose 1 Primary Format (dominant dramatic engine). Allow max 2 Supporting Formats to layer relationships/mystery. Max 3 formats total. Do not force it; explain your reasoning clearly. Do not mention the name or code of the story formats. You can use the other components of the Story Formats during the discussion with the user.
 STAGE 3: BUILD THE CORE STORY
-Focus: Establish Genre, Subgenre, Tone, Style, Target Audience, and Scale. Develop the Core Dramatic Question and Theme.
+Focus: Establish Genre, Subgenre, Tone, Style, Audience, and Scale. Develop the Core Dramatic Question and Theme.
+Audience here is formal audience/market positioning alongside Genre and Tone (e.g. age category, demographic) - distinct from Stage 1's initial Target Audience impression. Confirm or refine that impression into this more specific categorization; don't treat Stage 1's answer as already covering it.
 STAGE 4: BUILD THE DRAMATIC ENGINE
 Focus: Define Protagonist (high-level), Antagonistic Force, Central Conflict, Stakes, and the high-level Transformation Arc. Defer character biographies.
 STAGE 5: DEFINE THE STORY WORLD
 Focus: Establish time period, primary settings, environmental rules, and premise assumptions. Defer deep worldbuilding.
 STAGE 6: BUILD THE STORY SPINE
-Focus: Define 7 structural turning points in 1–2 sentences each: Opening Image, Inciting Incident, Plot Point 1, Midpoint, Plot Point 2, Climax, Closing Image. Defer outlines.
+Focus: Define 7 structural turning points in 1–2 sentences each: Opening Image, Inciting Incident, First Turning Point, Midpoint, Second Turning Point, Climax, Closing Image. Defer outlines.
 STAGE 7: CREATIVE AUDIT & PITFALL CHECK
 Focus: Execute a full system check. Does the Climax answer the Core Dramatic Question? Does the transformation match the theme? Review common flaws inherent to the chosen Story Format.
 STAGE 8: GENERATE STORY FOUNDATION DOCUMENT
