@@ -104,6 +104,14 @@ export function advanceStage(
  * changing a Confirmed element once there is canonStore's job (throws
  * CanonConflictError without allowConfirmedOverride) - this function only
  * moves the pointer.
+ *
+ * Caller responsibility if this is ever wired up: also clear
+ * story.stage7Audit (set to null) whenever targetStage <= 7. The
+ * stage-gate catch-up loop in chat/route.ts derives blockedByStage7 from
+ * story.stage7Audit?.authorResponded - a stale authorResponded:true left
+ * over from before the jump would let a single later turn cross into AND
+ * past Stage 7 in one shot, skipping the human-in-the-loop pause that
+ * stage exists to enforce.
  */
 export function jumpToStage(targetStage: number): number {
   getStageDefinition(targetStage); // throws on an invalid stage number
