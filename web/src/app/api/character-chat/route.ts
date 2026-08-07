@@ -217,7 +217,9 @@ export async function POST(req: NextRequest) {
 
       const lastActiveMessage = [...recentMessages]
         .reverse()
-        .find((m) => m.role === "assistant" && m.current_character === resolution.activeProgress.characterName);
+        .find(
+          (m) => m.role === "assistant" && m.current_character === resolution.activeProgress.characterName && m.context !== undefined
+        );
       const repeatedQuestion =
         lastActiveMessage?.content ?? "What would you like to explore next for this character?";
       const redirectReply = `Let's finish ${resolution.activeProgress.characterName}'s profile first — we're at Stage ${resolution.activeProgress.stage} (${P2_STAGE_NAMES[resolution.activeProgress.stage]}).\n\n${repeatedQuestion}`;
