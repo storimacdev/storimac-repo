@@ -6,7 +6,14 @@ import { logTurnHeuristics } from "@/lib/turnGuardrails";
 import { requireUser } from "@/lib/session";
 import { errorResponse } from "@/lib/apiErrors";
 import { getMembership } from "@/lib/workspace/workspaceStore";
-import { getStory, appendMessage, listMessages, CHARACTER_MESSAGES_COLLECTION } from "@/lib/canonEngine/storyStore";
+import {
+  getStory,
+  appendMessage,
+  listMessages,
+  CHARACTER_MESSAGES_COLLECTION,
+  setP2State,
+  type P2State,
+} from "@/lib/canonEngine/storyStore";
 import { applyStateDelta, CanonConflictError, CHARACTER_FACTS_COLLECTION, type ElementUpdate } from "@/lib/canonEngine/canonStore";
 import { extractTurn, TurnValidationError } from "@/lib/canonEngine/extractTurn";
 import { RateLimitTimeoutError } from "@/lib/rateLimit/anthropicGate";
@@ -14,6 +21,7 @@ import { ingestFoundation } from "@/lib/characterEngine/ingestFoundation";
 import { computePriorityMatrix } from "@/lib/characterEngine/priorityMatrix";
 import { getDepthLabel } from "@/lib/characterEngine/depthLabels";
 import { isKnownFieldId } from "@/lib/characterEngine/factRegistry";
+import { resolveCharacterTurn, P2_STAGE_NAMES } from "@/lib/characterEngine/characterFsm";
 import {
   CharacterTurnSchema,
   EMIT_CHARACTER_TURN_TOOL,
@@ -32,12 +40,14 @@ const CHARACTER_MESSAGE_WINDOW = 20;
 
 /**
  * The live Character Bible interview turn — issues #26/#27, reference:
- * web/src/app/api/chat/route.ts (Project 1's own turn handler). Deliberately
- * lighter: no stage-gate/canon-element/conflict-resolution/Stage-7-audit
- * machinery, since none of that exists for Project 2 yet (see
- * docs/superpowers/specs/2026-08-01-p2-interview-engine-design.md) - just
- * sequential-character enforcement (prompt-driven) and the reply/context
- * turn contract already proven on Project 1.
+ * web/src/app/api/chat/route.ts (Project 1's own turn handler). Issue #26
+ * (design: docs/superpowers/specs/2026-08-07-p2-sequential-interview-engine-design.md)
+ * added a hard app-level single-active-character lock and app-computed
+ * stage clamping via characterFsm.ts's resolveCharacterTurn - still no
+ * content-based (fact-completeness) stage-gating or conflict-resolution
+ * machinery, since P2 doesn't have a defined required-field vocabulary
+ * per stage yet (that's issue #28's job for Stage 2; #30 for conflict
+ * resolution).
  */
 function slugifyCharacterName(name: string): string {
   return name
@@ -190,6 +200,52 @@ export async function POST(req: NextRequest) {
     }
 
     const charId = resolveCharId(delta.current_character, foundation.cast, turnId);
+    const p2State: P2State = story.p2 ?? { activeCharacterId: null, characterProgress: {} };
+    const resolution = resolveCharacterTurn(
+      p2State,
+      charId,
+      delta.current_character,
+      delta.current_stage,
+      delta.character_signed_off,
+      delta.switch_override
+    );
+
+    if (!resolution.allowed) {
+      console.warn(
+        `[character-chat] blocked switch attempt to "${delta.current_character}" on turn ${turnId} - locked to "${resolution.activeProgress.characterName}" (no switch_override)`
+      );
+
+      const lastActiveMessage = [...recentMessages]
+        .reverse()
+        .find(
+          (m) => m.role === "assistant" && m.current_character === resolution.activeProgress.characterName && m.context !== undefined
+        );
+      const repeatedQuestion =
+        lastActiveMessage?.content ?? "What would you like to explore next for this character?";
+      const redirectReply = `Let's finish ${resolution.activeProgress.characterName}'s profile first — we're at Stage ${resolution.activeProgress.stage} (${P2_STAGE_NAMES[resolution.activeProgress.stage]}).\n\n${repeatedQuestion}`;
+
+      await appendMessage(
+        storyId,
+        {
+          role: "assistant",
+          content: redirectReply,
+          ts: new Date().toISOString(),
+          turnId,
+          current_character: resolution.activeProgress.characterName,
+          current_stage: resolution.activeProgress.stage,
+        },
+        CHARACTER_MESSAGES_COLLECTION
+      );
+
+      return NextResponse.json({
+        reply: redirectReply,
+        context: "",
+        current_character: resolution.activeProgress.characterName,
+        current_stage: resolution.activeProgress.stage,
+        character_signed_off: false,
+      });
+    }
+
     for (const u of delta.updates) {
       if (!isKnownFieldId(u.field)) {
         console.warn(
@@ -207,6 +263,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    await setP2State(storyId, resolution.nextP2State);
+
     await appendMessage(
       storyId,
       {
@@ -216,7 +274,7 @@ export async function POST(req: NextRequest) {
         turnId,
         context: delta.context,
         current_character: delta.current_character,
-        current_stage: delta.current_stage,
+        current_stage: resolution.stage,
       },
       CHARACTER_MESSAGES_COLLECTION
     );
@@ -226,8 +284,8 @@ export async function POST(req: NextRequest) {
       reply: delta.reply,
       context: delta.context,
       current_character: delta.current_character,
-      current_stage: delta.current_stage,
-      character_signed_off: delta.character_signed_off,
+      current_stage: resolution.stage,
+      character_signed_off: resolution.status === "signed_off",
     });
   } catch (err) {
     if (err instanceof Anthropic.APIError) {
