@@ -23,6 +23,14 @@ import { getDepthLabel } from "@/lib/characterEngine/depthLabels";
 import { isKnownFieldId } from "@/lib/characterEngine/factRegistry";
 import { resolveCharacterTurn, P2_STAGE_NAMES } from "@/lib/characterEngine/characterFsm";
 import {
+  claimsTraceability,
+  isTraceable,
+  isAlreadyConfirmed,
+  CHAIN_ENFORCED_FIELDS,
+  CHAIN_ROOT_FIELDS,
+  ENFORCED_TIERS,
+} from "@/lib/characterEngine/causalChain";
+import {
   CharacterTurnSchema,
   EMIT_CHARACTER_TURN_TOOL,
   type FactUpdateInput,
@@ -246,14 +254,56 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    const castIndex = foundation.cast.findIndex((m) => slugifyCharacterName(m.name) === charId);
+    const tier = castIndex >= 0 ? matrix[castIndex].tier : null;
+
+    // Roots being confirmed in this same turn's batch - a Firestore read for
+    // isTraceable would always miss these (applyStateDelta hasn't persisted
+    // the turn's transaction yet), so a correctly-chained same-turn proposal
+    // (e.g. core_wound: Confirmed alongside core_flaw: Confirmed,
+    // depends_on: ["core_wound"]) needs this to avoid a false downgrade.
+    const rootsConfirmedThisTurn = new Set(
+      delta.updates.filter((x) => CHAIN_ROOT_FIELDS.includes(x.field) && x.state === "Confirmed").map((x) => x.field)
+    );
+
+    const enforcedUpdates: FactUpdateInput[] = [];
     for (const u of delta.updates) {
       if (!isKnownFieldId(u.field)) {
         console.warn(
           `[character-chat] unknown field "${u.field}" on turn ${turnId} - not in the Project 2 canonical registry, writing as-is`
         );
       }
+
+      const enforceChain =
+        tier !== null &&
+        ENFORCED_TIERS.includes(tier) &&
+        CHAIN_ENFORCED_FIELDS.includes(u.field) &&
+        u.state === "Confirmed";
+
+      // Never re-litigate an already-settled fact: undoing a Confirmed fact
+      // is the separate Conflict Resolution flow's job (#10/#30), not this
+      // check's, and applyStateDelta rejects an already-Confirmed element's
+      // status change without allowConfirmedOverride - attempting the
+      // downgrade here would abort the whole turn's fact batch via the
+      // CanonConflictError catch below.
+      if (enforceChain && (await isAlreadyConfirmed(storyId, charId, u.field))) {
+        enforcedUpdates.push(u);
+        continue;
+      }
+
+      if (
+        enforceChain &&
+        !(claimsTraceability(u.depends_on) && (await isTraceable(storyId, charId, u.depends_on, rootsConfirmedThisTurn)))
+      ) {
+        console.warn(
+          `[character-chat] ${u.field} for ${charId} not traceable to a Confirmed Wound/Belief on turn ${turnId} - downgraded Confirmed->Working`
+        );
+        enforcedUpdates.push({ ...u, state: "Working" });
+      } else {
+        enforcedUpdates.push(u);
+      }
     }
-    const factUpdates = delta.updates.map((u) => toFactUpdate(u, charId));
+    const factUpdates = enforcedUpdates.map((u) => toFactUpdate(u, charId));
     if (factUpdates.length > 0) {
       try {
         await applyStateDelta(storyId, factUpdates, turnId, CHARACTER_FACTS_COLLECTION);
