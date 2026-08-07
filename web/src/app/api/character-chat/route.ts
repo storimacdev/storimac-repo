@@ -22,6 +22,7 @@ import { computePriorityMatrix } from "@/lib/characterEngine/priorityMatrix";
 import { getDepthLabel } from "@/lib/characterEngine/depthLabels";
 import { isKnownFieldId } from "@/lib/characterEngine/factRegistry";
 import { resolveCharacterTurn, P2_STAGE_NAMES } from "@/lib/characterEngine/characterFsm";
+import { claimsTraceability, isTraceable, CHAIN_ENFORCED_FIELDS, ENFORCED_TIERS } from "@/lib/characterEngine/causalChain";
 import {
   CharacterTurnSchema,
   EMIT_CHARACTER_TURN_TOOL,
@@ -246,14 +247,32 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    const castIndex = foundation.cast.findIndex((m) => slugifyCharacterName(m.name) === charId);
+    const tier = castIndex >= 0 ? matrix[castIndex].tier : null;
+
+    const enforcedUpdates: FactUpdateInput[] = [];
     for (const u of delta.updates) {
       if (!isKnownFieldId(u.field)) {
         console.warn(
           `[character-chat] unknown field "${u.field}" on turn ${turnId} - not in the Project 2 canonical registry, writing as-is`
         );
       }
+
+      const enforceChain =
+        tier !== null &&
+        ENFORCED_TIERS.includes(tier) &&
+        CHAIN_ENFORCED_FIELDS.includes(u.field) &&
+        u.state === "Confirmed";
+      if (enforceChain && !(claimsTraceability(u.depends_on) && (await isTraceable(storyId, charId, u.depends_on)))) {
+        console.warn(
+          `[character-chat] ${u.field} for ${charId} not traceable to a Confirmed Wound/Belief on turn ${turnId} - downgraded Confirmed->Working`
+        );
+        enforcedUpdates.push({ ...u, state: "Working" });
+      } else {
+        enforcedUpdates.push(u);
+      }
     }
-    const factUpdates = delta.updates.map((u) => toFactUpdate(u, charId));
+    const factUpdates = enforcedUpdates.map((u) => toFactUpdate(u, charId));
     if (factUpdates.length > 0) {
       try {
         await applyStateDelta(storyId, factUpdates, turnId, CHARACTER_FACTS_COLLECTION);
