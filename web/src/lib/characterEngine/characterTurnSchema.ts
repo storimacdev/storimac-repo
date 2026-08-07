@@ -11,7 +11,9 @@ import { CHARACTER_FIELD_IDS } from "./factRegistry";
  * independent state store - same pattern as Project 1's stateDelta.ts.
  * `updates`' `field` enum is deliberately scoped to only the Psychological
  * Engine's 11 known fields (factRegistry.ts) - see that file's own comment
- * for why the other 5 interview stages aren't covered yet.
+ * for why the other 5 interview stages aren't covered yet. `switch_override`
+ * (issue #26) is consumed by characterFsm.ts's resolveCharacterTurn, not
+ * used directly in this file.
  */
 
 export const FactUpdateSchema = z.object({
@@ -29,6 +31,7 @@ export const CharacterTurnSchema = z.object({
   current_character: z.string().min(1),
   current_stage: z.number().int().min(1).max(6),
   character_signed_off: z.boolean(),
+  switch_override: z.boolean(),
   context: z.string().min(1),
   updates: z.array(FactUpdateSchema),
 });
@@ -61,6 +64,11 @@ export const EMIT_CHARACTER_TURN_TOOL: Anthropic.Tool = {
         type: "boolean",
         description:
           "True only on the turn where current_character completes Stage 6 sign-off. False every other turn, including all of Stages 1-5.",
+      },
+      switch_override: {
+        type: "boolean",
+        description:
+          "True only on a turn where the author has explicitly asked to move to a different character before signing off the current one (e.g. 'let's switch to the antagonist for now'). False every other turn - do not set this just because the conversation touches another character in passing.",
       },
       context: {
         type: "string",
@@ -99,6 +107,6 @@ export const EMIT_CHARACTER_TURN_TOOL: Anthropic.Tool = {
         },
       },
     },
-    required: ["reply", "current_character", "current_stage", "character_signed_off", "context", "updates"],
+    required: ["reply", "current_character", "current_stage", "character_signed_off", "switch_override", "context", "updates"],
   },
 };
