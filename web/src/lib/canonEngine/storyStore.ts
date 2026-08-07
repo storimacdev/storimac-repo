@@ -33,6 +33,23 @@ export interface StoryPendingConflict {
   new_value: unknown;
 }
 
+/** Project 2 per-character interview progress (issue #26). */
+export type P2CharacterStatus = "in_progress" | "deferred" | "signed_off";
+
+export interface P2CharacterProgress {
+  characterName: string;
+  /** 1-6, app-computed ground truth - never trusted raw from the model. */
+  stage: number;
+  status: P2CharacterStatus;
+}
+
+export interface P2State {
+  /** The locked character's charId, or null if no character is currently locked (free to start/resume anyone). */
+  activeCharacterId: string | null;
+  /** Keyed by charId (see character-chat/route.ts's resolveCharId). */
+  characterProgress: Record<string, P2CharacterProgress>;
+}
+
 export interface Story {
   id: string;
   ownerUid: string;
@@ -58,6 +75,12 @@ export interface Story {
    * author's next message after seeing the summary flips it).
    */
   stage7Audit?: import("./stage7Audit").Stage7AuditResult | null;
+  /**
+   * Project 2's per-character interview lock/progress (issue #26).
+   * Optional/nullable since Stories created before this field existed
+   * won't have it in Firestore.
+   */
+  p2?: P2State | null;
 }
 
 export interface StoryMessage {
@@ -216,6 +239,13 @@ export async function setStage7Audit(
   await storiesCollection()
     .doc(storyId)
     .update({ stage7Audit: audit, updatedAt: new Date().toISOString() });
+}
+
+/** Stores Project 2's per-character lock/progress (issue #26) - whole-object replace, same convention as setStage7Audit. */
+export async function setP2State(storyId: string, p2: P2State): Promise<void> {
+  await storiesCollection()
+    .doc(storyId)
+    .update({ p2, updatedAt: new Date().toISOString() });
 }
 
 export interface StoredOutstandingQuestion {
