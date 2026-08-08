@@ -336,17 +336,59 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const alreadyConfirmedFields = new Set<string>();
+    for (const u of delta.updates) {
+      if (u.state === "Confirmed" && (await isAlreadyConfirmed(storyId, charId, u.field))) {
+        alreadyConfirmedFields.add(u.field);
+      }
+    }
+
     const pendingConflictBefore = story.p2PendingConflict ?? null;
-    const conflictResult = processConflict(
+    const conflictResult = processConflict({
       enforcedUpdates,
-      pendingConflictBefore,
+      rawUpdates: delta.updates,
+      pendingConflict: pendingConflictBefore,
       charId,
-      delta.current_character,
-      delta.conflict_detected,
-      delta.conflict_description,
-      delta.resolution,
-      new Date().toISOString()
-    );
+      characterName: delta.current_character,
+      conflictDetected: delta.conflict_detected,
+      conflictDescription: delta.conflict_description,
+      resolution: delta.resolution,
+      ts: new Date().toISOString(),
+      alreadyConfirmedFields,
+    });
+
+    let resolvedEnforcedUpdates = conflictResult.enforcedUpdates;
+    if (
+      conflictResult.resolvedField &&
+      tier !== null &&
+      ENFORCED_TIERS.includes(tier) &&
+      CHAIN_ENFORCED_FIELDS.includes(conflictResult.resolvedField)
+    ) {
+      const resolvedEntry = resolvedEnforcedUpdates.find((u) => u.field === conflictResult.resolvedField);
+      if (
+        resolvedEntry &&
+        resolvedEntry.state === "Confirmed" &&
+        !(claimsTraceability(resolvedEntry.depends_on) && (await isTraceable(storyId, charId, resolvedEntry.depends_on, rootsConfirmedThisTurn)))
+      ) {
+        console.warn(
+          `[character-chat] resolved conflict field "${conflictResult.resolvedField}" for ${charId} still not traceable on turn ${turnId} - downgraded Confirmed->Working`
+        );
+        resolvedEnforcedUpdates = resolvedEnforcedUpdates.map((u) =>
+          u.field === conflictResult.resolvedField ? { ...u, state: "Working" } : u
+        );
+      }
+    }
+
+    const factUpdates = resolvedEnforcedUpdates.map((u) => toFactUpdate(u, charId));
+    if (factUpdates.length > 0) {
+      try {
+        await applyStateDelta(storyId, factUpdates, turnId, CHARACTER_FACTS_COLLECTION);
+      } catch (err) {
+        if (!(err instanceof CanonConflictError)) throw err;
+        console.warn(`[character-chat] unscreened conflict applying fact updates on turn ${turnId}:`, err.message);
+      }
+    }
+
     if (conflictResult.logEntry) {
       console.warn(
         `[character-chat] Story Foundation conflict resolved (${conflictResult.logEntry.resolution}) for ${conflictResult.logEntry.field} on turn ${turnId}`
@@ -363,16 +405,6 @@ export async function POST(req: NextRequest) {
         `[character-chat] Story Foundation conflict detected for ${conflictResult.nextPendingConflict.field} on turn ${turnId}: ${conflictResult.nextPendingConflict.conflictDescription}`
       );
       await setP2PendingConflict(storyId, conflictResult.nextPendingConflict);
-    }
-
-    const factUpdates = conflictResult.enforcedUpdates.map((u) => toFactUpdate(u, charId));
-    if (factUpdates.length > 0) {
-      try {
-        await applyStateDelta(storyId, factUpdates, turnId, CHARACTER_FACTS_COLLECTION);
-      } catch (err) {
-        if (!(err instanceof CanonConflictError)) throw err;
-        console.warn(`[character-chat] unscreened conflict applying fact updates on turn ${turnId}:`, err.message);
-      }
     }
 
     await setP2State(storyId, resolution.nextP2State);
