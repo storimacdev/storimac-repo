@@ -12,8 +12,12 @@
  * source docs yet - inventing names for them now would risk the same
  * sibling-collision bug Project 1 just had fixed, self-inflicted this
  * time. Extend this array (don't create a parallel one) when a later
- * issue (#31 relationships, #34 compiler, or whichever issue covers
- * Stage 1/3/5's fields) defines more fields.
+ * issue (#34 compiler, or whichever issue covers Stage 1/3/5's fields)
+ * defines more single-character fields. Issue #31 (relationships) turned
+ * out NOT to extend this array - a relationship's key is the other
+ * character's ID, which can't be a fixed enum, so it got its own
+ * collection (CHARACTER_RELATIONSHIPS_COLLECTION below) and its own turn-
+ * schema shape (characterTurnSchema.ts's relationship_updates) instead.
  */
 
 export const CHARACTER_FIELD_IDS: string[] = [
@@ -37,3 +41,11 @@ export const CHARACTER_FIELD_IDS: string[] = [
 export function isKnownFieldId(id: string): boolean {
   return CHARACTER_FIELD_IDS.includes(id);
 }
+
+/** Project 2's relationship-graph collection name (issue #31) - a second
+ * P2 collection alongside CHARACTER_FACTS_COLLECTION, keyed by composite
+ * IDs {charId}.{otherCharId} rather than {charId}.{field}, since a
+ * relationship's "field name" would have to be the other character's ID -
+ * which can't be a fixed enum like CHARACTER_FIELD_IDS since the cast is
+ * dynamic per story. */
+export const CHARACTER_RELATIONSHIPS_COLLECTION = "characterRelationships";
