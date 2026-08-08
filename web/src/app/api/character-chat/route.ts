@@ -15,6 +15,8 @@ import {
   type P2State,
   setP2PendingConflict,
   appendCharacterConflictLog,
+  appendOutstandingQuestions,
+  type StoredOutstandingQuestion,
 } from "@/lib/canonEngine/storyStore";
 import { applyStateDelta, listElements, getElement, CanonConflictError, CHARACTER_FACTS_COLLECTION, type ElementUpdate } from "@/lib/canonEngine/canonStore";
 import { extractTurn, TurnValidationError } from "@/lib/canonEngine/extractTurn";
@@ -476,6 +478,22 @@ export async function POST(req: NextRequest) {
         if (!(err instanceof CanonConflictError)) throw err;
         console.warn(`[character-chat] unscreened conflict applying relationship updates on turn ${turnId}:`, err.message);
       }
+    }
+
+    // Out-of-scope deferrals (issue #32) - reuses Project 1's existing
+    // outstanding_questions mechanism as-is (storyStore.ts), since
+    // defer_to already supports "Project 3"/"Project 4"/"Project 5" and
+    // the subcollection is shared across projects, not P1-specific.
+    if (delta.deferred_items.length > 0) {
+      const outstandingQuestions: Omit<StoredOutstandingQuestion, "ts">[] = delta.deferred_items.map((d) => ({
+        item: d.item,
+        defer_to: d.defer_to_project,
+        notes: d.notes,
+      }));
+      console.warn(
+        `[character-chat] deferred ${outstandingQuestions.length} out-of-scope item(s) on turn ${turnId}: ${outstandingQuestions.map((q) => `${q.item} -> ${q.defer_to}`).join(", ")}`
+      );
+      await appendOutstandingQuestions(storyId, outstandingQuestions);
     }
 
     if (conflictResult.logEntry) {

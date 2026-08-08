@@ -22,6 +22,13 @@ import { CHARACTER_FIELD_IDS } from "./factRegistry";
  * not an extension of it - a relationship's key is the other character's
  * ID, which can't be a closed enum like CHARACTER_FIELD_IDS since the
  * cast is dynamic per story. See docs/superpowers/specs/2026-08-08-p2-relationship-graph-design.md.
+ * `deferred_items` (issue #32) declares out-of-scope input (World Bible/
+ * Project 3, Story Architecture/Project 4, Draft Writing/Project 5) the
+ * model captured only the character-relevant kernel of - persisted via
+ * Project 1's existing appendOutstandingQuestions/outstanding_questions
+ * mechanism (storyStore.ts), reused as-is since `defer_to` already
+ * supports these three project values and the subcollection is shared
+ * across projects, not P1-specific.
  */
 
 export const FactUpdateSchema = z.object({
@@ -44,6 +51,14 @@ export const RelationshipUpdateSchema = z.object({
 
 export type RelationshipUpdateInput = z.infer<typeof RelationshipUpdateSchema>;
 
+export const DeferredItemSchema = z.object({
+  item: z.string().min(1),
+  defer_to_project: z.enum(["Project 3", "Project 4", "Project 5"]),
+  notes: z.string().min(1),
+});
+
+export type DeferredItemInput = z.infer<typeof DeferredItemSchema>;
+
 export const CharacterTurnSchema = z.object({
   reply: z.string().min(1),
   current_character: z.string().min(1),
@@ -56,6 +71,7 @@ export const CharacterTurnSchema = z.object({
   conflict_description: z.string().optional(),
   resolution: z.enum(["revert", "update_foundation", "park"]).optional(),
   relationship_updates: z.array(RelationshipUpdateSchema),
+  deferred_items: z.array(DeferredItemSchema),
 });
 
 export type CharacterTurn = z.infer<typeof CharacterTurnSchema>;
@@ -167,6 +183,32 @@ export const EMIT_CHARACTER_TURN_TOOL: Anthropic.Tool = {
           required: ["with", "dynamic", "trust_trajectory", "power_dynamic"],
         },
       },
+      deferred_items: {
+        type: "array",
+        description:
+          "Out-of-scope input this turn strayed into (per your scope boundaries: World Bible/Project 3, Story Architecture/Project 4, or Draft Writing/Project 5) that you captured only the character-relevant kernel of and deferred the rest, rather than fully developing it. Empty array if nothing was out of scope this turn.",
+        items: {
+          type: "object",
+          properties: {
+            item: {
+              type: "string",
+              description:
+                "A short description of the deferred content itself (e.g. 'detailed magic system rules for the Ashfall Order').",
+            },
+            defer_to_project: {
+              type: "string",
+              enum: ["Project 3", "Project 4", "Project 5"],
+              description:
+                "Which project this belongs to: Project 3 (World Bible - lore, magic systems, political/religious structures), Project 4 (Story Architecture - scene layouts, chapter structure, beat sheets), or Project 5 (Draft Writing - prose, dialogue, manuscript formatting).",
+            },
+            notes: {
+              type: "string",
+              description: "Why this was deferred, and any character-relevant kernel you captured instead of the full idea.",
+            },
+          },
+          required: ["item", "defer_to_project", "notes"],
+        },
+      },
     },
     required: [
       "reply",
@@ -178,6 +220,7 @@ export const EMIT_CHARACTER_TURN_TOOL: Anthropic.Tool = {
       "updates",
       "conflict_detected",
       "relationship_updates",
+      "deferred_items",
     ],
   },
 };
