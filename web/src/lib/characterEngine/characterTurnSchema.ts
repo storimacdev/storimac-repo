@@ -13,7 +13,11 @@ import { CHARACTER_FIELD_IDS } from "./factRegistry";
  * Engine's 11 known fields (factRegistry.ts) - see that file's own comment
  * for why the other 5 interview stages aren't covered yet. `switch_override`
  * (issue #26) is consumed by characterFsm.ts's resolveCharacterTurn, not
- * used directly in this file.
+ * used directly in this file. `conflict_detected`/`conflict_description`/
+ * `resolution` (issue #30) mirror Project 1's stateDelta.ts equivalents,
+ * but with P2's own resolution vocabulary (revert/update_foundation/park)
+ * since P2's conflict is against another project's document, not against
+ * its own prior canon - see docs/superpowers/specs/2026-08-08-p2-foundation-conflict-detection-design.md.
  */
 
 export const FactUpdateSchema = z.object({
@@ -34,6 +38,9 @@ export const CharacterTurnSchema = z.object({
   switch_override: z.boolean(),
   context: z.string().min(1),
   updates: z.array(FactUpdateSchema),
+  conflict_detected: z.boolean(),
+  conflict_description: z.string().optional(),
+  resolution: z.enum(["revert", "update_foundation", "park"]).optional(),
 });
 
 export type CharacterTurn = z.infer<typeof CharacterTurnSchema>;
@@ -106,7 +113,32 @@ export const EMIT_CHARACTER_TURN_TOOL: Anthropic.Tool = {
           required: ["field"],
         },
       },
+      conflict_detected: {
+        type: "boolean",
+        description:
+          "True if any of this turn's proposed Confirmed facts contradict the Story Foundation grounding (Story Spine, Dramatic Engine) shown above. False otherwise.",
+      },
+      conflict_description: {
+        type: "string",
+        description:
+          "Required when conflict_detected is true: plain-language explanation of the contradiction, naming both the proposed fact and the specific Foundation content it conflicts with. Omit otherwise.",
+      },
+      resolution: {
+        type: "string",
+        enum: ["revert", "update_foundation", "park"],
+        description:
+          "Only set this during a Conflict Resolution turn (a system note will tell you when you're in one), after the author picks one of the three choices you presented: revert the proposal, update Story Foundation canon, or park the idea for later.",
+      },
     },
-    required: ["reply", "current_character", "current_stage", "character_signed_off", "switch_override", "context", "updates"],
+    required: [
+      "reply",
+      "current_character",
+      "current_stage",
+      "character_signed_off",
+      "switch_override",
+      "context",
+      "updates",
+      "conflict_detected",
+    ],
   },
 };
