@@ -13,6 +13,8 @@ import {
   CHARACTER_MESSAGES_COLLECTION,
   setP2State,
   type P2State,
+  setP2PendingConflict,
+  appendCharacterConflictLog,
 } from "@/lib/canonEngine/storyStore";
 import { applyStateDelta, CanonConflictError, CHARACTER_FACTS_COLLECTION, type ElementUpdate } from "@/lib/canonEngine/canonStore";
 import { extractTurn, TurnValidationError } from "@/lib/canonEngine/extractTurn";
@@ -22,6 +24,7 @@ import { computePriorityMatrix } from "@/lib/characterEngine/priorityMatrix";
 import { getDepthLabel } from "@/lib/characterEngine/depthLabels";
 import { isKnownFieldId } from "@/lib/characterEngine/factRegistry";
 import { resolveCharacterTurn, P2_STAGE_NAMES } from "@/lib/characterEngine/characterFsm";
+import { processConflict, buildConflictContextMessage } from "@/lib/characterEngine/foundationConflict";
 import {
   claimsTraceability,
   isTraceable,
@@ -169,6 +172,35 @@ export async function POST(req: NextRequest) {
 
     let system = getSystemPrompt("sp02-cdc-systemprompt.md");
     system += `\n\n[Cast & Priority Matrix - computed by the app, trust this over re-deriving it. Internal grounding only, never narrate this raw data to the author - synthesize it into your own evaluation.]\n${castLines}`;
+
+    // Story Spine & Dramatic Engine grounding (issue #30) - the only Story
+    // Foundation content the model can check a proposed fact against for
+    // contradiction; without this it has nothing to compare to. Scoped to
+    // exactly what ingestFoundation.ts already loads (see that file's own
+    // scope note on deferred CDRM/prose ingestion).
+    const spine = foundation.storySpine;
+    const spineLines = [
+      `Opening Image: ${spine.opening_image || "(not set)"}`,
+      `Inciting Incident: ${spine.inciting_incident || "(not set)"}`,
+      `First Turning Point: ${spine.first_turning_point || "(not set)"}`,
+      `Midpoint: ${spine.midpoint || "(not set)"}`,
+      `Second Turning Point: ${spine.second_turning_point || "(not set)"}`,
+      `Climax: ${spine.climax || "(not set)"}`,
+      `Closing Image: ${spine.closing_image || "(not set)"}`,
+    ].join("\n");
+    const engineLines = [
+      `Protagonist: ${foundation.dramaticEngine?.protagonist || "(not set)"}`,
+      `Antagonistic Force: ${foundation.dramaticEngine?.antagonistic_force || "(not set)"}`,
+      `Central Conflict: ${foundation.dramaticEngine?.central_conflict || "(not set)"}`,
+      `Primary Stakes: ${foundation.dramaticEngine?.primary_stakes || "(not set)"}`,
+      `Transformation Arc: ${foundation.dramaticEngine?.transformation_arc || "(not set)"}`,
+    ].join("\n");
+    system += `\n\n[Story Foundation grounding (Story Spine + Dramatic Engine) - computed by the app, trust this over re-deriving it. Internal grounding only, never narrate this raw data to the author. Check every proposed Confirmed fact against this for contradiction (conflict_detected).]\nStory Spine:\n${spineLines}\n\nDramatic Engine:\n${engineLines}`;
+
+    if (story.p2PendingConflict) {
+      system += `\n\n${buildConflictContextMessage(story.p2PendingConflict)}`;
+    }
+
     if (foundationResult.status === "incomplete") {
       system += `\n\n[Story Foundation is incomplete: ${foundationResult.reason} Proceed with what's available; note gaps to the author naturally if relevant, don't block the interview on it.]`;
     }
@@ -303,7 +335,37 @@ export async function POST(req: NextRequest) {
         enforcedUpdates.push(u);
       }
     }
-    const factUpdates = enforcedUpdates.map((u) => toFactUpdate(u, charId));
+
+    const pendingConflictBefore = story.p2PendingConflict ?? null;
+    const conflictResult = processConflict(
+      enforcedUpdates,
+      pendingConflictBefore,
+      charId,
+      delta.current_character,
+      delta.conflict_detected,
+      delta.conflict_description,
+      delta.resolution,
+      new Date().toISOString()
+    );
+    if (conflictResult.logEntry) {
+      console.warn(
+        `[character-chat] Story Foundation conflict resolved (${conflictResult.logEntry.resolution}) for ${conflictResult.logEntry.field} on turn ${turnId}`
+      );
+      await appendCharacterConflictLog(storyId, {
+        ...conflictResult.logEntry,
+        resolvedBy: user.uid,
+        ts: new Date().toISOString(),
+        turnId,
+      });
+      await setP2PendingConflict(storyId, null);
+    } else if (!pendingConflictBefore && conflictResult.nextPendingConflict) {
+      console.warn(
+        `[character-chat] Story Foundation conflict detected for ${conflictResult.nextPendingConflict.field} on turn ${turnId}: ${conflictResult.nextPendingConflict.conflictDescription}`
+      );
+      await setP2PendingConflict(storyId, conflictResult.nextPendingConflict);
+    }
+
+    const factUpdates = conflictResult.enforcedUpdates.map((u) => toFactUpdate(u, charId));
     if (factUpdates.length > 0) {
       try {
         await applyStateDelta(storyId, factUpdates, turnId, CHARACTER_FACTS_COLLECTION);
