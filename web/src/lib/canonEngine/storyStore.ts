@@ -50,6 +50,16 @@ export interface P2State {
   characterProgress: Record<string, P2CharacterProgress>;
 }
 
+/** Project 2's pending conflict vs. the Story Foundation (issue #30) - a character fact awaiting one of three author resolutions, gating that fact's confirmation until resolved. Singular, like P1's own StoryPendingConflict - only one conflict is ever open at a time. */
+export interface P2PendingConflict {
+  charId: string;
+  characterName: string;
+  field: string;
+  proposedValue: unknown;
+  conflictDescription: string;
+  ts: string;
+}
+
 export interface Story {
   id: string;
   ownerUid: string;
@@ -81,6 +91,13 @@ export interface Story {
    * won't have it in Firestore.
    */
   p2?: P2State | null;
+  /**
+   * Project 2's pending conflict vs. the Story Foundation (issue #30),
+   * cleared once the author picks one of the three resolution choices.
+   * Optional/nullable since Stories created before this field existed
+   * won't have it in Firestore.
+   */
+  p2PendingConflict?: P2PendingConflict | null;
 }
 
 export interface StoryMessage {
@@ -248,6 +265,16 @@ export async function setP2State(storyId: string, p2: P2State): Promise<void> {
     .update({ p2, updatedAt: new Date().toISOString() });
 }
 
+/** Records or clears Project 2's pending Story Foundation conflict (issue #30); pass null to clear once resolved. */
+export async function setP2PendingConflict(
+  storyId: string,
+  conflict: P2PendingConflict | null
+): Promise<void> {
+  await storiesCollection()
+    .doc(storyId)
+    .update({ p2PendingConflict: conflict, updatedAt: new Date().toISOString() });
+}
+
 export interface StoredOutstandingQuestion {
   item: string;
   defer_to: "Project 2" | "Project 3" | "Project 4" | "Project 5" | null;
@@ -302,6 +329,29 @@ export async function appendGuardrailFlag(
 export async function listGuardrailFlags(storyId: string): Promise<StoredGuardrailFlag[]> {
   const snap = await guardrailFlagsCollection(storyId).orderBy("ts", "asc").get();
   return snap.docs.map((d) => d.data() as StoredGuardrailFlag);
+}
+
+/** Project 2's canon_conflicts_log (issue #30, PRD §7) - one entry per resolved Story Foundation conflict. */
+export interface CharacterConflictLogEntry {
+  charId: string;
+  field: string;
+  conflictDescription: string;
+  resolution: "revert" | "update_foundation" | "park";
+  resolvedBy: string;
+  ts: string;
+  turnId: string;
+}
+
+function characterConflictsLogCollection(storyId: string) {
+  return storiesCollection().doc(storyId).collection("characterConflictsLog");
+}
+
+/** Appends a resolved conflict to Project 2's conflicts log (issue #30). */
+export async function appendCharacterConflictLog(
+  storyId: string,
+  entry: CharacterConflictLogEntry
+): Promise<void> {
+  await characterConflictsLogCollection(storyId).add(entry);
 }
 
 /** Appends an author-type re-assessment (issue #8 calls this) without clobbering prior history. */
