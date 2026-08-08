@@ -18,6 +18,10 @@ import { CHARACTER_FIELD_IDS } from "./factRegistry";
  * but with P2's own resolution vocabulary (revert/update_foundation/park)
  * since P2's conflict is against another project's document, not against
  * its own prior canon - see docs/superpowers/specs/2026-08-08-p2-foundation-conflict-detection-design.md.
+ * `relationship_updates` (issue #31) is a separate array from `updates`,
+ * not an extension of it - a relationship's key is the other character's
+ * ID, which can't be a closed enum like CHARACTER_FIELD_IDS since the
+ * cast is dynamic per story. See docs/superpowers/specs/2026-08-08-p2-relationship-graph-design.md.
  */
 
 export const FactUpdateSchema = z.object({
@@ -30,6 +34,16 @@ export const FactUpdateSchema = z.object({
 
 export type FactUpdateInput = z.infer<typeof FactUpdateSchema>;
 
+export const RelationshipUpdateSchema = z.object({
+  with: z.string().min(1),
+  dynamic: z.string().min(1),
+  trust_trajectory: z.string().min(1),
+  power_dynamic: z.string().min(1),
+  state: z.enum(["Exploring", "Working", "Confirmed", "Deferred"]).optional(),
+});
+
+export type RelationshipUpdateInput = z.infer<typeof RelationshipUpdateSchema>;
+
 export const CharacterTurnSchema = z.object({
   reply: z.string().min(1),
   current_character: z.string().min(1),
@@ -41,6 +55,7 @@ export const CharacterTurnSchema = z.object({
   conflict_detected: z.boolean(),
   conflict_description: z.string().optional(),
   resolution: z.enum(["revert", "update_foundation", "park"]).optional(),
+  relationship_updates: z.array(RelationshipUpdateSchema),
 });
 
 export type CharacterTurn = z.infer<typeof CharacterTurnSchema>;
@@ -129,6 +144,29 @@ export const EMIT_CHARACTER_TURN_TOOL: Anthropic.Tool = {
         description:
           "Only set this during a Conflict Resolution turn (a system note will tell you when you're in one), after the author picks one of the three choices you presented: revert the proposal, update Story Foundation canon, or park the idea for later.",
       },
+      relationship_updates: {
+        type: "array",
+        description:
+          "Relationship-graph changes proposed this turn, for current_character's relationship to another cast member. Empty array if none - most turns will have none; this is primarily populated during Stage 4 (Relationship Integration). All of dynamic/trust_trajectory/power_dynamic are required together whenever an entry is proposed at all - always restate the full current snapshot, never just the part that changed.",
+        items: {
+          type: "object",
+          properties: {
+            with: {
+              type: "string",
+              description: "The other character's full name, exactly as it appears in the Story Foundation's cast list.",
+            },
+            dynamic: { type: "string", description: "The relationship's core nature (e.g. mentor-student, rivals, found family)." },
+            trust_trajectory: { type: "string", description: "How trust between them is moving (e.g. growing, eroding, stable)." },
+            power_dynamic: { type: "string", description: "Who holds power/authority in the dynamic, and how." },
+            state: {
+              type: "string",
+              enum: ["Exploring", "Working", "Confirmed", "Deferred"],
+              description: "This relationship entry's canon state, same meaning as a fact's state.",
+            },
+          },
+          required: ["with", "dynamic", "trust_trajectory", "power_dynamic"],
+        },
+      },
     },
     required: [
       "reply",
@@ -139,6 +177,7 @@ export const EMIT_CHARACTER_TURN_TOOL: Anthropic.Tool = {
       "context",
       "updates",
       "conflict_detected",
+      "relationship_updates",
     ],
   },
 };
