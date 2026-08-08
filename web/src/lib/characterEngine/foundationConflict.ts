@@ -87,6 +87,15 @@ function downgradeField(
   );
 }
 
+function downgradeAllConfirmed(
+  updates: FactUpdateInput[],
+  alreadyConfirmedFields: Set<string>
+): FactUpdateInput[] {
+  return updates.map((u) =>
+    u.state === "Confirmed" && !alreadyConfirmedFields.has(u.field) ? { ...u, state: "Working" } : u
+  );
+}
+
 /**
  * Resolves this turn's conflict state:
  * - A pending conflict for THIS character plus a `resolution` this turn
@@ -169,7 +178,7 @@ export function processConflict(params: ProcessConflictParams): ConflictProcessi
     const culprit = rawUpdates.find((u) => u.state === "Confirmed" && !alreadyConfirmedFields.has(u.field));
     if (culprit) {
       return {
-        enforcedUpdates: downgradeField(enforcedUpdates, culprit.field, alreadyConfirmedFields),
+        enforcedUpdates: downgradeAllConfirmed(enforcedUpdates, alreadyConfirmedFields),
         nextPendingConflict: {
           charId,
           characterName,
