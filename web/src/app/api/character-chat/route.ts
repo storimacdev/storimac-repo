@@ -16,13 +16,13 @@ import {
   setP2PendingConflict,
   appendCharacterConflictLog,
 } from "@/lib/canonEngine/storyStore";
-import { applyStateDelta, CanonConflictError, CHARACTER_FACTS_COLLECTION, type ElementUpdate } from "@/lib/canonEngine/canonStore";
+import { applyStateDelta, listElements, CanonConflictError, CHARACTER_FACTS_COLLECTION, type ElementUpdate } from "@/lib/canonEngine/canonStore";
 import { extractTurn, TurnValidationError } from "@/lib/canonEngine/extractTurn";
 import { RateLimitTimeoutError } from "@/lib/rateLimit/anthropicGate";
 import { ingestFoundation } from "@/lib/characterEngine/ingestFoundation";
 import { computePriorityMatrix } from "@/lib/characterEngine/priorityMatrix";
 import { getDepthLabel } from "@/lib/characterEngine/depthLabels";
-import { isKnownFieldId } from "@/lib/characterEngine/factRegistry";
+import { isKnownFieldId, CHARACTER_RELATIONSHIPS_COLLECTION } from "@/lib/characterEngine/factRegistry";
 import { resolveCharacterTurn, P2_STAGE_NAMES } from "@/lib/characterEngine/characterFsm";
 import { processConflict, buildConflictContextMessage } from "@/lib/characterEngine/foundationConflict";
 import {
@@ -37,6 +37,7 @@ import {
   CharacterTurnSchema,
   EMIT_CHARACTER_TURN_TOOL,
   type FactUpdateInput,
+  type RelationshipUpdateInput,
 } from "@/lib/characterEngine/characterTurnSchema";
 
 export const runtime = "nodejs";
@@ -103,6 +104,19 @@ function toFactUpdate(u: FactUpdateInput, charId: string): ElementUpdate {
   return { element_id: `${charId}.${u.field}`, patch };
 }
 
+// Unlike toFactUpdate, value is always a complete { dynamic, trust_trajectory,
+// power_dynamic } object - all three are schema-required together (issue
+// #31's design decision: canonStore.ts replaces `value` wholesale, it
+// doesn't deep-merge sub-fields, so a partial value here would silently
+// drop whichever sub-fields weren't provided).
+function toRelationshipUpdate(u: RelationshipUpdateInput, charId: string, withCharId: string): ElementUpdate {
+  const patch: ElementUpdate["patch"] = {
+    value: { dynamic: u.dynamic, trust_trajectory: u.trust_trajectory, power_dynamic: u.power_dynamic },
+  };
+  if (u.state !== undefined) patch.status = u.state === "Deferred" ? "Parked" : u.state;
+  return { element_id: `${charId}.${withCharId}`, patch };
+}
+
 export async function POST(req: NextRequest) {
   if (!process.env.ANTHROPIC_API_KEY) {
     return NextResponse.json(
@@ -147,6 +161,7 @@ export async function POST(req: NextRequest) {
       );
     }
     const foundation = foundationResult.foundation;
+    const p2State: P2State = story.p2 ?? { activeCharacterId: null, characterProgress: {} };
 
     const turnId = randomUUID();
     const now = new Date().toISOString();
@@ -197,6 +212,38 @@ export async function POST(req: NextRequest) {
     ].join("\n");
     system += `\n\n[Story Foundation grounding (Story Spine + Dramatic Engine) - computed by the app, trust this over re-deriving it. Internal grounding only, never narrate this raw data to the author. Check every proposed Confirmed fact against this for contradiction (conflict_detected).]\nStory Spine:\n${spineLines}\n\nDramatic Engine:\n${engineLines}`;
 
+    // Relationship-graph grounding for ripple-effect checks (issue #31) -
+    // injected unconditionally for every already-signed-off character every
+    // turn (not conditionally on "the character currently being revised":
+    // the system prompt is built before the model reveals current_character,
+    // so there's no reliable way to know in advance who that will be).
+    // Matches this file's existing grounding philosophy (Cast & Priority
+    // Matrix, Story Foundation) of injecting broadly and trusting the model
+    // to use what's relevant.
+    const signedOffCharIds = Object.entries(p2State.characterProgress)
+      .filter(([, progress]) => progress.status === "signed_off")
+      .map(([id]) => id);
+    if (signedOffCharIds.length > 0) {
+      const relationshipElements = await listElements(storyId, CHARACTER_RELATIONSHIPS_COLLECTION);
+      const relationshipLines = signedOffCharIds
+        .map((id) => {
+          const characterName = p2State.characterProgress[id].characterName;
+          const entries = relationshipElements.filter((e) => e.element_id.startsWith(`${id}.`));
+          if (entries.length === 0) return `- ${characterName}: no relationships recorded yet.`;
+          const entryLines = entries
+            .map((e) => {
+              const v = (e.value ?? {}) as { dynamic?: string; trust_trajectory?: string; power_dynamic?: string };
+              const otherCharId = e.element_id.slice(id.length + 1);
+              const otherName = p2State.characterProgress[otherCharId]?.characterName ?? otherCharId;
+              return `  - with ${otherName}: ${v.dynamic ?? "?"} (trust: ${v.trust_trajectory ?? "?"}, power: ${v.power_dynamic ?? "?"})`;
+            })
+            .join("\n");
+          return `- ${characterName}:\n${entryLines}`;
+        })
+        .join("\n");
+      system += `\n\n[Relationship Graph (already-signed-off characters only) - computed by the app, trust this over re-deriving it. Internal grounding only, never narrate this raw data to the author. Consider ripple effects on these relationships before confirming a psychological change to any of these characters.]\n${relationshipLines}`;
+    }
+
     if (story.p2PendingConflict) {
       system += `\n\n${buildConflictContextMessage(story.p2PendingConflict)}`;
     }
@@ -240,7 +287,6 @@ export async function POST(req: NextRequest) {
     }
 
     const charId = resolveCharId(delta.current_character, foundation.cast, turnId);
-    const p2State: P2State = story.p2 ?? { activeCharacterId: null, characterProgress: {} };
     const resolution = resolveCharacterTurn(
       p2State,
       charId,
@@ -386,6 +432,19 @@ export async function POST(req: NextRequest) {
       } catch (err) {
         if (!(err instanceof CanonConflictError)) throw err;
         console.warn(`[character-chat] unscreened conflict applying fact updates on turn ${turnId}:`, err.message);
+      }
+    }
+
+    const relationshipUpdates = delta.relationship_updates.map((u) => {
+      const withCharId = resolveCharId(u.with, foundation.cast, turnId);
+      return toRelationshipUpdate(u, charId, withCharId);
+    });
+    if (relationshipUpdates.length > 0) {
+      try {
+        await applyStateDelta(storyId, relationshipUpdates, turnId, CHARACTER_RELATIONSHIPS_COLLECTION);
+      } catch (err) {
+        if (!(err instanceof CanonConflictError)) throw err;
+        console.warn(`[character-chat] unscreened conflict applying relationship updates on turn ${turnId}:`, err.message);
       }
     }
 
