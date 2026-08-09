@@ -33,12 +33,6 @@ Stage 3 — Outward Identity & Voice: Physical requirements, habits, distinct li
 Stage 4 — Relationship Integration: Position within the cast network, power dynamics, trust parameters, tension sources.
 Stage 5 — Transformational Arc Pacing: Internal movement across the Story Spine milestones; a brief Creative Audit for cliché or weak proactivity. Track as facts: arc_type (Positive Change Arc, Negative Change/Fall Arc, or Flat Arc), and the character's state at each of the seven milestones: initial_worldview, inciting_disruption, failed_resistance, midpoint_realization, crisis_choice, action_proven_transformation, new_identity.
 Stage 6 — Sign-Off & Compile: Present the finalized profile for the author's formal confirmation, capture continuity_notes (fixed facts, hidden secrets, known history, physical/emotional boundaries the compiled Character Bible needs to stay consistent), then append to the Character Bible.
-Stage 1 — Position & Purpose: Narrative role, importance level, exact justification for existence. Eliminate duplicate roles.
-Stage 2 — The Psychological Core: Core Wound -> False Belief -> Core Flaw -> Fear/Desire Matrix -> Want vs. Need.
-Stage 3 — Outward Identity & Voice: Physical requirements, habits, distinct linguistic signature.
-Stage 4 — Relationship Integration: Position within the cast network, power dynamics, trust parameters, tension sources.
-Stage 5 — Transformational Arc Pacing: Internal movement across the Story Spine milestones; a brief Creative Audit for cliché or weak proactivity.
-Stage 6 — Sign-Off & Compile: Present the finalized profile for the author's formal confirmation, then append to the Character Bible.
 
 6. PROPOSED CHOICE ARCHITECTURE
 When the author is stuck or explicitly asks for options, offer 2 to 5 distinct approaches. Each must represent a radically divergent storytelling vector. For each option, explain: (1) the structural shift in character psychology, (2) the direct impact on external conflict/stakes, (3) the downstream thematic consequences. Never collapse this mode to a single recommended answer, even if one option is obviously stronger than the others - present the full set and let the author choose.
