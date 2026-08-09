@@ -5,6 +5,9 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Markdown from "@/components/Markdown";
 import UserMenu from "@/components/UserMenu";
+import { downloadText, downloadBlob } from "@/lib/download";
+import type { CharacterBibleEntry } from "@/lib/canonEngine/storyStore";
+import { renderCharacterBibleMarkdown } from "@/lib/characterEngine/characterBibleMarkdown";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -34,6 +37,8 @@ export default function CharacterInterview() {
   const [characterSignedOff, setCharacterSignedOff] = useState(false);
   const [context, setContext] = useState<string | null>(null);
   const [leftWidth, setLeftWidth] = useState(380);
+  const [bibleEntries, setBibleEntries] = useState<CharacterBibleEntry[] | null>(null);
+  const [docxGenerating, setDocxGenerating] = useState(false);
   const listEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -83,6 +88,32 @@ export default function CharacterInterview() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resuming, canvasId]);
 
+  // Compiled Character Bible entries (issue #35) - fetched once on mount
+  // so a resumed session with prior sign-offs shows the panel immediately,
+  // and refetched after every turn that completes a fresh sign-off (see
+  // sendMessage below). fetchBibleEntries is a plain function declaration,
+  // hoisted within this component body the same way sendMessage already
+  // is (called above, at line ~82, before its own textual definition).
+  useEffect(() => {
+    if (!canvasId) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setBibleEntries(null);
+    fetchBibleEntries();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasId]);
+
+  async function fetchBibleEntries() {
+    if (!canvasId) return;
+    try {
+      const res = await fetch(`/api/character-chat/bible?storyId=${canvasId}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setBibleEntries((data.entries ?? []) as CharacterBibleEntry[]);
+    } catch {
+      // Enhancement panel only - silently skip on failure, no user-facing error.
+    }
+  }
+
   async function sendMessage(preset?: string) {
     const text = (preset ?? input).trim();
     if (!text || loading || !canvasId) return;
@@ -110,6 +141,9 @@ export default function CharacterInterview() {
       setCurrentCharacter(data.current_character ?? null);
       setCurrentStage(typeof data.current_stage === "number" ? data.current_stage : null);
       setCharacterSignedOff(Boolean(data.character_signed_off));
+      if (data.character_signed_off) {
+        fetchBibleEntries();
+      }
     } catch {
       setError("Couldn't reach the server. Is the dev server running?");
     } finally {
@@ -117,6 +151,26 @@ export default function CharacterInterview() {
       requestAnimationFrame(() =>
         listEndRef.current?.scrollIntoView({ behavior: "smooth" })
       );
+    }
+  }
+
+  function downloadBibleMarkdown() {
+    if (!bibleEntries) return;
+    downloadText("character-bible.md", renderCharacterBibleMarkdown(bibleEntries), "text/markdown");
+  }
+
+  async function downloadBibleDocx() {
+    if (!bibleEntries || docxGenerating) return;
+    setDocxGenerating(true);
+    setError(null);
+    try {
+      const { generateCharacterBibleDocxBlob } = await import("@/lib/docx/characterBibleDocx");
+      const blob = await generateCharacterBibleDocxBlob(bibleEntries);
+      downloadBlob("character-bible.docx", blob);
+    } catch {
+      setError("Couldn't generate the .docx file.");
+    } finally {
+      setDocxGenerating(false);
     }
   }
 
@@ -233,10 +287,30 @@ export default function CharacterInterview() {
             />
 
             <div data-testid="right-panel" className="flex min-w-0 flex-1 flex-col bg-neutral-950">
-              <div className="shrink-0 border-b border-red-900/40 px-5 py-2.5">
+              <div className="flex shrink-0 items-center justify-between border-b border-red-900/40 px-5 py-2.5">
                 <span className="text-[11px] uppercase tracking-widest text-neutral-500">
                   preview · {currentCharacter ?? "Cast overview"}
                 </span>
+                {bibleEntries && bibleEntries.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-neutral-400">
+                      Character Bible ({bibleEntries.length} {bibleEntries.length === 1 ? "character" : "characters"})
+                    </span>
+                    <button
+                      onClick={downloadBibleMarkdown}
+                      className="rounded-lg bg-gradient-to-r from-red-600 to-orange-500 px-3 py-1.5 text-[11px] font-semibold text-white hover:from-red-500 hover:to-orange-400"
+                    >
+                      Download .md
+                    </button>
+                    <button
+                      onClick={downloadBibleDocx}
+                      disabled={docxGenerating}
+                      className="rounded-lg bg-gradient-to-r from-red-600 to-orange-500 px-3 py-1.5 text-[11px] font-semibold text-white hover:from-red-500 hover:to-orange-400 disabled:opacity-40"
+                    >
+                      {docxGenerating ? "Generating…" : "Generate .docx"}
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="min-h-0 flex-1 overflow-y-auto px-8 py-8">
