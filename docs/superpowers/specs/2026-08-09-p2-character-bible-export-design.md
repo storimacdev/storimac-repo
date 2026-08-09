@@ -68,7 +68,7 @@ New state: `bibleEntries: CharacterBibleEntry[] | null`, `docxGenerating: boolea
 ## Error Handling
 
 - The `GET .../bible` fetch failing (network error, story not found) simply means the panel doesn't render — logged to console, no error banner shown to the author. This is an enhancement panel, not a blocking flow step.
-- Docx generation throwing (malformed input, `docx` package internal error) resets `docxGenerating` to `false` in a `finally` block and logs to console — matches `ChatInterview.tsx`'s existing `downloadPdf` error handling shape (no user-facing error UI exists there today either, so #35 doesn't invent a new pattern for this).
+- Docx generation throwing (malformed input, `docx` package internal error) resets `docxGenerating` to `false` in a `finally` block and sets the existing `error` state to a short message — matches `ChatInterview.tsx`'s existing `downloadPdf` error handling shape exactly (`setError(null)` before attempting, `setError("Couldn't generate the PDF.")` in the `catch`), so #35 reuses the same pattern rather than inventing a new one.
 
 ## Testing
 
