@@ -1,14 +1,20 @@
 "use client";
 
-import { PROJECT1_STAGES, getDefaultDepthMode } from "@/lib/canonEngine/stageDefinitions";
+import { PROJECT1_STAGES, getDefaultDepthMode, type StageDefinition } from "@/lib/canonEngine/stageDefinitions";
 
 /**
  * Read-only Story Canon panel — GitHub issue #11, PRD §7. Shows all 8
  * stages with the current one highlighted; per-element status badges for the
- * current and prior stages; no editing. Rendered inside the left panel's
- * Chat/Canon tab switcher (the tab acts as the collapse mechanism). `debug`
- * additionally shows each element's depth_mode (dev/QA only — gated on a
- * ?debug=1 query param at the call site, never shown to end authors).
+ * current and prior stages; no editing. `debug` additionally shows each
+ * element's depth_mode (dev/QA only — gated on a ?debug=1 query param at the
+ * call site, never shown to end authors).
+ *
+ * `orientation="horizontal"` (added alongside the view-pane relocation) is a
+ * compact stepper strip instead of the full vertical stage list — each
+ * stage pill's fill color is an aggregate of its required elements' status
+ * (aggregateStageStatus below), not a per-element breakdown; the vertical
+ * mode's per-element badges aren't reproduced there, by design (a "which
+ * stage am I in" glance, not the full detail view).
  */
 
 export type PanelElement = {
@@ -27,18 +33,92 @@ const STATUS_STYLES: Record<PanelElement["status"], string> = {
   Parked: "bg-sky-500/20 text-sky-300 border border-sky-500/40",
 };
 
+type AggregateStatus = "Exploring" | "Working" | "Confirmed";
+
+// Same three-color family as STATUS_STYLES above (muted/amber/emerald),
+// applied to the whole stage pill instead of one element's badge.
+const AGGREGATE_STYLES: Record<AggregateStatus, string> = {
+  Exploring: "bg-neutral-800 text-neutral-400 border border-neutral-700",
+  Working: "bg-amber-500/20 text-amber-300 border border-amber-500/40",
+  Confirmed: "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40",
+};
+
+/** Rolls a stage's requiredElementIds up into one status: Confirmed only if
+ * every required element is Confirmed, Working if any element has been
+ * touched at all (Working/Confirmed/Parked), else the muted Exploring
+ * default. Stages with no required elements (7, 8) have nothing to
+ * aggregate — the caller falls back to current/past/future positioning. */
+function aggregateStageStatus(stage: StageDefinition, byId: Map<string, PanelElement>): AggregateStatus {
+  if (stage.requiredElementIds.length === 0) return "Exploring";
+  let confirmedCount = 0;
+  let touchedCount = 0;
+  for (const id of stage.requiredElementIds) {
+    const status = byId.get(id)?.status;
+    if (status === "Confirmed") confirmedCount++;
+    if (status && status !== "Exploring") touchedCount++;
+  }
+  if (confirmedCount === stage.requiredElementIds.length) return "Confirmed";
+  if (touchedCount > 0) return "Working";
+  return "Exploring";
+}
+
+function HorizontalCanonStrip({
+  byId,
+  currentStage,
+}: {
+  byId: Map<string, PanelElement>;
+  currentStage: number;
+}) {
+  return (
+    <div data-testid="canon-strip" className="flex items-center gap-1.5 overflow-x-auto px-1 py-1">
+      {PROJECT1_STAGES.map((stage, i) => {
+        const isCurrent = stage.stage === currentStage;
+        const isFuture = stage.stage > currentStage;
+        const noElements = stage.requiredElementIds.length === 0;
+        const aggClass = noElements
+          ? isCurrent || stage.stage < currentStage
+            ? AGGREGATE_STYLES.Confirmed
+            : AGGREGATE_STYLES.Exploring
+          : AGGREGATE_STYLES[aggregateStageStatus(stage, byId)];
+        return (
+          <div key={stage.stage} className="flex shrink-0 items-center gap-1.5">
+            <div
+              data-stage={stage.stage}
+              data-current={isCurrent}
+              title={stage.name}
+              className={`flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[10px] font-semibold transition ${aggClass} ${
+                isCurrent ? "ring-2 ring-red-500/70" : ""
+              } ${isFuture ? "opacity-40" : ""}`}
+            >
+              <span>{stage.stage}</span>
+              <span className="hidden sm:inline">{stage.name}</span>
+            </div>
+            {i < PROJECT1_STAGES.length - 1 && <span className="h-px w-3 shrink-0 bg-neutral-700" />}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function CanonPanel({
   elements,
   currentStage,
   debug = false,
   guardrailFlags,
+  orientation = "vertical",
 }: {
   elements: PanelElement[];
   currentStage: number;
   debug?: boolean;
   guardrailFlags?: GuardrailFlag[];
+  orientation?: "vertical" | "horizontal";
 }) {
   const byId = new Map(elements.map((e) => [e.element_id, e]));
+
+  if (orientation === "horizontal") {
+    return <HorizontalCanonStrip byId={byId} currentStage={currentStage} />;
+  }
 
   return (
     <div className="h-full overflow-y-auto px-3 py-3">

@@ -88,9 +88,20 @@ export default function ChatInterview() {
   const [versions, setVersions] = useState<VersionRow[]>([]);
   const [generating, setGenerating] = useState(false);
   const [pdfGenerating, setPdfGenerating] = useState(false);
-  const [leftTab, setLeftTab] = useState<"chat" | "canon">("chat");
   const [leftWidth, setLeftWidth] = useState(380);
+  const [notesCollapsed, setNotesCollapsed] = useState(false);
+  const [notesKey, setNotesKey] = useState<string | null>(null);
   const listEndRef = useRef<HTMLDivElement | null>(null);
+
+  // Each new turn's notes start expanded - collapsing is a per-turn choice,
+  // not a sticky "never show notes again" setting. Adjusting state during
+  // render (React's documented pattern for "reset state when a value
+  // changes") rather than in an effect, which would cascade an extra render.
+  const currentNotesKey = auditSummary ?? context ?? null;
+  if (currentNotesKey !== notesKey) {
+    setNotesKey(currentNotesKey);
+    setNotesCollapsed(false);
+  }
 
   useEffect(() => {
     if (!workspaceId || !canvasId) return;
@@ -278,79 +289,75 @@ export default function ChatInterview() {
               className="flex shrink-0 flex-col border-r border-red-900/40 bg-neutral-900/40"
               style={{ width: leftWidth }}
             >
-              <div className="flex shrink-0 gap-1 border-b border-red-900/40 p-2">
-                <button
-                  onClick={() => setLeftTab("chat")}
-                  data-active={leftTab === "chat"}
-                  className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                    leftTab === "chat"
-                      ? "bg-gradient-to-r from-red-600/80 to-orange-600/60 text-white"
-                      : "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
-                  }`}
-                >
-                  Chat
-                </button>
-                <button
-                  onClick={() => setLeftTab("canon")}
-                  data-active={leftTab === "canon"}
-                  className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                    leftTab === "canon"
-                      ? "bg-gradient-to-r from-red-600/80 to-orange-600/60 text-white"
-                      : "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
-                  }`}
-                >
-                  Story Canon
-                </button>
+              <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4">
+                {resuming && <Bubble role="assistant" content="Loading your canvas…" pending />}
+                {!resuming && messages.length === 0 && <Bubble role="assistant" content={WELCOME} />}
+                {messages.map((m, i) => (
+                  <Bubble key={i} role={m.role} content={m.content} />
+                ))}
+                {loading && <Bubble role="assistant" content="…" pending />}
+                {conflict && !loading && (
+                  <div
+                    data-testid="conflict-card"
+                    className="mb-4 rounded-xl border-2 border-red-500/60 bg-red-950/40 px-4 py-4"
+                  >
+                    <p className="text-xs font-bold uppercase tracking-widest text-red-300">
+                      ⚠ Canon conflict — your call
+                    </p>
+                    <p className="mt-1 text-sm text-red-100/90">
+                      <b>{conflict.element_id.replace(/_/g, " ")}</b> is already confirmed. Pick how to resolve it:
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {CONFLICT_CHOICES.map((c) => (
+                        <button
+                          key={c.letter}
+                          onClick={() => sendMessage(c.message)}
+                          disabled={loading}
+                          className="rounded-lg border border-red-500/50 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200 transition hover:bg-red-500/25 disabled:opacity-40"
+                        >
+                          <span className="mr-1.5 inline-block rounded bg-gradient-to-r from-red-500 to-orange-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                            {c.letter}
+                          </span>
+                          {c.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {doc && !loading && (
+                  <div
+                    data-testid="next-steps-card"
+                    className="mb-4 rounded-xl border-2 border-red-500/40 bg-red-950/30 px-4 py-4"
+                  >
+                    <p className="text-xs font-bold uppercase tracking-widest text-red-300">
+                      Story Foundation ready
+                    </p>
+                    <p className="mt-1 text-sm text-red-100/90">
+                      Your Story Foundation Document is generated. Ready to move on?
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Link
+                        href={`/character-bible?workspaceId=${workspaceId}&canvasId=${canvasId}`}
+                        className="rounded-lg bg-gradient-to-r from-red-600 to-orange-500 px-3 py-2 text-xs font-semibold text-white transition hover:from-red-500 hover:to-orange-400"
+                      >
+                        Continue to Character Development →
+                      </Link>
+                      <Link
+                        href="/dashboard"
+                        className="rounded-lg border border-red-500/50 px-3 py-2 text-xs font-semibold text-red-200 transition hover:bg-red-500/10"
+                      >
+                        Back to Dashboard
+                      </Link>
+                    </div>
+                  </div>
+                )}
+                {error && (
+                  <div className="mt-2 rounded-lg border border-red-900 bg-red-950/60 px-4 py-3 text-sm text-red-200">
+                    {error}
+                  </div>
+                )}
+                <div ref={listEndRef} />
               </div>
-
-              {leftTab === "chat" ? (
-                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4">
-                  {resuming && <Bubble role="assistant" content="Loading your canvas…" pending />}
-                  {!resuming && messages.length === 0 && <Bubble role="assistant" content={WELCOME} />}
-                  {messages.map((m, i) => (
-                    <Bubble key={i} role={m.role} content={m.content} />
-                  ))}
-                  {loading && <Bubble role="assistant" content="…" pending />}
-                  {conflict && !loading && (
-                    <div
-                      data-testid="conflict-card"
-                      className="mb-4 rounded-xl border-2 border-red-500/60 bg-red-950/40 px-4 py-4"
-                    >
-                      <p className="text-xs font-bold uppercase tracking-widest text-red-300">
-                        ⚠ Canon conflict — your call
-                      </p>
-                      <p className="mt-1 text-sm text-red-100/90">
-                        <b>{conflict.element_id.replace(/_/g, " ")}</b> is already confirmed. Pick how to resolve it:
-                      </p>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {CONFLICT_CHOICES.map((c) => (
-                          <button
-                            key={c.letter}
-                            onClick={() => sendMessage(c.message)}
-                            disabled={loading}
-                            className="rounded-lg border border-red-500/50 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200 transition hover:bg-red-500/25 disabled:opacity-40"
-                          >
-                            <span className="mr-1.5 inline-block rounded bg-gradient-to-r from-red-500 to-orange-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                              {c.letter}
-                            </span>
-                            {c.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {error && (
-                    <div className="mt-2 rounded-lg border border-red-900 bg-red-950/60 px-4 py-3 text-sm text-red-200">
-                      {error}
-                    </div>
-                  )}
-                  <div ref={listEndRef} />
-                </div>
-              ) : (
-                <div className="min-h-0 flex-1">
-                  <CanonPanel elements={elements} currentStage={currentStage} debug={debug} guardrailFlags={guardrailFlags} />
-                </div>
-              )}
 
               <div className="shrink-0 border-t border-red-900/40 p-3">
                 <div className="rounded-xl p-[1px]" style={{ background: BORDER_GRADIENT }}>
@@ -388,6 +395,15 @@ export default function ChatInterview() {
                 <span className="text-[11px] uppercase tracking-widest text-neutral-500">
                   preview · {stageName ?? "Stage 1"}
                 </span>
+              </div>
+              <div className="shrink-0 border-b border-red-900/40 bg-neutral-900/40 px-3">
+                <CanonPanel
+                  elements={elements}
+                  currentStage={currentStage}
+                  debug={debug}
+                  guardrailFlags={guardrailFlags}
+                  orientation="horizontal"
+                />
               </div>
 
               <div className="min-h-0 flex-1 overflow-y-auto px-8 py-8">
@@ -472,21 +488,40 @@ export default function ChatInterview() {
 
                 {!loading && !doc && !resuming && (
                   <>
-                    {(auditSummary || context) && (
-                      <div
-                        data-testid="notes-card"
-                        className="mb-6 rounded-xl border border-red-500/30 bg-gradient-to-br from-red-950/40 to-neutral-900/40 px-5 py-5"
-                      >
-                        <p className="bg-gradient-to-r from-red-400 to-orange-300 bg-clip-text text-xs font-bold uppercase tracking-widest text-transparent">
-                          {auditSummary ? "Creative Audit" : "Notes"}
-                        </p>
-                        <div className="mt-3">
-                          <Markdown className="text-[13px] leading-relaxed text-neutral-300">
-                            {auditSummary ?? context ?? ""}
-                          </Markdown>
+                    {(auditSummary || context) &&
+                      (notesCollapsed ? (
+                        <button
+                          data-testid="notes-card-collapsed"
+                          onClick={() => setNotesCollapsed(false)}
+                          className="mb-6 flex items-center gap-2 rounded-full border border-red-500/30 bg-gradient-to-br from-red-950/40 to-neutral-900/40 px-4 py-2 text-xs font-semibold text-red-300 transition hover:bg-red-950/60"
+                        >
+                          <span>{auditSummary ? "Creative Audit" : "Notes"}</span>
+                          <span aria-hidden>▸</span>
+                        </button>
+                      ) : (
+                        <div
+                          data-testid="notes-card"
+                          className="mb-6 rounded-xl border border-red-500/30 bg-gradient-to-br from-red-950/40 to-neutral-900/40 px-5 py-5"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="bg-gradient-to-r from-red-400 to-orange-300 bg-clip-text text-xs font-bold uppercase tracking-widest text-transparent">
+                              {auditSummary ? "Creative Audit" : "Notes"}
+                            </p>
+                            <button
+                              onClick={() => setNotesCollapsed(true)}
+                              aria-label="Collapse notes"
+                              className="shrink-0 rounded-full px-1.5 py-0.5 text-sm leading-none text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-200"
+                            >
+                              ×
+                            </button>
+                          </div>
+                          <div className="mt-3">
+                            <Markdown className="text-[13px] leading-relaxed text-neutral-300">
+                              {auditSummary ?? context ?? ""}
+                            </Markdown>
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      ))}
                     <StorySoFar elements={elements} currentStage={currentStage} />
                   </>
                 )}
