@@ -280,6 +280,10 @@ export interface StoredOutstandingQuestion {
   defer_to: "Project 2" | "Project 3" | "Project 4" | "Project 5" | null;
   notes: string;
   ts: string;
+  /** The P2 character this item was deferred from, if any (issue #34's
+   * retrofit) - optional/absent on every P1-originated entry and every
+   * issue #32 entry written before this field existed. */
+  charId?: string;
 }
 
 function outstandingQuestionsCollection(storyId: string) {
@@ -352,6 +356,93 @@ export async function appendCharacterConflictLog(
   entry: CharacterConflictLogEntry
 ): Promise<void> {
   await characterConflictsLogCollection(storyId).add(entry);
+}
+
+/** Project 2's compiled, permanent Character Bible entries (issue #34,
+ * CDRM §7) - one per signed-off character, written exactly once. */
+export interface CharacterBibleEntry {
+  charId: string;
+  metadata: {
+    character_name: string;
+    age: string;
+    occupation: string;
+    story_role: string;
+    narrative_importance: string;
+    development_depth: string;
+    arc_type: string;
+    canon_status: "Signed Off";
+  };
+  story_function: {
+    narrative_purpose: string;
+    protagonist_relationship: string;
+    conflict_contribution: string;
+    thematic_thesis: string;
+  };
+  psychological_engine: {
+    want: string;
+    personality_how: string;
+    need: string;
+    values: string;
+    life_experience: string;
+    core_wound: string;
+    false_belief: string;
+    core_flaw: string;
+    dominant_fear: string;
+    defense_mechanisms: string;
+    behavioral_trajectory: string;
+  };
+  behavior_voice_profile: {
+    physical_description: string;
+    habits: string;
+    voice_signature: string;
+    behavior_under_stress: string;
+  };
+  ensemble_interconnection_registry: {
+    with: string;
+    dynamic: string;
+    trust_trajectory: string;
+    power_dynamic: string;
+  }[];
+  milestone_arc_timeline: {
+    initial_worldview: string;
+    inciting_disruption: string;
+    failed_resistance: string;
+    midpoint_realization: string;
+    crisis_choice: string;
+    action_proven_transformation: string;
+    new_identity: string;
+  };
+  continuity_canon_rules: string;
+  outstanding_questions: { item: string; defer_to: string | null; notes: string }[];
+  signed_off_at: string;
+}
+
+function characterBibleEntriesCollection(storyId: string) {
+  return storiesCollection().doc(storyId).collection("characterBibleEntries");
+}
+
+/** Persists a character's compiled Character Bible entry exactly once
+ * (issue #34, AC: "prior characters' entries are never overwritten").
+ * Uses a read-then-write check rather than a create()-and-catch pattern -
+ * matches the established isAlreadyConfirmed-style convention already
+ * proven in issues #28/#30/#31, and avoids relying on an unverified
+ * Firestore error-code shape for "already exists". */
+export async function appendCharacterBibleEntry(
+  storyId: string,
+  entry: CharacterBibleEntry
+): Promise<{ ok: true } | { ok: false; alreadyExists: true }> {
+  const ref = characterBibleEntriesCollection(storyId).doc(entry.charId);
+  const existing = await ref.get();
+  if (existing.exists) {
+    return { ok: false, alreadyExists: true };
+  }
+  await ref.set(entry);
+  return { ok: true };
+}
+
+export async function listCharacterBibleEntries(storyId: string): Promise<CharacterBibleEntry[]> {
+  const snap = await characterBibleEntriesCollection(storyId).get();
+  return snap.docs.map((d) => d.data() as CharacterBibleEntry);
 }
 
 /** Appends an author-type re-assessment (issue #8 calls this) without clobbering prior history. */

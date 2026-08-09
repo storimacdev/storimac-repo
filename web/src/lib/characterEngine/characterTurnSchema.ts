@@ -9,9 +9,10 @@ import { CHARACTER_FIELD_IDS } from "./factRegistry";
  * (ARCHITECTURE.md §2). Issue #29's architecture note: configure the
  * shared Canon Engine with Project 2's own field vocabulary, not an
  * independent state store - same pattern as Project 1's stateDelta.ts.
- * `updates`' `field` enum is deliberately scoped to only the Psychological
- * Engine's 11 known fields (factRegistry.ts) - see that file's own comment
- * for why the other 5 interview stages aren't covered yet. `switch_override`
+ * `updates`' `field` enum is sourced from factRegistry.ts's
+ * CHARACTER_FIELD_IDS, covering Stage 2's 11 Psychological Engine fields
+ * plus Stage 1/3/5/6's fields added by issue #34 - see that file's own
+ * comment for the full breakdown. `switch_override`
  * (issue #26) is consumed by characterFsm.ts's resolveCharacterTurn, not
  * used directly in this file. `conflict_detected`/`conflict_description`/
  * `resolution` (issue #30) mirror Project 1's stateDelta.ts equivalents,
@@ -116,7 +117,7 @@ export const EMIT_CHARACTER_TURN_TOOL: Anthropic.Tool = {
       updates: {
         type: "array",
         description:
-          "Canon fact changes proposed this turn, for current_character only. Empty array if none - most turns during Stages 1, 3, 4, 5, and 6 will have none, since only the Psychological Engine's fields (Stage 2) are tracked as facts today.",
+          "Canon fact changes proposed this turn, for current_character only. Empty array if none. Stage 4 (Relationship Integration) has no fields of its own here - see relationship_updates instead.",
         items: {
           type: "object",
           properties: {
