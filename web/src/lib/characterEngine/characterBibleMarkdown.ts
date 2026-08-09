@@ -24,6 +24,12 @@ function renderEntry(entry: CharacterBibleEntry): string[] {
     `## ${m.character_name}`,
     `_${m.story_role || "role not set"} · ${m.narrative_importance || "tier not set"} tier · ${m.development_depth || "depth not set"} depth · ${m.arc_type || "arc type not set"} · ${m.canon_status}_`,
     "",
+    `### Metadata`,
+    ...fieldLines([
+      ["Age", m.age],
+      ["Occupation", m.occupation],
+    ]),
+    "",
     `### Story Function & Integration Map`,
     ...fieldLines([
       ["Narrative Purpose", entry.story_function.narrative_purpose],
