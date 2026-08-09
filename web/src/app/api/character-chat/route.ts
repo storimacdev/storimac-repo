@@ -514,9 +514,13 @@ export async function POST(req: NextRequest) {
         listElements(storyId, CHARACTER_RELATIONSHIPS_COLLECTION),
         listOutstandingQuestions(storyId),
       ]);
+      const characterNames: Record<string, string> = Object.fromEntries(
+        Object.entries(p2State.characterProgress).map(([id, progress]) => [id, progress.characterName])
+      );
       const compiled = compileCharacterBibleEntry({
         charId,
-        characterName: delta.current_character,
+        characterName: foundation.cast[castIndex]?.name ?? delta.current_character,
+        characterNames,
         storyRole: foundation.cast[castIndex]?.story_role ?? "",
         tier: tier ?? "",
         depthLabel: tier ? getDepthLabel(tier) : "",

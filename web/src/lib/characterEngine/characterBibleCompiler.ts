@@ -42,6 +42,11 @@ function confirmedStr(byId: ElementMap, field: string): string {
 export interface CompileCharacterBibleEntryParams {
   charId: string;
   characterName: string;
+  /** Maps every known charId in this story to its display name (e.g. from
+   * p2State.characterProgress), used to resolve ensemble_interconnection_registry's
+   * "with" field to a readable name instead of a raw charId slug. Falls
+   * back to the charId itself for any id not present in this map. */
+  characterNames: Record<string, string>;
   storyRole: string;
   tier: string;
   depthLabel: string;
@@ -58,6 +63,7 @@ export function compileCharacterBibleEntry(params: CompileCharacterBibleEntryPar
   const {
     charId,
     characterName,
+    characterNames,
     storyRole,
     tier,
     depthLabel,
@@ -74,8 +80,9 @@ export function compileCharacterBibleEntry(params: CompileCharacterBibleEntryPar
     .filter((e) => e.status === "Confirmed" && e.element_id.startsWith(relationshipPrefix))
     .map((e) => {
       const v = (e.value ?? {}) as { dynamic?: string; trust_trajectory?: string; power_dynamic?: string };
+      const otherCharId = e.element_id.slice(relationshipPrefix.length);
       return {
-        with: e.element_id.slice(relationshipPrefix.length),
+        with: characterNames[otherCharId] ?? otherCharId,
         dynamic: v.dynamic ?? "",
         trust_trajectory: v.trust_trajectory ?? "",
         power_dynamic: v.power_dynamic ?? "",
