@@ -96,6 +96,8 @@ export default function CharacterInterview() {
   // is (called above, at line ~82, before its own textual definition).
   useEffect(() => {
     if (!canvasId) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setBibleEntries(null);
     fetchBibleEntries();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canvasId]);
