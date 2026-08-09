@@ -17,6 +17,8 @@ import {
   appendCharacterConflictLog,
   appendOutstandingQuestions,
   type StoredOutstandingQuestion,
+  listOutstandingQuestions,
+  appendCharacterBibleEntry,
 } from "@/lib/canonEngine/storyStore";
 import { applyStateDelta, listElements, getElement, CanonConflictError, CHARACTER_FACTS_COLLECTION, type ElementUpdate } from "@/lib/canonEngine/canonStore";
 import { extractTurn, TurnValidationError } from "@/lib/canonEngine/extractTurn";
@@ -41,6 +43,7 @@ import {
   type FactUpdateInput,
   type RelationshipUpdateInput,
 } from "@/lib/characterEngine/characterTurnSchema";
+import { compileCharacterBibleEntry } from "@/lib/characterEngine/characterBibleCompiler";
 
 export const runtime = "nodejs";
 
@@ -298,6 +301,7 @@ export async function POST(req: NextRequest) {
     }
 
     const charId = resolveCharId(delta.current_character, foundation.cast, turnId);
+    const wasSignedOffBefore = p2State.characterProgress[charId]?.status === "signed_off";
     const resolution = resolveCharacterTurn(
       p2State,
       charId,
@@ -489,11 +493,46 @@ export async function POST(req: NextRequest) {
         item: d.item,
         defer_to: d.defer_to_project,
         notes: d.notes,
+        charId,
       }));
       console.warn(
         `[character-chat] deferred ${outstandingQuestions.length} out-of-scope item(s) on turn ${turnId}: ${outstandingQuestions.map((q) => `${q.item} -> ${q.defer_to}`).join(", ")}`
       );
       await appendOutstandingQuestions(storyId, outstandingQuestions);
+    }
+
+    // Stage 6 sign-off compilation (issue #34) - only on a FRESH
+    // transition to signed_off this turn (wasSignedOffBefore captured
+    // from p2State, the pre-turn snapshot, before resolveCharacterTurn
+    // ran). Runs after this turn's own fact/relationship/deferred-item
+    // writes above, so a character who confirms their final fact on the
+    // same turn they sign off (Stage 6 immediately follows Stage 5) gets
+    // a complete entry.
+    if (!wasSignedOffBefore && resolution.status === "signed_off") {
+      const [characterFacts, characterRelationships, outstandingQuestionsForCompile] = await Promise.all([
+        listElements(storyId, CHARACTER_FACTS_COLLECTION),
+        listElements(storyId, CHARACTER_RELATIONSHIPS_COLLECTION),
+        listOutstandingQuestions(storyId),
+      ]);
+      const compiled = compileCharacterBibleEntry({
+        charId,
+        characterName: delta.current_character,
+        storyRole: foundation.cast[castIndex]?.story_role ?? "",
+        tier: tier ?? "",
+        depthLabel: tier ? getDepthLabel(tier) : "",
+        facts: characterFacts,
+        relationships: characterRelationships,
+        outstandingQuestions: outstandingQuestionsForCompile,
+        signedOffAt: new Date().toISOString(),
+      });
+      const compileResult = await appendCharacterBibleEntry(storyId, compiled);
+      if (compileResult.ok) {
+        console.warn(`[character-chat] compiled Character Bible entry for ${charId} on turn ${turnId}`);
+      } else {
+        console.warn(
+          `[character-chat] Character Bible entry for ${charId} already exists on turn ${turnId} - not overwritten`
+        );
+      }
     }
 
     if (conflictResult.logEntry) {
