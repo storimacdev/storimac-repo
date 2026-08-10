@@ -73,7 +73,12 @@ export default function CharacterInterview() {
         if (activeProgress) {
           setCurrentCharacter(activeProgress.characterName);
           setCurrentStage(activeProgress.stage);
-          setCharacterSignedOff(activeProgress.status === "signed_off");
+          // Not setting characterSignedOff here: characterFsm.ts clears
+          // activeCharacterId to null exactly when a character signs off,
+          // so activeProgress (only defined when activeCharacterId is
+          // non-null) can never have status "signed_off" - it stays at
+          // its initial `false`, matching the pre-existing behavior where
+          // the "Signed Off" banner never persisted across a reload anyway.
         }
         const lastAssistant = [...rawMessages].reverse().find((m) => m.role === "assistant" && m.current_character);
         if (lastAssistant) {
