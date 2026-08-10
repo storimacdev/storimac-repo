@@ -258,6 +258,34 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Confirmed-facts grounding (issue #36) - the model's only other
+    // signal that a fact is already settled is the bounded
+    // CHARACTER_MESSAGE_WINDOW replayed transcript, which falls out of
+    // scope on a long interview or a resumed session (a fresh, short
+    // window). Mirrors the Relationship Graph block immediately above:
+    // unconditional injection for every character with a
+    // characterProgress entry (reusing the same relationshipGroundedIds
+    // array, not recomputed), since current_character isn't known until
+    // after this turn's model call - inject broadly and trust the model
+    // to use what's relevant. Only Confirmed facts appear; Working/
+    // Exploring facts are still legitimately being explored.
+    if (relationshipGroundedIds.length > 0) {
+      const factElements = await listElements(storyId, CHARACTER_FACTS_COLLECTION);
+      const factLines: string[] = [];
+      for (const id of relationshipGroundedIds) {
+        const progress = p2State.characterProgress[id];
+        const confirmed = factElements.filter((e) => e.element_id.startsWith(`${id}.`) && e.status === "Confirmed");
+        if (confirmed.length === 0) continue;
+        const fieldLines = confirmed
+          .map((e) => `  - ${e.element_id.slice(id.length + 1)}: ${typeof e.value === "string" ? e.value : JSON.stringify(e.value)}`)
+          .join("\n");
+        factLines.push(`- ${progress.characterName}:\n${fieldLines}`);
+      }
+      if (factLines.length > 0) {
+        system += `\n\n[Confirmed Facts So Far - computed by the app, trust this over re-deriving it. Internal grounding only, never narrate this raw data to the author. Do not re-ask about any fact listed here as Confirmed - treat it as already settled and move the interview forward.]\n${factLines.join("\n")}`;
+      }
+    }
+
     if (story.p2PendingConflict) {
       system += `\n\n${buildConflictContextMessage(story.p2PendingConflict)}`;
     }
