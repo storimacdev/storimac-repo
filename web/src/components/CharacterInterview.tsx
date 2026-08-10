@@ -6,7 +6,7 @@ import Link from "next/link";
 import Markdown from "@/components/Markdown";
 import UserMenu from "@/components/UserMenu";
 import { downloadText, downloadBlob } from "@/lib/download";
-import type { CharacterBibleEntry } from "@/lib/canonEngine/storyStore";
+import type { CharacterBibleEntry, P2State } from "@/lib/canonEngine/storyStore";
 import { renderCharacterBibleMarkdown } from "@/lib/characterEngine/characterBibleMarkdown";
 
 type ChatMessage = {
@@ -61,9 +61,25 @@ export default function CharacterInterview() {
           current_stage?: number;
         }[];
         setMessages(rawMessages.map((m) => ({ role: m.role, content: m.content })));
+
+        // Prefer the persisted, authoritative P2State over re-deriving
+        // current character/stage from message metadata (issue #36) -
+        // data.story.p2 is already sent by this endpoint, just unread
+        // until now. context has no structured equivalent in P2State
+        // (it's the model's free-text reasoning, not session state), so
+        // it still comes from the last assistant message regardless.
+        const p2 = data.story?.p2 as P2State | undefined;
+        const activeProgress = p2?.activeCharacterId ? p2.characterProgress[p2.activeCharacterId] : undefined;
+        if (activeProgress) {
+          setCurrentCharacter(activeProgress.characterName);
+          setCurrentStage(activeProgress.stage);
+          setCharacterSignedOff(activeProgress.status === "signed_off");
+        }
         const lastAssistant = [...rawMessages].reverse().find((m) => m.role === "assistant" && m.current_character);
         if (lastAssistant) {
           setContext(lastAssistant.context ?? null);
+        }
+        if (!activeProgress && lastAssistant) {
           setCurrentCharacter(lastAssistant.current_character ?? null);
           setCurrentStage(lastAssistant.current_stage ?? null);
         }
