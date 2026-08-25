@@ -5,6 +5,8 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Markdown from "@/components/Markdown";
 import UserMenu from "@/components/UserMenu";
+import type { P3State } from "@/lib/canonEngine/storyStore";
+import { WCL_LABELS, WCL_LEVELS, type WclLevel } from "@/lib/worldEngine/wcl";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -32,6 +34,8 @@ export default function WorldInterview() {
   const [currentStage, setCurrentStage] = useState<number | null>(null);
   const [context, setContext] = useState<string | null>(null);
   const [leftWidth, setLeftWidth] = useState(380);
+  const [wclState, setWclState] = useState<P3State | null>(null);
+  const [wclUpdating, setWclUpdating] = useState(false);
   const listEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -58,6 +62,7 @@ export default function WorldInterview() {
           setContext(lastAssistant.context ?? null);
           setCurrentStage(lastAssistant.current_stage ?? null);
         }
+        setWclState((data.story?.p3 as P3State | undefined) ?? null);
       } catch {
         if (!cancelled) setError("Couldn't reach the server. Is the dev server running?");
       } finally {
@@ -104,6 +109,12 @@ export default function WorldInterview() {
       setMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
       setContext(data.context ?? null);
       setCurrentStage(typeof data.current_stage === "number" ? data.current_stage : null);
+      if (typeof data.proposed_wcl === "number") {
+        setWclState((prev) => ({
+          proposedWorldComplexityLevel: data.proposed_wcl,
+          worldComplexityLevel: prev?.worldComplexityLevel ?? null,
+        }));
+      }
     } catch {
       setError("Couldn't reach the server. Is the dev server running?");
     } finally {
@@ -112,6 +123,39 @@ export default function WorldInterview() {
         listEndRef.current?.scrollIntoView({ behavior: "smooth" })
       );
     }
+  }
+
+  async function applyWcl(level: WclLevel) {
+    if (!canvasId || wclUpdating) return;
+    setWclUpdating(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/world-chat/wcl", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storyId: canvasId, level }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Couldn't update the World Complexity Level.");
+        return;
+      }
+      setWclState((data.p3 as P3State | undefined) ?? null);
+    } catch {
+      setError("Couldn't reach the server. Is the dev server running?");
+    } finally {
+      setWclUpdating(false);
+    }
+  }
+
+  function handleWclChange(level: WclLevel) {
+    if (wclState?.worldComplexityLevel && level !== wclState.worldComplexityLevel) {
+      const confirmed = window.confirm(
+        "Changing the World Complexity Level after it's set affects downstream depth budgets. Continue?"
+      );
+      if (!confirmed) return;
+    }
+    applyWcl(level);
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -229,6 +273,60 @@ export default function WorldInterview() {
             <div data-testid="right-panel" className="flex min-w-0 flex-1 flex-col bg-neutral-950">
               <div className="flex shrink-0 items-center justify-between border-b border-red-900/40 px-5 py-2.5">
                 <span className="text-[11px] uppercase tracking-widest text-neutral-500">preview · World Overview</span>
+                {wclState?.worldComplexityLevel ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-neutral-400">
+                      WCL: Level {wclState.worldComplexityLevel} ({WCL_LABELS[wclState.worldComplexityLevel]})
+                    </span>
+                    <select
+                      value=""
+                      disabled={wclUpdating}
+                      onChange={(e) => {
+                        const level = Number(e.target.value) as WclLevel;
+                        if (level) handleWclChange(level);
+                        e.target.value = "";
+                      }}
+                      className="rounded-lg border border-red-500/50 bg-neutral-900 px-2 py-1 text-[11px] font-semibold text-red-200 disabled:opacity-40"
+                    >
+                      <option value="">Change ▾</option>
+                      {WCL_LEVELS.map((level) => (
+                        <option key={level} value={level}>
+                          Level {level} ({WCL_LABELS[level]})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : wclState?.proposedWorldComplexityLevel ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-neutral-400">
+                      Proposed: Level {wclState.proposedWorldComplexityLevel} ({WCL_LABELS[wclState.proposedWorldComplexityLevel]})
+                    </span>
+                    <button
+                      onClick={() => applyWcl(wclState.proposedWorldComplexityLevel as WclLevel)}
+                      disabled={wclUpdating}
+                      className="rounded-lg bg-gradient-to-r from-red-600 to-orange-500 px-3 py-1.5 text-[11px] font-semibold text-white hover:from-red-500 hover:to-orange-400 disabled:opacity-40"
+                    >
+                      Confirm
+                    </button>
+                    <select
+                      value=""
+                      disabled={wclUpdating}
+                      onChange={(e) => {
+                        const level = Number(e.target.value) as WclLevel;
+                        if (level) applyWcl(level);
+                        e.target.value = "";
+                      }}
+                      className="rounded-lg border border-red-500/50 bg-neutral-900 px-2 py-1 text-[11px] font-semibold text-red-200 disabled:opacity-40"
+                    >
+                      <option value="">Pick a different level ▾</option>
+                      {WCL_LEVELS.filter((level) => level !== wclState.proposedWorldComplexityLevel).map((level) => (
+                        <option key={level} value={level}>
+                          Level {level} ({WCL_LABELS[level]})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
               </div>
 
               <div className="min-h-0 flex-1 overflow-y-auto px-8 py-8">
