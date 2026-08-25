@@ -107,10 +107,15 @@ export interface StoryMessage {
   ts: string;
   turnId: string;
   context?: string;
-  /** Project 2 only (issues #26/#27) — the character/stage this assistant
-   * turn reported as current. Optional since Project 1 messages, and every
-   * user-role message, never set these. */
+  /** Project 2 only (issues #26/#27) — the character this assistant turn
+   * reported as current. Optional since Project 1 messages, and every
+   * user-role message, never set this. */
   current_character?: string;
+  /** The stage this assistant turn reported as current - Project 2 (1-6,
+   * issues #26/#27) or Project 3 (1-5, issue #38), whichever project wrote
+   * this message; each project's own subcollection keeps the two from ever
+   * mixing. Optional since Project 1 messages, and every user-role
+   * message, never set this. */
   current_stage?: number;
 }
 
@@ -119,6 +124,13 @@ export interface StoryMessage {
  * string across files, which would let a typo silently split reads and
  * writes across two different subcollections with no compile error. */
 export const CHARACTER_MESSAGES_COLLECTION = "characterMessages";
+
+/** Project 3's message subcollection name (issue #38) - same reasoning as
+ * CHARACTER_MESSAGES_COLLECTION above. Reuses StoryMessage's existing
+ * `current_stage` field as-is (no Project-3-specific message type needed);
+ * `current_character` simply stays unset for every Project 3 message,
+ * since Project 3 has no per-character concept. */
+export const WORLD_MESSAGES_COLLECTION = "worldMessages";
 
 export class StoryAccessError extends Error {
   constructor(message: string) {
