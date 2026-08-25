@@ -61,6 +61,15 @@ const EMPTY_STORY_SPINE: FoundationDocument["11_story_spine"] = {
   closing_image: "",
 };
 
+const EMPTY_DRAMATIC_ENGINE: FoundationDocument["8_dramatic_engine"] = {
+  protagonist: "",
+  antagonistic_force: "",
+  central_conflict: "",
+  primary_stakes: "",
+  transformation_arc: "",
+  emotional_journey: "",
+};
+
 /** Guards against a missing/malformed section at runtime (unchecked
  * Firestore cast) - generalizes characterEngine/ingestFoundation.ts's
  * extractStorySpine into a reusable helper since this file needs the same
@@ -90,6 +99,7 @@ export function extractIngestedWorldFoundation(version: StoredDocumentVersion, s
     EMPTY_WORLD_FOUNDATION
   );
   const { value: storySpine } = extractSection(doc["11_story_spine"], EMPTY_STORY_SPINE);
+  const { value: dramaticEngine } = extractSection(doc["8_dramatic_engine"], EMPTY_DRAMATIC_ENGINE);
 
   const foundation: IngestedWorldFoundation = {
     storyId,
@@ -99,7 +109,7 @@ export function extractIngestedWorldFoundation(version: StoredDocumentVersion, s
     premise,
     worldFoundation,
     storySpine,
-    dramaticEngine: doc["8_dramatic_engine"],
+    dramaticEngine,
   };
 
   const reasons: string[] = [];

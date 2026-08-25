@@ -19,8 +19,8 @@ export const runtime = "nodejs";
 // CHARACTER_MESSAGE_WINDOW.
 const WORLD_MESSAGE_WINDOW = 20;
 
-function listOrDash(items: unknown[]): string {
-  if (!items.length) return "(not set)";
+function listOrDash(items?: unknown[]): string {
+  if (!items?.length) return "(not set)";
   return items.map((i) => (typeof i === "string" ? i : JSON.stringify(i))).join("; ");
 }
 
