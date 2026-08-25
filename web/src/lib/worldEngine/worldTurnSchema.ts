@@ -26,7 +26,7 @@ export const WorldTurnSchema = z.object({
   reply: z.string().min(1),
   context: z.string().min(1),
   current_stage: z.number().int().min(1).max(5),
-  proposed_wcl: z.number().int().min(1).max(4).nullable(),
+  proposed_wcl: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).nullable(),
 });
 
 export type WorldTurn = z.infer<typeof WorldTurnSchema>;
@@ -55,6 +55,7 @@ export const EMIT_WORLD_TURN_TOOL: Anthropic.Tool = {
       },
       proposed_wcl: {
         type: ["number", "null"],
+        enum: [1, 2, 3, 4, null],
         description:
           "The World Complexity Level (1-4: Minimal/Moderate/Rich/Extensive) you calculated this turn per the Adaptive World Complexity framework, so the app can offer it to the author as a real proposal to confirm or override. Report the level again on every turn you've assessed one, even if unchanged from a prior turn. Use null only if you haven't assessed a level yet this turn (e.g. still gathering the Stage 1 basics).",
       },

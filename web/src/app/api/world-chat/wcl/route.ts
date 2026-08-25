@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/session";
 import { errorResponse } from "@/lib/apiErrors";
 import { getMembership } from "@/lib/workspace/workspaceStore";
-import { getStory, setP3State, type P3State } from "@/lib/canonEngine/storyStore";
+import { getStory, setP3ConfirmedLevel, type P3State } from "@/lib/canonEngine/storyStore";
 
 export const runtime = "nodejs";
 
@@ -39,7 +39,11 @@ export async function PATCH(req: NextRequest) {
 
     const currentP3: P3State = story.p3 ?? { proposedWorldComplexityLevel: null, worldComplexityLevel: null };
     const nextP3: P3State = { ...currentP3, worldComplexityLevel: level };
-    await setP3State(storyId, nextP3);
+    // Dotted-field-path update (issue #39 final-review fix) - only
+    // worldComplexityLevel is ever written here, so this can never
+    // clobber a proposedWorldComplexityLevel written concurrently by a
+    // turn's own setP3ProposedLevel call.
+    await setP3ConfirmedLevel(storyId, level);
 
     return NextResponse.json({ p3: nextP3 });
   } catch (err) {

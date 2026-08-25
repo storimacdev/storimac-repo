@@ -294,11 +294,29 @@ export async function setP2State(storyId: string, p2: P2State): Promise<void> {
     .update({ p2, updatedAt: new Date().toISOString() });
 }
 
-/** Persists Project 3's World Complexity Level state (issue #39) - same shape as setP2State. */
-export async function setP3State(storyId: string, p3: P3State): Promise<void> {
+/** Updates only Project 3's model-proposed World Complexity Level (issue
+ * #39 final-review fix) - a dotted-field-path update so this write and
+ * setP3ConfirmedLevel below touch disjoint Firestore fields. A whole-
+ * object read-modify-write here previously let a turn's stale `story.p3`
+ * snapshot (held across a 10-45s model call) silently overwrite an
+ * author's confirmed level if they clicked Confirm while that turn was
+ * still in flight - this write can never touch worldComplexityLevel, so
+ * it can no longer clobber it no matter how stale the caller's own read
+ * was. */
+export async function setP3ProposedLevel(storyId: string, level: 1 | 2 | 3 | 4): Promise<void> {
   await storiesCollection()
     .doc(storyId)
-    .update({ p3, updatedAt: new Date().toISOString() });
+    .update({ "p3.proposedWorldComplexityLevel": level, updatedAt: new Date().toISOString() });
+}
+
+/** Updates only Project 3's author-confirmed World Complexity Level
+ * (issue #39 final-review fix) - the counterpart to setP3ProposedLevel
+ * above, keeping the two writers' fields disjoint so neither can clobber
+ * the other regardless of which one reads a stale snapshot first. */
+export async function setP3ConfirmedLevel(storyId: string, level: 1 | 2 | 3 | 4): Promise<void> {
+  await storiesCollection()
+    .doc(storyId)
+    .update({ "p3.worldComplexityLevel": level, updatedAt: new Date().toISOString() });
 }
 
 /** Records or clears Project 2's pending Story Foundation conflict (issue #30); pass null to clear once resolved. */

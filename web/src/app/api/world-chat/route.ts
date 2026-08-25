@@ -9,7 +9,7 @@ import {
   getStory,
   appendMessage,
   listMessages,
-  setP3State,
+  setP3ProposedLevel,
   type P3State,
   WORLD_MESSAGES_COLLECTION,
 } from "@/lib/canonEngine/storyStore";
@@ -148,27 +148,25 @@ export async function POST(req: NextRequest) {
       WORLD_MESSAGES_COLLECTION
     );
 
-    // World Complexity Level proposal tracking (issue #39) - only the
-    // proposed value updates here; the confirmed value only ever changes
-    // via the explicit PATCH /api/world-chat/wcl action, never from a
-    // turn response directly.
+    // World Complexity Level proposal tracking (issue #39, final-review
+    // fix) - only the proposed field is ever written here, via a
+    // dotted-field-path update (setP3ProposedLevel) so this write can
+    // never clobber a confirmed value set concurrently by
+    // PATCH /api/world-chat/wcl while this turn's model call was in
+    // flight. proposed_wcl is now typed as the literal union 1|2|3|4|null
+    // directly by WorldTurnSchema (a Zod union of literals, not a ranged
+    // .number()), so no cast is needed here.
+    let p3ForResponse: P3State = story.p3 ?? { proposedWorldComplexityLevel: null, worldComplexityLevel: null };
     if (delta.proposed_wcl !== null) {
-      const currentP3: P3State = story.p3 ?? { proposedWorldComplexityLevel: null, worldComplexityLevel: null };
-      // WorldTurnSchema validates proposed_wcl to an integer in [1, 4] at
-      // runtime (see worldTurnSchema.ts), but zod's .number() infers as
-      // the wider `number` type, so narrow it to P3State's literal union
-      // here rather than widening P3State itself.
-      await setP3State(storyId, {
-        ...currentP3,
-        proposedWorldComplexityLevel: delta.proposed_wcl as 1 | 2 | 3 | 4,
-      });
+      await setP3ProposedLevel(storyId, delta.proposed_wcl);
+      p3ForResponse = { ...p3ForResponse, proposedWorldComplexityLevel: delta.proposed_wcl };
     }
 
     return NextResponse.json({
       reply: delta.reply,
       context: delta.context,
       current_stage: delta.current_stage,
-      proposed_wcl: delta.proposed_wcl,
+      p3: p3ForResponse,
     });
   } catch (err) {
     if (err instanceof Anthropic.APIError) {

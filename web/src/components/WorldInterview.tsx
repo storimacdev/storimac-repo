@@ -109,11 +109,8 @@ export default function WorldInterview() {
       setMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
       setContext(data.context ?? null);
       setCurrentStage(typeof data.current_stage === "number" ? data.current_stage : null);
-      if (typeof data.proposed_wcl === "number") {
-        setWclState((prev) => ({
-          proposedWorldComplexityLevel: data.proposed_wcl,
-          worldComplexityLevel: prev?.worldComplexityLevel ?? null,
-        }));
+      if (data.p3) {
+        setWclState(data.p3 as P3State);
       }
     } catch {
       setError("Couldn't reach the server. Is the dev server running?");
@@ -280,7 +277,7 @@ export default function WorldInterview() {
                     </span>
                     <select
                       value=""
-                      disabled={wclUpdating}
+                      disabled={wclUpdating || loading}
                       onChange={(e) => {
                         const level = Number(e.target.value) as WclLevel;
                         if (level) handleWclChange(level);
@@ -289,7 +286,7 @@ export default function WorldInterview() {
                       className="rounded-lg border border-red-500/50 bg-neutral-900 px-2 py-1 text-[11px] font-semibold text-red-200 disabled:opacity-40"
                     >
                       <option value="">Change ▾</option>
-                      {WCL_LEVELS.map((level) => (
+                      {WCL_LEVELS.filter((level) => level !== wclState.worldComplexityLevel).map((level) => (
                         <option key={level} value={level}>
                           Level {level} ({WCL_LABELS[level]})
                         </option>
@@ -303,14 +300,14 @@ export default function WorldInterview() {
                     </span>
                     <button
                       onClick={() => applyWcl(wclState.proposedWorldComplexityLevel as WclLevel)}
-                      disabled={wclUpdating}
+                      disabled={wclUpdating || loading}
                       className="rounded-lg bg-gradient-to-r from-red-600 to-orange-500 px-3 py-1.5 text-[11px] font-semibold text-white hover:from-red-500 hover:to-orange-400 disabled:opacity-40"
                     >
                       Confirm
                     </button>
                     <select
                       value=""
-                      disabled={wclUpdating}
+                      disabled={wclUpdating || loading}
                       onChange={(e) => {
                         const level = Number(e.target.value) as WclLevel;
                         if (level) applyWcl(level);
