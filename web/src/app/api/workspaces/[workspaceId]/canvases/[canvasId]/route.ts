@@ -2,7 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/session";
 import { errorResponse } from "@/lib/apiErrors";
 import { getMembership } from "@/lib/workspace/workspaceStore";
-import { getStory, listMessages, renameStory, deleteStory, listGuardrailFlags, CHARACTER_MESSAGES_COLLECTION } from "@/lib/canonEngine/storyStore";
+import {
+  getStory,
+  listMessages,
+  renameStory,
+  deleteStory,
+  listGuardrailFlags,
+  CHARACTER_MESSAGES_COLLECTION,
+  WORLD_MESSAGES_COLLECTION,
+} from "@/lib/canonEngine/storyStore";
 import { listElements } from "@/lib/canonEngine/canonStore";
 import { setLastVisited } from "@/lib/userStore";
 
@@ -25,6 +33,8 @@ export async function GET(
     // when the Character Bible client explicitly asks, so P1's canvas load
     // doesn't pay for an unused Firestore read and a larger payload.
     const includeCharacterMessages = req.nextUrl.searchParams.get("characterMessages") === "1";
+    // Same reasoning, for the World Bible client (issue #38).
+    const includeWorldMessages = req.nextUrl.searchParams.get("worldMessages") === "1";
 
     const membership = await getMembership(workspaceId, user.uid);
     if (!membership) {
@@ -36,17 +46,18 @@ export async function GET(
       return NextResponse.json({ error: "Story Canvas not found." }, { status: 404 });
     }
 
-    const [elements, messages, characterMessages, guardrailFlags] = await Promise.all([
+    const [elements, messages, characterMessages, worldMessages, guardrailFlags] = await Promise.all([
       listElements(canvasId),
       listMessages(canvasId),
       includeCharacterMessages ? listMessages(canvasId, undefined, CHARACTER_MESSAGES_COLLECTION) : Promise.resolve([]),
+      includeWorldMessages ? listMessages(canvasId, undefined, WORLD_MESSAGES_COLLECTION) : Promise.resolve([]),
       listGuardrailFlags(canvasId),
     ]);
 
     // Track last-visited so "/" and bare "/interview" resume here (issue #90).
     await setLastVisited(user.uid, workspaceId, canvasId);
 
-    return NextResponse.json({ story, elements, messages, characterMessages, guardrailFlags });
+    return NextResponse.json({ story, elements, messages, characterMessages, worldMessages, guardrailFlags });
   } catch (err) {
     return errorResponse(err);
   }
