@@ -343,6 +343,12 @@ export default function ChatInterview() {
                         Continue to Character Development →
                       </Link>
                       <Link
+                        href={`/world-bible?workspaceId=${workspaceId}&canvasId=${canvasId}`}
+                        className="rounded-lg border border-red-500/50 px-3 py-2 text-xs font-semibold text-red-200 transition hover:bg-red-500/10"
+                      >
+                        Start World Bible →
+                      </Link>
+                      <Link
                         href="/dashboard"
                         className="rounded-lg border border-red-500/50 px-3 py-2 text-xs font-semibold text-red-200 transition hover:bg-red-500/10"
                       >
