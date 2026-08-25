@@ -60,6 +60,17 @@ export interface P2PendingConflict {
   ts: string;
 }
 
+/** Project 3's World Complexity Level state (issue #39) - a single
+ * author-confirmed value per project, not part of the 4-state canon
+ * machinery. `proposedWorldComplexityLevel` updates from any turn where
+ * the model states a calculated level; `worldComplexityLevel` only
+ * changes via the explicit UI confirm/change action
+ * (POST /api/world-chat/wcl), never from a turn response directly. */
+export interface P3State {
+  proposedWorldComplexityLevel: 1 | 2 | 3 | 4 | null;
+  worldComplexityLevel: 1 | 2 | 3 | 4 | null;
+}
+
 export interface Story {
   id: string;
   ownerUid: string;
@@ -98,6 +109,12 @@ export interface Story {
    * won't have it in Firestore.
    */
   p2PendingConflict?: P2PendingConflict | null;
+  /**
+   * Project 3's World Complexity Level state (issue #39). Optional/
+   * nullable since Stories created before this field existed won't have
+   * it in Firestore.
+   */
+  p3?: P3State | null;
 }
 
 export interface StoryMessage {
@@ -275,6 +292,13 @@ export async function setP2State(storyId: string, p2: P2State): Promise<void> {
   await storiesCollection()
     .doc(storyId)
     .update({ p2, updatedAt: new Date().toISOString() });
+}
+
+/** Persists Project 3's World Complexity Level state (issue #39) - same shape as setP2State. */
+export async function setP3State(storyId: string, p3: P3State): Promise<void> {
+  await storiesCollection()
+    .doc(storyId)
+    .update({ p3, updatedAt: new Date().toISOString() });
 }
 
 /** Records or clears Project 2's pending Story Foundation conflict (issue #30); pass null to clear once resolved. */
