@@ -3,14 +3,15 @@ import type Anthropic from "@anthropic-ai/sdk";
 
 /**
  * Project 3 turn schema/tool - GitHub issue #38 (base turn shape for
- * Stage 1). Reference: Project 1's stateDelta.ts + extractTurn.ts's
- * generic StructuredDeltaExtractor (ARCHITECTURE.md §2), and Project 2's
- * characterTurnSchema.ts for the same reply/context/current_stage shape.
- * Deliberately minimal for this issue - no canon-state updates, no
- * guardrail/conflict fields yet, since the Canon Registry (#41), scope
- * guardrails (#46), and Conflict Resolution (#47) haven't been built.
- * Every later Phase 1-3 issue extends this same schema, the same way
- * Project 2's grew incrementally across issues #26/#28/#30/#31/#32.
+ * Stage 1) and #39 (`proposed_wcl`). Reference: Project 1's stateDelta.ts +
+ * extractTurn.ts's generic StructuredDeltaExtractor (ARCHITECTURE.md §2),
+ * and Project 2's characterTurnSchema.ts for the same
+ * reply/context/current_stage shape. Deliberately minimal beyond that - no
+ * canon-state updates, no guardrail/conflict fields yet, since the Canon
+ * Registry (#41), scope guardrails (#46), and Conflict Resolution (#47)
+ * haven't been built. Every later Phase 1-3 issue extends this same
+ * schema, the same way Project 2's grew incrementally across issues
+ * #26/#28/#30/#31/#32.
  */
 
 export const WORLD_STAGE_NAMES: Record<number, string> = {
@@ -25,6 +26,7 @@ export const WorldTurnSchema = z.object({
   reply: z.string().min(1),
   context: z.string().min(1),
   current_stage: z.number().int().min(1).max(5),
+  proposed_wcl: z.number().int().min(1).max(4).nullable(),
 });
 
 export type WorldTurn = z.infer<typeof WorldTurnSchema>;
@@ -51,7 +53,12 @@ export const EMIT_WORLD_TURN_TOOL: Anthropic.Tool = {
         description:
           "The interview stage (1-5) currently in progress: 1 Understand, 2 Assess & Pillar Mapping, 3 Prioritize & Deep Dive, 4 System Integration Audit, 5 Compile.",
       },
+      proposed_wcl: {
+        type: ["number", "null"],
+        description:
+          "The World Complexity Level (1-4: Minimal/Moderate/Rich/Extensive) you calculated this turn per the Adaptive World Complexity framework, so the app can offer it to the author as a real proposal to confirm or override. Report the level again on every turn you've assessed one, even if unchanged from a prior turn. Use null only if you haven't assessed a level yet this turn (e.g. still gathering the Stage 1 basics).",
+      },
     },
-    required: ["reply", "context", "current_stage"],
+    required: ["reply", "context", "current_stage", "proposed_wcl"],
   },
 };
