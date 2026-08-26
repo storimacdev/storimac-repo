@@ -10,6 +10,8 @@ import {
   appendMessage,
   listMessages,
   setP3ProposedLevel,
+  setP3ProposedPillars,
+  normalizeP3,
   type P3State,
   WORLD_MESSAGES_COLLECTION,
 } from "@/lib/canonEngine/storyStore";
@@ -148,18 +150,20 @@ export async function POST(req: NextRequest) {
       WORLD_MESSAGES_COLLECTION
     );
 
-    // World Complexity Level proposal tracking (issue #39, final-review
-    // fix) - only the proposed field is ever written here, via a
-    // dotted-field-path update (setP3ProposedLevel) so this write can
-    // never clobber a confirmed value set concurrently by
-    // PATCH /api/world-chat/wcl while this turn's model call was in
-    // flight. proposed_wcl is now typed as the literal union 1|2|3|4|null
-    // directly by WorldTurnSchema (a Zod union of literals, not a ranged
-    // .number()), so no cast is needed here.
-    let p3ForResponse: P3State = story.p3 ?? { proposedWorldComplexityLevel: null, worldComplexityLevel: null };
+    // World Complexity Level and Pillar proposal tracking (issues #39,
+    // #40, final-review fix pattern) - only the proposed fields are ever
+    // written here, via dotted-field-path updates, so this can never
+    // clobber a value an author confirmed concurrently via
+    // PATCH /api/world-chat/wcl or PATCH /api/world-chat/pillars while
+    // this turn's model call was in flight.
+    let p3ForResponse: P3State = normalizeP3(story.p3);
     if (delta.proposed_wcl !== null) {
       await setP3ProposedLevel(storyId, delta.proposed_wcl);
       p3ForResponse = { ...p3ForResponse, proposedWorldComplexityLevel: delta.proposed_wcl };
+    }
+    if (delta.proposed_pillars !== null) {
+      await setP3ProposedPillars(storyId, delta.proposed_pillars);
+      p3ForResponse = { ...p3ForResponse, proposedPillars: delta.proposed_pillars };
     }
 
     return NextResponse.json({

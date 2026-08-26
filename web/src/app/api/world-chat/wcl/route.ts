@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/session";
 import { errorResponse } from "@/lib/apiErrors";
 import { getMembership } from "@/lib/workspace/workspaceStore";
-import { getStory, setP3ConfirmedLevel, type P3State } from "@/lib/canonEngine/storyStore";
+import { getStory, setP3ConfirmedLevel, normalizeP3, type P3State } from "@/lib/canonEngine/storyStore";
 
 export const runtime = "nodejs";
 
@@ -37,7 +37,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Not a member of this workspace." }, { status: 403 });
     }
 
-    const currentP3: P3State = story.p3 ?? { proposedWorldComplexityLevel: null, worldComplexityLevel: null };
+    const currentP3: P3State = normalizeP3(story.p3);
     const nextP3: P3State = { ...currentP3, worldComplexityLevel: level };
     // Dotted-field-path update (issue #39 final-review fix) - only
     // worldComplexityLevel is ever written here, so this can never
