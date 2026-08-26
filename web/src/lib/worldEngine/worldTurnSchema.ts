@@ -27,6 +27,7 @@ export const WorldTurnSchema = z.object({
   context: z.string().min(1),
   current_stage: z.number().int().min(1).max(5),
   proposed_wcl: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).nullable(),
+  proposed_pillars: z.array(z.string().min(1)).nullable(),
 });
 
 export type WorldTurn = z.infer<typeof WorldTurnSchema>;
@@ -59,7 +60,13 @@ export const EMIT_WORLD_TURN_TOOL: Anthropic.Tool = {
         description:
           "The World Complexity Level (1-4: Minimal/Moderate/Rich/Extensive) you calculated this turn per the Adaptive World Complexity framework, so the app can offer it to the author as a real proposal to confirm or override. Report the level again on every turn you've assessed one, even if unchanged from a prior turn. Use null only if you haven't assessed a level yet this turn (e.g. still gathering the Stage 1 basics).",
       },
+      proposed_pillars: {
+        type: ["array", "null"],
+        items: { type: "string" },
+        description:
+          "The ordered list of relevant World Pillars you've identified for this world (e.g. Technology, Government & Bureaucracy, Economy, Culture, Geography, Underworld, History), most important first, so the app can offer it to the author as a starting list to confirm, edit, or reorder. Report the list again on every turn you've assessed one, even if unchanged from a prior turn. Use null only if you haven't identified a pillar list yet this turn.",
+      },
     },
-    required: ["reply", "context", "current_stage", "proposed_wcl"],
+    required: ["reply", "context", "current_stage", "proposed_wcl", "proposed_pillars"],
   },
 };
