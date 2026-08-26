@@ -36,6 +36,10 @@ export default function WorldInterview() {
   const [leftWidth, setLeftWidth] = useState(380);
   const [wclState, setWclState] = useState<P3State | null>(null);
   const [wclUpdating, setWclUpdating] = useState(false);
+  const [pillarDraft, setPillarDraft] = useState<string[]>([]);
+  const [pillarDraftTouched, setPillarDraftTouched] = useState(false);
+  const [pillarsUpdating, setPillarsUpdating] = useState(false);
+  const [newPillarInput, setNewPillarInput] = useState("");
   const listEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -73,6 +77,30 @@ export default function WorldInterview() {
       cancelled = true;
     };
   }, [workspaceId, canvasId]);
+
+  // Mirrors `pillars` once adopted (live-edit mode); before adoption,
+  // mirrors the model's latest `proposedPillars` unless the author has
+  // already started editing the pre-adoption draft locally - once
+  // touched, the local draft is the author's own and stops following
+  // new model proposals, the same "final authority once decided"
+  // posture the WCL confirm/change split already established one step
+  // later in that flow.
+  useEffect(() => {
+    if (!wclState) return;
+    // Mirrors external p3 state (server-confirmed or model-proposed
+    // pillars) into the local draft - the "sync from an external
+    // source" case the set-state-in-effect rule permits.
+    if (wclState.pillars !== null) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPillarDraft(wclState.pillars);
+      setPillarDraftTouched(false);
+    } else if (!pillarDraftTouched) {
+      setPillarDraft(wclState.proposedPillars ?? []);
+    }
+    // Deliberately granular deps so an unrelated wclState field change
+    // (e.g. WCL) doesn't reset this effect's decision.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wclState?.pillars, wclState?.proposedPillars, pillarDraftTouched]);
 
   // Fires the opening turn (sp03 §10: structural assessment + WCL proposal
   // + first discovery questions) automatically, once, the first time a
@@ -153,6 +181,64 @@ export default function WorldInterview() {
       if (!confirmed) return;
     }
     applyWcl(level);
+  }
+
+  async function applyPillars(pillars: string[]) {
+    if (!canvasId || pillarsUpdating) return;
+    setPillarsUpdating(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/world-chat/pillars", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storyId: canvasId, pillars }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Couldn't update the pillar list.");
+        return;
+      }
+      setWclState((data.p3 as P3State | undefined) ?? null);
+    } catch {
+      setError("Couldn't reach the server. Is the dev server running?");
+    } finally {
+      setPillarsUpdating(false);
+    }
+  }
+
+  // Before adoption (wclState.pillars === null), edits only touch the
+  // local draft - Confirm below is what first writes it to the server.
+  // After adoption, every edit immediately PATCHes the resulting array,
+  // since the author already owns this field (no confirm step needed).
+  function mutatePillars(next: string[]) {
+    setPillarDraft(next);
+    setPillarDraftTouched(true);
+    if (wclState && wclState.pillars !== null) {
+      applyPillars(next);
+    }
+  }
+
+  function addPillar() {
+    const name = newPillarInput.trim();
+    if (!name) return;
+    mutatePillars([...pillarDraft, name]);
+    setNewPillarInput("");
+  }
+
+  function removePillar(index: number) {
+    mutatePillars(pillarDraft.filter((_, i) => i !== index));
+  }
+
+  function movePillar(index: number, direction: -1 | 1) {
+    const target = index + direction;
+    if (target < 0 || target >= pillarDraft.length) return;
+    const next = [...pillarDraft];
+    [next[index], next[target]] = [next[target], next[index]];
+    mutatePillars(next);
+  }
+
+  function confirmPillarDraft() {
+    applyPillars(pillarDraft);
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -331,6 +417,87 @@ export default function WorldInterview() {
                   <div className="flex h-full flex-col items-center justify-center gap-3 text-neutral-500">
                     <div className="h-10 w-10 animate-pulse rounded-full bg-gradient-to-br from-red-600/60 to-purple-600/60" />
                     <p className="text-sm">Developing this world…</p>
+                  </div>
+                )}
+
+                {!resuming && wclState && (
+                  <div
+                    data-testid="pillars-panel"
+                    className="mb-6 rounded-xl border border-red-500/30 bg-gradient-to-br from-red-950/40 to-neutral-900/40 px-5 py-5"
+                  >
+                    <p className="bg-gradient-to-r from-red-400 to-orange-300 bg-clip-text text-xs font-bold uppercase tracking-widest text-transparent">
+                      {wclState.pillars !== null ? "World Pillars" : "Proposed World Pillars"}
+                    </p>
+                    <ul className="mt-3 flex flex-col gap-1.5">
+                      {pillarDraft.map((name, i) => (
+                        <li
+                          key={i}
+                          className="flex items-center gap-2 rounded-lg bg-neutral-900/60 px-3 py-1.5 text-[13px] text-neutral-200"
+                        >
+                          <span className="flex-1">
+                            {i + 1}. {name}
+                          </span>
+                          <button
+                            onClick={() => movePillar(i, -1)}
+                            disabled={pillarsUpdating || loading || i === 0}
+                            className="rounded px-1.5 text-neutral-400 hover:text-neutral-100 disabled:opacity-30"
+                            aria-label={`Move ${name} up`}
+                          >
+                            ▲
+                          </button>
+                          <button
+                            onClick={() => movePillar(i, 1)}
+                            disabled={pillarsUpdating || loading || i === pillarDraft.length - 1}
+                            className="rounded px-1.5 text-neutral-400 hover:text-neutral-100 disabled:opacity-30"
+                            aria-label={`Move ${name} down`}
+                          >
+                            ▼
+                          </button>
+                          <button
+                            onClick={() => removePillar(i)}
+                            disabled={pillarsUpdating || loading}
+                            className="rounded px-1.5 text-red-400 hover:text-red-300 disabled:opacity-30"
+                            aria-label={`Remove ${name}`}
+                          >
+                            ✕
+                          </button>
+                        </li>
+                      ))}
+                      {pillarDraft.length === 0 && (
+                        <li className="text-[13px] text-neutral-500">No pillars yet — add one below.</li>
+                      )}
+                    </ul>
+                    <div className="mt-3 flex items-center gap-2">
+                      <input
+                        value={newPillarInput}
+                        onChange={(e) => setNewPillarInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            addPillar();
+                          }
+                        }}
+                        placeholder="Add a pillar…"
+                        disabled={pillarsUpdating || loading}
+                        className="min-w-0 flex-1 rounded-lg border border-neutral-700 bg-neutral-900 px-2.5 py-1.5 text-[13px] text-neutral-100 placeholder:text-neutral-500 focus:outline-none disabled:opacity-40"
+                      />
+                      <button
+                        onClick={addPillar}
+                        disabled={pillarsUpdating || loading || !newPillarInput.trim()}
+                        className="shrink-0 rounded-lg border border-red-500/50 px-3 py-1.5 text-[12px] font-semibold text-red-200 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Add
+                      </button>
+                    </div>
+                    {wclState.pillars === null && (
+                      <button
+                        onClick={confirmPillarDraft}
+                        disabled={pillarsUpdating || loading || pillarDraft.length === 0}
+                        className="mt-3 rounded-lg bg-gradient-to-r from-red-600 to-orange-500 px-3 py-1.5 text-[12px] font-semibold text-white hover:from-red-500 hover:to-orange-400 disabled:opacity-40"
+                      >
+                        Confirm pillar list
+                      </button>
+                    )}
                   </div>
                 )}
 
