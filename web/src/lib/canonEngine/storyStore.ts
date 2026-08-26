@@ -60,15 +60,34 @@ export interface P2PendingConflict {
   ts: string;
 }
 
-/** Project 3's World Complexity Level state (issue #39) - a single
- * author-confirmed value per project, not part of the 4-state canon
- * machinery. `proposedWorldComplexityLevel` updates from any turn where
- * the model states a calculated level; `worldComplexityLevel` only
- * changes via the explicit UI confirm/change action
- * (POST /api/world-chat/wcl), never from a turn response directly. */
+/** Project 3's World Complexity Level and Pillar list state (issues #39,
+ * #40) - not part of the 4-state canon machinery. `proposedWorldComplexityLevel`
+ * and `proposedPillars` update from any turn where the model reports a
+ * value; `worldComplexityLevel` and `pillars` only change via an explicit
+ * author action (PATCH /api/world-chat/wcl, PATCH /api/world-chat/pillars),
+ * never from a turn response directly. `pillars: null` means the author
+ * hasn't adopted a working list yet; `pillars: []` is a distinct,
+ * deliberate "cleared it out" state - never conflate the two. */
 export interface P3State {
   proposedWorldComplexityLevel: 1 | 2 | 3 | 4 | null;
   worldComplexityLevel: 1 | 2 | 3 | 4 | null;
+  proposedPillars: string[] | null;
+  pillars: string[] | null;
+}
+
+/** Fills in `null` defaults for any P3 sub-field missing from a Story
+ * doc written before that sub-field existed (Firestore has no schema, so
+ * an old doc simply lacks the key rather than storing it as null) -
+ * every route that needs "the current p3 state, safe to read or spread"
+ * should go through this rather than hand-writing a defaults literal. */
+export function normalizeP3(p3: P3State | null | undefined): P3State {
+  return {
+    proposedWorldComplexityLevel: null,
+    worldComplexityLevel: null,
+    proposedPillars: null,
+    pillars: null,
+    ...p3,
+  };
 }
 
 export interface Story {
@@ -317,6 +336,26 @@ export async function setP3ConfirmedLevel(storyId: string, level: 1 | 2 | 3 | 4)
   await storiesCollection()
     .doc(storyId)
     .update({ "p3.worldComplexityLevel": level, updatedAt: new Date().toISOString() });
+}
+
+/** Updates only Project 3's model-proposed pillar list (issue #40) - a
+ * dotted-field-path update, same disjointness reasoning as
+ * setP3ProposedLevel: this write can never touch `pillars`, so it can't
+ * clobber an author's already-adopted working list no matter how stale
+ * this call's own read of `story.p3` was. */
+export async function setP3ProposedPillars(storyId: string, pillars: string[]): Promise<void> {
+  await storiesCollection()
+    .doc(storyId)
+    .update({ "p3.proposedPillars": pillars, updatedAt: new Date().toISOString() });
+}
+
+/** Updates only Project 3's author-adopted pillar list (issue #40) - the
+ * counterpart to setP3ProposedPillars above, keeping the two writers'
+ * fields disjoint. */
+export async function setP3Pillars(storyId: string, pillars: string[]): Promise<void> {
+  await storiesCollection()
+    .doc(storyId)
+    .update({ "p3.pillars": pillars, updatedAt: new Date().toISOString() });
 }
 
 /** Records or clears Project 2's pending Story Foundation conflict (issue #30); pass null to clear once resolved. */
