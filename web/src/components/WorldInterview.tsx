@@ -138,7 +138,13 @@ export default function WorldInterview() {
       setContext(data.context ?? null);
       setCurrentStage(typeof data.current_stage === "number" ? data.current_stage : null);
       if (data.p3) {
-        setWclState(data.p3 as P3State);
+        const incoming = data.p3 as P3State;
+        setWclState((prev) => ({
+          proposedWorldComplexityLevel: incoming.proposedWorldComplexityLevel,
+          worldComplexityLevel: prev?.worldComplexityLevel ?? null,
+          proposedPillars: incoming.proposedPillars,
+          pillars: prev?.pillars ?? null,
+        }));
       }
     } catch {
       setError("Couldn't reach the server. Is the dev server running?");
@@ -426,7 +432,11 @@ export default function WorldInterview() {
                     className="mb-6 rounded-xl border border-red-500/30 bg-gradient-to-br from-red-950/40 to-neutral-900/40 px-5 py-5"
                   >
                     <p className="bg-gradient-to-r from-red-400 to-orange-300 bg-clip-text text-xs font-bold uppercase tracking-widest text-transparent">
-                      {wclState.pillars !== null ? "World Pillars" : "Proposed World Pillars"}
+                      {wclState.pillars !== null
+                        ? "World Pillars"
+                        : (wclState.proposedPillars?.length ?? 0) > 0
+                          ? "Proposed World Pillars"
+                          : "World Pillars"}
                     </p>
                     <ul className="mt-3 flex flex-col gap-1.5">
                       {pillarDraft.map((name, i) => (

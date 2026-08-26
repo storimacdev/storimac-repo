@@ -8,6 +8,7 @@ import {
   renameStory,
   deleteStory,
   listGuardrailFlags,
+  normalizeP3,
   CHARACTER_MESSAGES_COLLECTION,
   WORLD_MESSAGES_COLLECTION,
 } from "@/lib/canonEngine/storyStore";
@@ -57,7 +58,14 @@ export async function GET(
     // Track last-visited so "/" and bare "/interview" resume here (issue #90).
     await setLastVisited(user.uid, workspaceId, canvasId);
 
-    return NextResponse.json({ story, elements, messages, characterMessages, worldMessages, guardrailFlags });
+    return NextResponse.json({
+      story: { ...story, p3: normalizeP3(story.p3) },
+      elements,
+      messages,
+      characterMessages,
+      worldMessages,
+      guardrailFlags,
+    });
   } catch (err) {
     return errorResponse(err);
   }
