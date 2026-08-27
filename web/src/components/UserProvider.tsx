@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { signOut as firebaseSignOut } from "firebase/auth";
 import { auth } from "@/lib/firebaseClient";
+import type { LastProject } from "@/lib/lastProject";
 
 /**
  * Client-side user state — GitHub issue #90. Loads /api/auth/me once per
@@ -27,6 +28,7 @@ export type UserState =
       workspaces: WorkspaceSummary[];
       lastWorkspaceId: string | null;
       lastCanvasId: string | null;
+      lastProject: LastProject | null;
     };
 
 type UserContextValue = {
@@ -64,6 +66,7 @@ export default function UserProvider({ children }: { children: React.ReactNode }
         workspaces: data.workspaces ?? [],
         lastWorkspaceId: data.lastWorkspaceId ?? null,
         lastCanvasId: data.lastCanvasId ?? null,
+        lastProject: data.lastProject ?? null,
       });
     } catch {
       setState({ status: "guest" });
