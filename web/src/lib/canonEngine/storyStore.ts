@@ -308,18 +308,9 @@ export async function setStage7Audit(
 
 /** Stores Project 2's per-character lock/progress (issue #26) - whole-object replace, same convention as setStage7Audit. */
 export async function setP2State(storyId: string, p2: P2State): Promise<void> {
-  try {
-    await storiesCollection()
-      .doc(storyId)
-      .update({ p2, updatedAt: new Date().toISOString() });
-  } catch (err) {
-    // TEMPORARY DIAGNOSTIC (remove once the live "p2 contains an invalid
-    // nested entity" Firestore write error is root-caused): include the
-    // actual payload that failed to write, since no server-log access is
-    // available to the team debugging this.
-    const message = err instanceof Error ? err.message : String(err);
-    throw new Error(`setP2State write failed: ${message} — payload: ${JSON.stringify(p2)}`);
-  }
+  await storiesCollection()
+    .doc(storyId)
+    .update({ p2, updatedAt: new Date().toISOString() });
 }
 
 /** Updates only Project 3's model-proposed World Complexity Level (issue

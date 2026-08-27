@@ -55,6 +55,17 @@ export const runtime = "nodejs";
 // Project 1's own short-transcript window (contextBudget.ts).
 const CHARACTER_MESSAGE_WINDOW = 20;
 
+// A real character name never needs more than this many characters once
+// slugified. Caps every derived charId - both the exact/prefix-matched
+// cast-list path and the raw-slugify fallback below - as a hard backstop
+// against ever writing an oversized Firestore map key, independent of
+// whatever validation current_character's schema enforces upstream (a live
+// incident: a pre-fix schema had no max-length bound on current_character,
+// the model emitted a multi-thousand-character value, and the resulting
+// charId became a Firestore map key too large to write, permanently
+// corrupting that Story's p2 state).
+const MAX_CHAR_ID_LENGTH = 60;
+
 /**
  * The live Character Bible interview turn — issues #26/#27, reference:
  * web/src/app/api/chat/route.ts (Project 1's own turn handler). Issue #26
@@ -71,7 +82,8 @@ function slugifyCharacterName(name: string): string {
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
+    .replace(/^_+|_+$/g, "")
+    .slice(0, MAX_CHAR_ID_LENGTH);
 }
 
 // current_character is model-emitted free text, not a closed enum (unlike
@@ -166,7 +178,27 @@ export async function POST(req: NextRequest) {
       );
     }
     const foundation = foundationResult.foundation;
-    const p2State: P2State = story.p2 ?? { activeCharacterId: null, characterProgress: {} };
+    const rawP2State: P2State = story.p2 ?? { activeCharacterId: null, characterProgress: {} };
+    // Self-heals P2 state corrupted by the pre-fix current_character bug
+    // above: any characterProgress key longer than a real charId could ever
+    // be is dropped (Firestore already rejects writing it back, so leaving
+    // it in place would fail every future turn for this Story the same
+    // way), and activeCharacterId is cleared if it pointed at one of those
+    // dropped entries - otherwise the interview would stay permanently
+    // locked to a character that no longer exists in characterProgress.
+    const rawCharacterProgress = rawP2State.characterProgress ?? {};
+    const corruptedCharIds = Object.keys(rawCharacterProgress).filter((id) => id.length > MAX_CHAR_ID_LENGTH);
+    const p2State: P2State =
+      corruptedCharIds.length > 0
+        ? {
+            activeCharacterId: corruptedCharIds.includes(rawP2State.activeCharacterId ?? "")
+              ? null
+              : rawP2State.activeCharacterId,
+            characterProgress: Object.fromEntries(
+              Object.entries(rawCharacterProgress).filter(([id]) => !corruptedCharIds.includes(id))
+            ),
+          }
+        : rawP2State;
 
     const turnId = randomUUID();
     const now = new Date().toISOString();

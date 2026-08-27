@@ -62,7 +62,7 @@ export type DeferredItemInput = z.infer<typeof DeferredItemSchema>;
 
 export const CharacterTurnSchema = z.object({
   reply: z.string().min(1),
-  current_character: z.string().min(1),
+  current_character: z.string().min(1).max(100),
   current_stage: z.number().int().min(1).max(6),
   character_signed_off: z.boolean(),
   switch_override: z.boolean(),
@@ -92,7 +92,7 @@ export const EMIT_CHARACTER_TURN_TOOL: Anthropic.Tool = {
       current_character: {
         type: "string",
         description:
-          "The full name of the character currently under interview, exactly as it appears in the Story Foundation's cast list.",
+          "The full name of the character currently under interview, exactly as it appears in the Story Foundation's cast list - just the name, nothing else (max 100 characters). Never a cast summary, a list of characters, or any other free-text content.",
       },
       current_stage: {
         type: "number",
