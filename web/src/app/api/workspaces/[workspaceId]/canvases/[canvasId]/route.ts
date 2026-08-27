@@ -12,7 +12,7 @@ import {
   CHARACTER_MESSAGES_COLLECTION,
   WORLD_MESSAGES_COLLECTION,
 } from "@/lib/canonEngine/storyStore";
-import { listElements } from "@/lib/canonEngine/canonStore";
+import { listElements, WORLD_ELEMENTS_COLLECTION } from "@/lib/canonEngine/canonStore";
 import { setLastVisited } from "@/lib/userStore";
 
 export const runtime = "nodejs";
@@ -36,6 +36,8 @@ export async function GET(
     const includeCharacterMessages = req.nextUrl.searchParams.get("characterMessages") === "1";
     // Same reasoning, for the World Bible client (issue #38).
     const includeWorldMessages = req.nextUrl.searchParams.get("worldMessages") === "1";
+    // Same reasoning, for the World Bible client's per-pillar canon status (issue #41).
+    const includeWorldElements = req.nextUrl.searchParams.get("worldElements") === "1";
 
     const membership = await getMembership(workspaceId, user.uid);
     if (!membership) {
@@ -47,11 +49,12 @@ export async function GET(
       return NextResponse.json({ error: "Story Canvas not found." }, { status: 404 });
     }
 
-    const [elements, messages, characterMessages, worldMessages, guardrailFlags] = await Promise.all([
+    const [elements, messages, characterMessages, worldMessages, worldElements, guardrailFlags] = await Promise.all([
       listElements(canvasId),
       listMessages(canvasId),
       includeCharacterMessages ? listMessages(canvasId, undefined, CHARACTER_MESSAGES_COLLECTION) : Promise.resolve([]),
       includeWorldMessages ? listMessages(canvasId, undefined, WORLD_MESSAGES_COLLECTION) : Promise.resolve([]),
+      includeWorldElements ? listElements(canvasId, WORLD_ELEMENTS_COLLECTION) : Promise.resolve([]),
       listGuardrailFlags(canvasId),
     ]);
 
@@ -64,6 +67,7 @@ export async function GET(
       messages,
       characterMessages,
       worldMessages,
+      worldElements,
       guardrailFlags,
     });
   } catch (err) {
