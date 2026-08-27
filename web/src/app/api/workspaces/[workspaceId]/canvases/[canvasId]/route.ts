@@ -61,9 +61,9 @@ export async function GET(
 
     // Track last-visited so a bare resume route lands back on whichever
     // project screen was actually active, not always Project 1 (issue #90,
-    // extended). includeCharacterMessages/includeWorldMessages already
-    // uniquely identify which screen made this request - no new query
-    // param needed.
+    // extended). includeCharacterMessages/includeWorldMessages/
+    // includeWorldElements already uniquely identify which screen made
+    // this request - no new query param needed.
     const lastProject: LastProject = includeCharacterMessages
       ? "character-bible"
       : includeWorldMessages || includeWorldElements
