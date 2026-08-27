@@ -70,6 +70,7 @@ export async function ensureUserProfile(params: {
       email: params.email,
       displayName: params.displayName ?? existing.displayName,
       photoURL: params.photoURL ?? existing.photoURL,
+      lastProject: existing.lastProject ?? null,
       updatedAt: now,
     };
     tx.set(ref, refreshed);

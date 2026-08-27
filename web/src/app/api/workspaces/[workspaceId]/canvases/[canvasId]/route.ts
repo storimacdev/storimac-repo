@@ -66,7 +66,7 @@ export async function GET(
     // param needed.
     const lastProject: LastProject = includeCharacterMessages
       ? "character-bible"
-      : includeWorldMessages
+      : includeWorldMessages || includeWorldElements
         ? "world-bible"
         : "interview";
     await setLastVisited(user.uid, workspaceId, canvasId, lastProject);

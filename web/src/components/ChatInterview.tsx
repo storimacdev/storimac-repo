@@ -60,7 +60,7 @@ export default function ChatInterview() {
   const workspaceId = searchParams.get("workspaceId");
   const canvasId = searchParams.get("canvasId");
   const debug = searchParams.get("debug") === "1";
-  const { state: userState } = useUser();
+  const { state: userState, setLastProject } = useUser();
 
   // Bare /interview: route signed-in users to their last-active project
   // screen (issue #90, extended) instead of the dead-end empty state
@@ -75,6 +75,15 @@ export default function ChatInterview() {
       );
     }
   }, [workspaceId, canvasId, userState, router]);
+
+  // Tells the client-side user state this is now the active project, the
+  // moment a real canvas is loaded - independent of the redirect effect
+  // above, so it fires even when workspaceId/canvasId are already present
+  // (e.g. arriving here directly, not via a bare-/interview redirect).
+  useEffect(() => {
+    if (!workspaceId || !canvasId) return;
+    setLastProject("interview");
+  }, [workspaceId, canvasId, setLastProject]);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
