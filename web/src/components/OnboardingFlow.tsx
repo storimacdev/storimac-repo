@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/useAuth";
 import { useUser } from "@/components/UserProvider";
 import ScriptPreview from "@/components/ScriptPreview";
+import { lastProjectPath } from "@/lib/lastProject";
 
 /**
  * Onboarding flow — ported from the Claude Design handoff
@@ -179,7 +180,7 @@ export default function OnboardingFlow() {
 
     if (userState.lastWorkspaceId && userState.lastCanvasId) {
       router.replace(
-        `/interview?workspaceId=${userState.lastWorkspaceId}&canvasId=${userState.lastCanvasId}`
+        `${lastProjectPath(userState.lastProject)}?workspaceId=${userState.lastWorkspaceId}&canvasId=${userState.lastCanvasId}`
       );
       return;
     }
@@ -199,6 +200,10 @@ export default function OnboardingFlow() {
           const data = await res.json();
           if (cancelled) return;
           if (res.ok && Array.isArray(data.canvases) && data.canvases.length > 0) {
+            // Always /interview, not lastProjectPath: reachable only when
+            // lastCanvasId was null (the check above already handles the
+            // has-a-last-canvas case), so this canvas has never been
+            // visited in any project yet.
             router.replace(`/interview?workspaceId=${ws.id}&canvasId=${data.canvases[0].id}`);
             return;
           }

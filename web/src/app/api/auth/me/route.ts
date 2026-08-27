@@ -26,6 +26,7 @@ export async function GET() {
       workspaces,
       lastWorkspaceId: profile.lastWorkspaceId,
       lastCanvasId: profile.lastCanvasId,
+      lastProject: profile.lastProject,
     });
   } catch (err) {
     return errorResponse(err);

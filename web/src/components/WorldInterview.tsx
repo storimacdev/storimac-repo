@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Markdown from "@/components/Markdown";
 import UserMenu from "@/components/UserMenu";
+import { useUser } from "@/components/UserProvider";
 import type { P3State } from "@/lib/canonEngine/storyStore";
 import { WCL_LABELS, WCL_LEVELS, type WclLevel } from "@/lib/worldEngine/wcl";
 import { pillarElementId } from "@/lib/worldEngine/pillarElementId";
@@ -50,6 +51,7 @@ export default function WorldInterview() {
   const searchParams = useSearchParams();
   const workspaceId = searchParams.get("workspaceId");
   const canvasId = searchParams.get("canvasId");
+  const { setLastProject } = useUser();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -108,6 +110,11 @@ export default function WorldInterview() {
       cancelled = true;
     };
   }, [workspaceId, canvasId]);
+
+  useEffect(() => {
+    if (!workspaceId || !canvasId) return;
+    setLastProject("world-bible");
+  }, [workspaceId, canvasId, setLastProject]);
 
   // Mirrors `pillars` once adopted (live-edit mode); before adoption,
   // mirrors the model's latest `proposedPillars` unless the author has

@@ -14,6 +14,7 @@ import {
 } from "@/lib/canonEngine/storyStore";
 import { listElements, WORLD_ELEMENTS_COLLECTION } from "@/lib/canonEngine/canonStore";
 import { setLastVisited } from "@/lib/userStore";
+import type { LastProject } from "@/lib/lastProject";
 
 export const runtime = "nodejs";
 
@@ -58,8 +59,17 @@ export async function GET(
       listGuardrailFlags(canvasId),
     ]);
 
-    // Track last-visited so "/" and bare "/interview" resume here (issue #90).
-    await setLastVisited(user.uid, workspaceId, canvasId);
+    // Track last-visited so a bare resume route lands back on whichever
+    // project screen was actually active, not always Project 1 (issue #90,
+    // extended). includeCharacterMessages/includeWorldMessages/
+    // includeWorldElements already uniquely identify which screen made
+    // this request - no new query param needed.
+    const lastProject: LastProject = includeCharacterMessages
+      ? "character-bible"
+      : includeWorldMessages || includeWorldElements
+        ? "world-bible"
+        : "interview";
+    await setLastVisited(user.uid, workspaceId, canvasId, lastProject);
 
     return NextResponse.json({
       story: { ...story, p3: normalizeP3(story.p3) },

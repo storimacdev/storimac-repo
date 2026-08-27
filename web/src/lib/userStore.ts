@@ -1,4 +1,5 @@
 import { getDb } from "@/lib/firebaseAdmin";
+import type { LastProject } from "@/lib/lastProject";
 
 /**
  * User profile store — GitHub issue #90. One doc per Firebase Auth user at
@@ -18,6 +19,7 @@ export interface UserProfile {
   updatedAt: string;
   lastWorkspaceId: string | null;
   lastCanvasId: string | null;
+  lastProject: LastProject | null;
   acceptedTermsAt: string | null;
 }
 
@@ -56,6 +58,7 @@ export async function ensureUserProfile(params: {
         updatedAt: now,
         lastWorkspaceId: null,
         lastCanvasId: null,
+        lastProject: null,
         acceptedTermsAt: null,
       };
       tx.set(ref, profile);
@@ -67,6 +70,7 @@ export async function ensureUserProfile(params: {
       email: params.email,
       displayName: params.displayName ?? existing.displayName,
       photoURL: params.photoURL ?? existing.photoURL,
+      lastProject: existing.lastProject ?? null,
       updatedAt: now,
     };
     tx.set(ref, refreshed);
@@ -74,14 +78,17 @@ export async function ensureUserProfile(params: {
   });
 }
 
-/** Called whenever a canvas is opened or created, so "/" and bare "/interview" can resume it. */
+/** Called whenever a canvas is opened or created, so "/" and bare "/interview"
+ * (or the equivalent bare route for whichever project was last active) can
+ * resume it. */
 export async function setLastVisited(
   uid: string,
   lastWorkspaceId: string,
-  lastCanvasId: string
+  lastCanvasId: string,
+  lastProject: LastProject
 ): Promise<void> {
   await usersCollection().doc(uid).set(
-    { lastWorkspaceId, lastCanvasId, updatedAt: new Date().toISOString() },
+    { lastWorkspaceId, lastCanvasId, lastProject, updatedAt: new Date().toISOString() },
     { merge: true }
   );
 }

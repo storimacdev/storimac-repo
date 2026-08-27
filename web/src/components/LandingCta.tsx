@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useUser } from "@/components/UserProvider";
+import { lastProjectPath } from "@/lib/lastProject";
 
 /**
  * State-aware landing CTA — issue #90. Returning users with a canvas get
@@ -15,7 +16,7 @@ export default function LandingCta() {
     return (
       <div className="flex items-center gap-4">
         <Link
-          href={`/interview?workspaceId=${state.lastWorkspaceId}&canvasId=${state.lastCanvasId}`}
+          href={`${lastProjectPath(state.lastProject)}?workspaceId=${state.lastWorkspaceId}&canvasId=${state.lastCanvasId}`}
           className="btn btn-ember"
         >
           Continue your story

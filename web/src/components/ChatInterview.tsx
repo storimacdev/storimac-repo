@@ -8,6 +8,7 @@ import Markdown from "@/components/Markdown";
 import StorySoFar from "@/components/StorySoFar";
 import UserMenu from "@/components/UserMenu";
 import { useUser } from "@/components/UserProvider";
+import { lastProjectPath } from "@/lib/lastProject";
 import { downloadText, downloadBlob } from "@/lib/download";
 import type { FoundationDocument } from "@/lib/canonEngine/foundationDoc";
 
@@ -59,18 +60,30 @@ export default function ChatInterview() {
   const workspaceId = searchParams.get("workspaceId");
   const canvasId = searchParams.get("canvasId");
   const debug = searchParams.get("debug") === "1";
-  const { state: userState } = useUser();
+  const { state: userState, setLastProject } = useUser();
 
-  // Bare /interview: route signed-in users to their last canvas (issue #90)
-  // instead of the dead-end empty state (which stays for guests).
+  // Bare /interview: route signed-in users to their last-active project
+  // screen (issue #90, extended) instead of the dead-end empty state
+  // (which stays for guests). Usually this resolves back to /interview
+  // itself (a no-op replace) unless the author's last activity was
+  // actually in Character Bible or World Bible.
   useEffect(() => {
     if (workspaceId && canvasId) return;
     if (userState.status === "authed" && userState.lastWorkspaceId && userState.lastCanvasId) {
       router.replace(
-        `/interview?workspaceId=${userState.lastWorkspaceId}&canvasId=${userState.lastCanvasId}`
+        `${lastProjectPath(userState.lastProject)}?workspaceId=${userState.lastWorkspaceId}&canvasId=${userState.lastCanvasId}`
       );
     }
   }, [workspaceId, canvasId, userState, router]);
+
+  // Tells the client-side user state this is now the active project, the
+  // moment a real canvas is loaded - independent of the redirect effect
+  // above, so it fires even when workspaceId/canvasId are already present
+  // (e.g. arriving here directly, not via a bare-/interview redirect).
+  useEffect(() => {
+    if (!workspaceId || !canvasId) return;
+    setLastProject("interview");
+  }, [workspaceId, canvasId, setLastProject]);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");

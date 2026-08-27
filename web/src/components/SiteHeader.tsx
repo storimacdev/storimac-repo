@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useUser } from "@/components/UserProvider";
 import UserMenu from "@/components/UserMenu";
+import { lastProjectPath } from "@/lib/lastProject";
 
 /**
  * Persistent site header + navigation — issue #90. Guest: Sign in / Get
@@ -26,7 +27,10 @@ export default function SiteHeader() {
       const data = await res.json();
       const first = res.ok && Array.isArray(data.canvases) ? data.canvases[0] : null;
       if (first) {
-        router.push(`/interview?workspaceId=${workspaceId}&canvasId=${first.id}`);
+        const isLastVisited =
+          state.status === "authed" && state.lastWorkspaceId === workspaceId && state.lastCanvasId === first.id;
+        const path = isLastVisited ? lastProjectPath(state.lastProject) : "/interview";
+        router.push(`${path}?workspaceId=${workspaceId}&canvasId=${first.id}`);
       } else {
         router.push("/onboarding");
       }

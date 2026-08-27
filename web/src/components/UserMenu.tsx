@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useUser } from "@/components/UserProvider";
+import { lastProjectPath } from "@/lib/lastProject";
 
 /**
  * Signed-in user menu — issue #90. Rendered in the site header and in the
@@ -68,7 +69,9 @@ export default function UserMenu() {
             <button
               onClick={() => {
                 setOpen(false);
-                router.push(`/interview?workspaceId=${state.lastWorkspaceId}&canvasId=${state.lastCanvasId}`);
+                router.push(
+                  `${lastProjectPath(state.lastProject)}?workspaceId=${state.lastWorkspaceId}&canvasId=${state.lastCanvasId}`
+                );
               }}
               className="block w-full px-4 py-2.5 text-left text-xs text-neutral-300 hover:bg-neutral-800"
             >
