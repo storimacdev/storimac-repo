@@ -21,6 +21,11 @@ export class CanonConflictError extends Error {
  * parameter added to every function below. */
 export const CHARACTER_FACTS_COLLECTION = "characterFacts";
 
+/** Project 3's canon-element subcollection name (issue #41) - a sibling
+ * to CHARACTER_FACTS_COLLECTION, sharing the same store/transition logic
+ * via the existing `collection` parameter on every function below. */
+export const WORLD_ELEMENTS_COLLECTION = "worldElements";
+
 function elementsCollection(storyId: string, collection: string = "elements") {
   return getDb().collection("stories").doc(storyId).collection(collection);
 }
