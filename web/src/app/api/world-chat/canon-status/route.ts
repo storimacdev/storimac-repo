@@ -70,7 +70,8 @@ export async function PATCH(req: NextRequest) {
       elementId,
       { status: nextStatus },
       randomUUID(),
-      /* allowConfirmedOverride */ true
+      /* allowConfirmedOverride */ true,
+      WORLD_ELEMENTS_COLLECTION
     );
 
     return NextResponse.json({

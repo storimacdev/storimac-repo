@@ -156,12 +156,14 @@ export async function upsertElement(
   elementId: string,
   patch: CanonElementPatch,
   turnId: string,
-  allowConfirmedOverride = false
+  allowConfirmedOverride = false,
+  collection: string = "elements"
 ): Promise<CanonElement> {
   const [result] = await applyStateDelta(
     storyId,
     [{ element_id: elementId, patch, allowConfirmedOverride }],
-    turnId
+    turnId,
+    collection
   );
   return result;
 }
