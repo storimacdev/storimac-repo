@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/useAuth";
 import { useUser } from "@/components/UserProvider";
 import ScriptPreview from "@/components/ScriptPreview";
+import { lastProjectPath } from "@/lib/lastProject";
 
 /**
  * Onboarding flow — ported from the Claude Design handoff
@@ -179,7 +180,7 @@ export default function OnboardingFlow() {
 
     if (userState.lastWorkspaceId && userState.lastCanvasId) {
       router.replace(
-        `/interview?workspaceId=${userState.lastWorkspaceId}&canvasId=${userState.lastCanvasId}`
+        `${lastProjectPath(userState.lastProject)}?workspaceId=${userState.lastWorkspaceId}&canvasId=${userState.lastCanvasId}`
       );
       return;
     }

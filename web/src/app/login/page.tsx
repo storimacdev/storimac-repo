@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useUser } from "@/components/UserProvider";
 import { useAuth } from "@/lib/useAuth";
+import { lastProjectPath } from "@/lib/lastProject";
 import SiteHeader from "@/components/SiteHeader";
 import SiteFooter from "@/components/SiteFooter";
 
@@ -26,7 +27,9 @@ export default function LoginPage() {
   useEffect(() => {
     if (state.status !== "authed") return;
     if (state.lastWorkspaceId && state.lastCanvasId) {
-      router.replace(`/interview?workspaceId=${state.lastWorkspaceId}&canvasId=${state.lastCanvasId}`);
+      router.replace(
+        `${lastProjectPath(state.lastProject)}?workspaceId=${state.lastWorkspaceId}&canvasId=${state.lastCanvasId}`
+      );
     } else {
       router.replace("/onboarding");
     }
