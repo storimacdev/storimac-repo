@@ -37,6 +37,9 @@ export async function PATCH(req: NextRequest) {
     if (typeof elementId !== "string" || !elementId) {
       return NextResponse.json({ error: "Request must include `elementId`." }, { status: 400 });
     }
+    if (!/^pillar-[a-z0-9-]+$/.test(elementId)) {
+      return NextResponse.json({ error: "`elementId` must be a valid pillar element id." }, { status: 400 });
+    }
     if (status !== "Exploring" && status !== "Working" && status !== "Confirmed" && status !== "Deferred") {
       return NextResponse.json(
         { error: "`status` must be Exploring, Working, Confirmed, or Deferred." },

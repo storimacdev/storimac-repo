@@ -519,31 +519,35 @@ export default function WorldInterview() {
                             <span className="flex-1">
                               {i + 1}. {name}
                             </span>
-                            <span
-                              className={`rounded-full px-2 py-0.5 text-[9px] font-medium ${STATUS_BADGE_STYLES[status]}`}
-                            >
-                              {status}
-                            </span>
-                            <select
-                              value=""
-                              disabled={
-                                elementStatusUpdating || pillarsUpdating || loading || statusOptions.length === 0
-                              }
-                              onChange={(e) => {
-                                const next = e.target.value as PillarStatus;
-                                if (next) handleElementStatusChange(elementId, status, next);
-                                e.target.value = "";
-                              }}
-                              className="rounded border border-neutral-700 bg-neutral-900 px-1 py-0.5 text-[10px] text-neutral-300 disabled:opacity-30"
-                              aria-label={`Change status for ${name}`}
-                            >
-                              <option value="">→</option>
-                              {statusOptions.map((candidate) => (
-                                <option key={candidate} value={candidate}>
-                                  {candidate}
-                                </option>
-                              ))}
-                            </select>
+                            {wclState.pillars !== null && (
+                              <>
+                                <span
+                                  className={`rounded-full px-2 py-0.5 text-[9px] font-medium ${STATUS_BADGE_STYLES[status]}`}
+                                >
+                                  {status}
+                                </span>
+                                <select
+                                  value=""
+                                  disabled={
+                                    elementStatusUpdating || pillarsUpdating || loading || statusOptions.length === 0
+                                  }
+                                  onChange={(e) => {
+                                    const next = e.target.value as PillarStatus;
+                                    if (next) handleElementStatusChange(elementId, status, next);
+                                    e.target.value = "";
+                                  }}
+                                  className="rounded border border-neutral-700 bg-neutral-900 px-1 py-0.5 text-[10px] text-neutral-300 disabled:opacity-30"
+                                  aria-label={`Change status for ${name}`}
+                                >
+                                  <option value="">→</option>
+                                  {statusOptions.map((candidate) => (
+                                    <option key={candidate} value={candidate}>
+                                      {candidate}
+                                    </option>
+                                  ))}
+                                </select>
+                              </>
+                            )}
                             <button
                               onClick={() => movePillar(i, -1)}
                               disabled={pillarsUpdating || loading || i === 0}
