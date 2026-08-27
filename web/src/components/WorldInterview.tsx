@@ -7,6 +7,9 @@ import Markdown from "@/components/Markdown";
 import UserMenu from "@/components/UserMenu";
 import type { P3State } from "@/lib/canonEngine/storyStore";
 import { WCL_LABELS, WCL_LEVELS, type WclLevel } from "@/lib/worldEngine/wcl";
+import { pillarElementId } from "@/lib/worldEngine/pillarElementId";
+import { isValidTransition } from "@/lib/canonEngine/transitions";
+import type { CanonStatus } from "@/lib/canonEngine/types";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -20,6 +23,28 @@ const AMBIENT_GRADIENT =
   "linear-gradient(115deg, #2a0707 0%, #7f1d1d 18%, #dc2626 38%, #ea580c 52%, #7e22ce 76%, #312e81 100%)";
 const BORDER_GRADIENT =
   "linear-gradient(135deg, #f87171, #dc2626, #ea580c, #a855f7, #6366f1)";
+
+type PillarStatus = "Exploring" | "Working" | "Confirmed" | "Deferred";
+
+const PILLAR_STATUSES: PillarStatus[] = ["Exploring", "Working", "Confirmed", "Deferred"];
+
+const STATUS_BADGE_STYLES: Record<PillarStatus, string> = {
+  Exploring: "bg-neutral-700 text-neutral-300",
+  Working: "bg-amber-500/20 text-amber-300 border border-amber-500/40",
+  Confirmed: "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40",
+  Deferred: "bg-sky-500/20 text-sky-300 border border-sky-500/40",
+};
+
+// The shared Canon Engine's status type uses "Parked"; every P3 boundary
+// (this UI, the canon-status route) speaks "Deferred" instead, matching
+// the same translation convention already used by character-chat/route.ts.
+function toCanonStatus(status: PillarStatus): CanonStatus {
+  return status === "Deferred" ? "Parked" : status;
+}
+
+function toPillarStatus(status: CanonStatus): PillarStatus {
+  return status === "Parked" ? "Deferred" : status;
+}
 
 export default function WorldInterview() {
   const searchParams = useSearchParams();
@@ -40,6 +65,8 @@ export default function WorldInterview() {
   const [pillarDraftTouched, setPillarDraftTouched] = useState(false);
   const [pillarsUpdating, setPillarsUpdating] = useState(false);
   const [newPillarInput, setNewPillarInput] = useState("");
+  const [elementStatuses, setElementStatuses] = useState<Record<string, PillarStatus>>({});
+  const [elementStatusUpdating, setElementStatusUpdating] = useState(false);
   const listEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -47,7 +74,7 @@ export default function WorldInterview() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/api/workspaces/${workspaceId}/canvases/${canvasId}?worldMessages=1`);
+        const res = await fetch(`/api/workspaces/${workspaceId}/canvases/${canvasId}?worldMessages=1&worldElements=1`);
         const data = await res.json();
         if (cancelled) return;
         if (!res.ok) {
@@ -67,6 +94,10 @@ export default function WorldInterview() {
           setCurrentStage(lastAssistant.current_stage ?? null);
         }
         setWclState((data.story?.p3 as P3State | undefined) ?? null);
+        const rawElements = (data.worldElements ?? []) as { element_id: string; status: CanonStatus }[];
+        setElementStatuses(
+          Object.fromEntries(rawElements.map((e) => [e.element_id, toPillarStatus(e.status)]))
+        );
       } catch {
         if (!cancelled) setError("Couldn't reach the server. Is the dev server running?");
       } finally {
@@ -245,6 +276,39 @@ export default function WorldInterview() {
 
   function confirmPillarDraft() {
     applyPillars(pillarDraft);
+  }
+
+  async function changeElementStatus(elementId: string, nextStatus: PillarStatus) {
+    if (!canvasId || elementStatusUpdating) return;
+    setElementStatusUpdating(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/world-chat/canon-status", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storyId: canvasId, elementId, status: nextStatus }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Couldn't update that pillar's status.");
+        return;
+      }
+      setElementStatuses((prev) => ({ ...prev, [elementId]: data.status as PillarStatus }));
+    } catch {
+      setError("Couldn't reach the server. Is the dev server running?");
+    } finally {
+      setElementStatusUpdating(false);
+    }
+  }
+
+  function handleElementStatusChange(elementId: string, currentStatus: PillarStatus, nextStatus: PillarStatus) {
+    if (currentStatus === "Confirmed" && nextStatus !== currentStatus) {
+      const confirmed = window.confirm(
+        "This pillar is Confirmed. Deferring it moves it out of active canon. Continue?"
+      );
+      if (!confirmed) return;
+    }
+    changeElementStatus(elementId, nextStatus);
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -439,40 +503,78 @@ export default function WorldInterview() {
                           : "World Pillars"}
                     </p>
                     <ul className="mt-3 flex flex-col gap-1.5">
-                      {pillarDraft.map((name, i) => (
-                        <li
-                          key={i}
-                          className="flex items-center gap-2 rounded-lg bg-neutral-900/60 px-3 py-1.5 text-[13px] text-neutral-200"
-                        >
-                          <span className="flex-1">
-                            {i + 1}. {name}
-                          </span>
-                          <button
-                            onClick={() => movePillar(i, -1)}
-                            disabled={pillarsUpdating || loading || i === 0}
-                            className="rounded px-1.5 text-neutral-400 hover:text-neutral-100 disabled:opacity-30"
-                            aria-label={`Move ${name} up`}
+                      {pillarDraft.map((name, i) => {
+                        const elementId = pillarElementId(name);
+                        const status = elementStatuses[elementId] ?? "Exploring";
+                        const statusOptions = PILLAR_STATUSES.filter(
+                          (candidate) =>
+                            candidate !== status &&
+                            isValidTransition(toCanonStatus(status), toCanonStatus(candidate))
+                        );
+                        return (
+                          <li
+                            key={i}
+                            className="flex items-center gap-2 rounded-lg bg-neutral-900/60 px-3 py-1.5 text-[13px] text-neutral-200"
                           >
-                            ▲
-                          </button>
-                          <button
-                            onClick={() => movePillar(i, 1)}
-                            disabled={pillarsUpdating || loading || i === pillarDraft.length - 1}
-                            className="rounded px-1.5 text-neutral-400 hover:text-neutral-100 disabled:opacity-30"
-                            aria-label={`Move ${name} down`}
-                          >
-                            ▼
-                          </button>
-                          <button
-                            onClick={() => removePillar(i)}
-                            disabled={pillarsUpdating || loading}
-                            className="rounded px-1.5 text-red-400 hover:text-red-300 disabled:opacity-30"
-                            aria-label={`Remove ${name}`}
-                          >
-                            ✕
-                          </button>
-                        </li>
-                      ))}
+                            <span className="flex-1">
+                              {i + 1}. {name}
+                            </span>
+                            {wclState.pillars !== null && (
+                              <>
+                                <span
+                                  className={`rounded-full px-2 py-0.5 text-[9px] font-medium ${STATUS_BADGE_STYLES[status]}`}
+                                >
+                                  {status}
+                                </span>
+                                <select
+                                  value=""
+                                  disabled={
+                                    elementStatusUpdating || pillarsUpdating || loading || statusOptions.length === 0
+                                  }
+                                  onChange={(e) => {
+                                    const next = e.target.value as PillarStatus;
+                                    if (next) handleElementStatusChange(elementId, status, next);
+                                    e.target.value = "";
+                                  }}
+                                  className="rounded border border-neutral-700 bg-neutral-900 px-1 py-0.5 text-[10px] text-neutral-300 disabled:opacity-30"
+                                  aria-label={`Change status for ${name}`}
+                                >
+                                  <option value="">→</option>
+                                  {statusOptions.map((candidate) => (
+                                    <option key={candidate} value={candidate}>
+                                      {candidate}
+                                    </option>
+                                  ))}
+                                </select>
+                              </>
+                            )}
+                            <button
+                              onClick={() => movePillar(i, -1)}
+                              disabled={pillarsUpdating || loading || i === 0}
+                              className="rounded px-1.5 text-neutral-400 hover:text-neutral-100 disabled:opacity-30"
+                              aria-label={`Move ${name} up`}
+                            >
+                              ▲
+                            </button>
+                            <button
+                              onClick={() => movePillar(i, 1)}
+                              disabled={pillarsUpdating || loading || i === pillarDraft.length - 1}
+                              className="rounded px-1.5 text-neutral-400 hover:text-neutral-100 disabled:opacity-30"
+                              aria-label={`Move ${name} down`}
+                            >
+                              ▼
+                            </button>
+                            <button
+                              onClick={() => removePillar(i)}
+                              disabled={pillarsUpdating || loading}
+                              className="rounded px-1.5 text-red-400 hover:text-red-300 disabled:opacity-30"
+                              aria-label={`Remove ${name}`}
+                            >
+                              ✕
+                            </button>
+                          </li>
+                        );
+                      })}
                       {pillarDraft.length === 0 && (
                         <li className="text-[13px] text-neutral-500">No pillars yet — add one below.</li>
                       )}
