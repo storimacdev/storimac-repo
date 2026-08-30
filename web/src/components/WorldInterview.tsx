@@ -11,6 +11,7 @@ import { WCL_LABELS, WCL_LEVELS, type WclLevel } from "@/lib/worldEngine/wcl";
 import { pillarElementId } from "@/lib/worldEngine/pillarElementId";
 import { isValidTransition } from "@/lib/canonEngine/transitions";
 import type { CanonStatus } from "@/lib/canonEngine/types";
+import type { CharacterBibleGateResult } from "@/lib/worldEngine/characterBibleGate";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -62,6 +63,7 @@ export default function WorldInterview() {
   const [context, setContext] = useState<string | null>(null);
   const [leftWidth, setLeftWidth] = useState(380);
   const [wclState, setWclState] = useState<P3State | null>(null);
+  const [characterBibleGate, setCharacterBibleGate] = useState<CharacterBibleGateResult | null>(null);
   const [wclUpdating, setWclUpdating] = useState(false);
   const [pillarDraft, setPillarDraft] = useState<string[]>([]);
   const [pillarDraftTouched, setPillarDraftTouched] = useState(false);
@@ -96,6 +98,7 @@ export default function WorldInterview() {
           setCurrentStage(lastAssistant.current_stage ?? null);
         }
         setWclState((data.story?.p3 as P3State | undefined) ?? null);
+        setCharacterBibleGate((data.characterBibleGate as CharacterBibleGateResult | undefined) ?? null);
         const rawElements = (data.worldElements ?? []) as { element_id: string; status: CanonStatus }[];
         setElementStatuses(
           Object.fromEntries(rawElements.map((e) => [e.element_id, toPillarStatus(e.status)]))
@@ -146,9 +149,10 @@ export default function WorldInterview() {
   // the author to type something before the model ever speaks.
   useEffect(() => {
     if (resuming || messages.length > 0 || !canvasId) return;
+    if (characterBibleGate && !characterBibleGate.complete) return;
     sendMessage("Let's begin.");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resuming, canvasId]);
+  }, [resuming, canvasId, characterBibleGate]);
 
   async function sendMessage(preset?: string) {
     const text = (preset ?? input).trim();
@@ -359,6 +363,27 @@ export default function WorldInterview() {
               className="rounded-xl bg-gradient-to-r from-red-600 to-orange-500 px-5 py-3 text-sm font-semibold text-white hover:from-red-500 hover:to-orange-400"
             >
               Go to dashboard
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!resuming && characterBibleGate && !characterBibleGate.complete) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center p-4" style={{ background: AMBIENT_GRADIENT }}>
+        <div className="rounded-2xl p-[1.5px]" style={{ background: BORDER_GRADIENT }}>
+          <div className="flex flex-col items-center gap-4 rounded-[14px] bg-neutral-950 px-10 py-12 text-center text-neutral-100">
+            <p className="text-lg font-medium">Finish your Character Bible first.</p>
+            <p className="max-w-sm text-sm text-neutral-400">
+              Still in progress: {characterBibleGate.incompleteNames.join(", ")}.
+            </p>
+            <Link
+              href={`/character-bible?workspaceId=${workspaceId}&canvasId=${canvasId}`}
+              className="rounded-xl bg-gradient-to-r from-red-600 to-orange-500 px-5 py-3 text-sm font-semibold text-white hover:from-red-500 hover:to-orange-400"
+            >
+              Go to Character Bible
             </Link>
           </div>
         </div>
