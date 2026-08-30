@@ -15,8 +15,30 @@ import {
 import { listElements, WORLD_ELEMENTS_COLLECTION } from "@/lib/canonEngine/canonStore";
 import { setLastVisited } from "@/lib/userStore";
 import type { LastProject } from "@/lib/lastProject";
+import { ingestFoundation as characterIngestFoundation } from "@/lib/characterEngine/ingestFoundation";
+import { checkCharacterBibleComplete, type CharacterBibleGateResult } from "@/lib/worldEngine/characterBibleGate";
+import type { P2State } from "@/lib/canonEngine/storyStore";
 
 export const runtime = "nodejs";
+
+/** Computes the Character Bible completion gate for a World Bible resume
+ * request only (null for a Project 1/2 resume, which never asked for it)
+ * - a missing/malformed character Foundation is "nothing to gate on yet",
+ * matching world-chat/route.ts's own enforcement of this same gate. */
+async function computeCharacterBibleGate(
+  storyId: string,
+  p2State: P2State | null | undefined
+): Promise<CharacterBibleGateResult | null> {
+  try {
+    const characterFoundation = await characterIngestFoundation(storyId);
+    if (characterFoundation.status !== "ok" && characterFoundation.status !== "incomplete") {
+      return null;
+    }
+    return checkCharacterBibleComplete(characterFoundation.foundation.cast, p2State);
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Resume a Story Canvas — issue #89. Any workspace member can load it (not
@@ -50,14 +72,18 @@ export async function GET(
       return NextResponse.json({ error: "Story Canvas not found." }, { status: 404 });
     }
 
-    const [elements, messages, characterMessages, worldMessages, worldElements, guardrailFlags] = await Promise.all([
-      listElements(canvasId),
-      listMessages(canvasId),
-      includeCharacterMessages ? listMessages(canvasId, undefined, CHARACTER_MESSAGES_COLLECTION) : Promise.resolve([]),
-      includeWorldMessages ? listMessages(canvasId, undefined, WORLD_MESSAGES_COLLECTION) : Promise.resolve([]),
-      includeWorldElements ? listElements(canvasId, WORLD_ELEMENTS_COLLECTION) : Promise.resolve([]),
-      listGuardrailFlags(canvasId),
-    ]);
+    const [elements, messages, characterMessages, worldMessages, worldElements, guardrailFlags, characterBibleGate] =
+      await Promise.all([
+        listElements(canvasId),
+        listMessages(canvasId),
+        includeCharacterMessages ? listMessages(canvasId, undefined, CHARACTER_MESSAGES_COLLECTION) : Promise.resolve([]),
+        includeWorldMessages ? listMessages(canvasId, undefined, WORLD_MESSAGES_COLLECTION) : Promise.resolve([]),
+        includeWorldElements ? listElements(canvasId, WORLD_ELEMENTS_COLLECTION) : Promise.resolve([]),
+        listGuardrailFlags(canvasId),
+        includeWorldMessages || includeWorldElements
+          ? computeCharacterBibleGate(canvasId, story.p2)
+          : Promise.resolve(null),
+      ]);
 
     // Track last-visited so a bare resume route lands back on whichever
     // project screen was actually active, not always Project 1 (issue #90,
@@ -67,7 +93,9 @@ export async function GET(
     const lastProject: LastProject = includeCharacterMessages
       ? "character-bible"
       : includeWorldMessages || includeWorldElements
-        ? "world-bible"
+        ? characterBibleGate && !characterBibleGate.complete
+          ? "character-bible"
+          : "world-bible"
         : "interview";
     await setLastVisited(user.uid, workspaceId, canvasId, lastProject);
 
@@ -79,6 +107,7 @@ export async function GET(
       worldMessages,
       worldElements,
       guardrailFlags,
+      characterBibleGate,
     });
   } catch (err) {
     return errorResponse(err);

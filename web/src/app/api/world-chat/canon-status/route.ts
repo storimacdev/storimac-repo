@@ -7,6 +7,8 @@ import { getStory } from "@/lib/canonEngine/storyStore";
 import { getElement, upsertElement, WORLD_ELEMENTS_COLLECTION } from "@/lib/canonEngine/canonStore";
 import { isValidTransition } from "@/lib/canonEngine/transitions";
 import type { CanonStatus } from "@/lib/canonEngine/types";
+import { ingestFoundation as characterIngestFoundation } from "@/lib/characterEngine/ingestFoundation";
+import { checkCharacterBibleComplete } from "@/lib/worldEngine/characterBibleGate";
 
 export const runtime = "nodejs";
 
@@ -54,6 +56,19 @@ export async function PATCH(req: NextRequest) {
     const membership = await getMembership(story.workspaceId, user.uid);
     if (!membership) {
       return NextResponse.json({ error: "Not a member of this workspace." }, { status: 403 });
+    }
+
+    const characterFoundation = await characterIngestFoundation(storyId);
+    if (characterFoundation.status === "ok" || characterFoundation.status === "incomplete") {
+      const gate = checkCharacterBibleComplete(characterFoundation.foundation.cast, story.p2);
+      if (!gate.complete) {
+        return NextResponse.json(
+          {
+            error: `Finish your Character Bible before continuing the World Bible. Still in progress: ${gate.incompleteNames.join(", ")}.`,
+          },
+          { status: 400 }
+        );
+      }
     }
 
     const nextStatus: CanonStatus = status === "Deferred" ? "Parked" : status;
