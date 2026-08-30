@@ -44,6 +44,7 @@ import {
   type RelationshipUpdateInput,
 } from "@/lib/characterEngine/characterTurnSchema";
 import { compileCharacterBibleEntry } from "@/lib/characterEngine/characterBibleCompiler";
+import { MAX_CHAR_ID_LENGTH, slugifyCharacterName } from "@/lib/characterEngine/characterId";
 
 export const runtime = "nodejs";
 
@@ -54,17 +55,6 @@ export const runtime = "nodejs";
 // ceiling with no in-app recovery). Matches the order of magnitude of
 // Project 1's own short-transcript window (contextBudget.ts).
 const CHARACTER_MESSAGE_WINDOW = 20;
-
-// A real character name never needs more than this many characters once
-// slugified. Caps every derived charId - both the exact/prefix-matched
-// cast-list path and the raw-slugify fallback below - as a hard backstop
-// against ever writing an oversized Firestore map key, independent of
-// whatever validation current_character's schema enforces upstream (a live
-// incident: a pre-fix schema had no max-length bound on current_character,
-// the model emitted a multi-thousand-character value, and the resulting
-// charId became a Firestore map key too large to write, permanently
-// corrupting that Story's p2 state).
-const MAX_CHAR_ID_LENGTH = 60;
 
 /**
  * The live Character Bible interview turn — issues #26/#27, reference:
@@ -77,14 +67,6 @@ const MAX_CHAR_ID_LENGTH = 60;
  * per stage yet (that's issue #28's job for Stage 2; #30 for conflict
  * resolution).
  */
-function slugifyCharacterName(name: string): string {
-  return name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, MAX_CHAR_ID_LENGTH);
-}
 
 // current_character is model-emitted free text, not a closed enum (unlike
 // P1's element_id) - two turns naming the same character slightly
