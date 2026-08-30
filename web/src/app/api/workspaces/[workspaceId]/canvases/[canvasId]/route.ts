@@ -29,11 +29,15 @@ async function computeCharacterBibleGate(
   storyId: string,
   p2State: P2State | null | undefined
 ): Promise<CharacterBibleGateResult | null> {
-  const characterFoundation = await characterIngestFoundation(storyId);
-  if (characterFoundation.status !== "ok" && characterFoundation.status !== "incomplete") {
+  try {
+    const characterFoundation = await characterIngestFoundation(storyId);
+    if (characterFoundation.status !== "ok" && characterFoundation.status !== "incomplete") {
+      return null;
+    }
+    return checkCharacterBibleComplete(characterFoundation.foundation.cast, p2State);
+  } catch {
     return null;
   }
-  return checkCharacterBibleComplete(characterFoundation.foundation.cast, p2State);
 }
 
 /**
@@ -89,7 +93,9 @@ export async function GET(
     const lastProject: LastProject = includeCharacterMessages
       ? "character-bible"
       : includeWorldMessages || includeWorldElements
-        ? "world-bible"
+        ? characterBibleGate && !characterBibleGate.complete
+          ? "character-bible"
+          : "world-bible"
         : "interview";
     await setLastVisited(user.uid, workspaceId, canvasId, lastProject);
 

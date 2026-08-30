@@ -86,7 +86,11 @@ export async function POST(req: NextRequest) {
       if (!gate.complete) {
         return NextResponse.json(
           {
-            error: `Finish your Character Bible before starting the World Bible. Still in progress: ${gate.incompleteNames.join(", ")}.`,
+            error: `Finish your Character Bible before starting the World Bible. Still in progress: ${
+              gate.incompleteNames.length > 5
+                ? `${gate.incompleteNames.slice(0, 5).join(", ")}, and ${gate.incompleteNames.length - 5} more`
+                : gate.incompleteNames.join(", ")
+            }.`,
           },
           { status: 400 }
         );

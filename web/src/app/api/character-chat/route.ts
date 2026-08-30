@@ -56,18 +56,6 @@ export const runtime = "nodejs";
 // Project 1's own short-transcript window (contextBudget.ts).
 const CHARACTER_MESSAGE_WINDOW = 20;
 
-/**
- * The live Character Bible interview turn — issues #26/#27, reference:
- * web/src/app/api/chat/route.ts (Project 1's own turn handler). Issue #26
- * (design: docs/superpowers/specs/2026-08-07-p2-sequential-interview-engine-design.md)
- * added a hard app-level single-active-character lock and app-computed
- * stage clamping via characterFsm.ts's resolveCharacterTurn - still no
- * content-based (fact-completeness) stage-gating or conflict-resolution
- * machinery, since P2 doesn't have a defined required-field vocabulary
- * per stage yet (that's issue #28's job for Stage 2; #30 for conflict
- * resolution).
- */
-
 // current_character is model-emitted free text, not a closed enum (unlike
 // P1's element_id) - two turns naming the same character slightly
 // differently ("Deva" vs "Deva Okonkwo-Price") would otherwise fragment
@@ -116,6 +104,17 @@ function toRelationshipUpdate(u: RelationshipUpdateInput, charId: string, withCh
   return { element_id: `${charId}.${withCharId}`, patch };
 }
 
+/**
+ * The live Character Bible interview turn — issues #26/#27, reference:
+ * web/src/app/api/chat/route.ts (Project 1's own turn handler). Issue #26
+ * (design: docs/superpowers/specs/2026-08-07-p2-sequential-interview-engine-design.md)
+ * added a hard app-level single-active-character lock and app-computed
+ * stage clamping via characterFsm.ts's resolveCharacterTurn - still no
+ * content-based (fact-completeness) stage-gating or conflict-resolution
+ * machinery, since P2 doesn't have a defined required-field vocabulary
+ * per stage yet (that's issue #28's job for Stage 2; #30 for conflict
+ * resolution).
+ */
 export async function POST(req: NextRequest) {
   if (!process.env.ANTHROPIC_API_KEY) {
     return NextResponse.json(

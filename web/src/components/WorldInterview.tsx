@@ -148,11 +148,11 @@ export default function WorldInterview() {
   // genuinely new session loads - otherwise the session sits waiting for
   // the author to type something before the model ever speaks.
   useEffect(() => {
-    if (resuming || messages.length > 0 || !canvasId) return;
+    if (resuming || messages.length > 0 || !canvasId || error) return;
     if (characterBibleGate && !characterBibleGate.complete) return;
     sendMessage("Let's begin.");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resuming, canvasId, characterBibleGate]);
+  }, [resuming, canvasId, characterBibleGate, error]);
 
   async function sendMessage(preset?: string) {
     const text = (preset ?? input).trim();
@@ -377,13 +377,23 @@ export default function WorldInterview() {
           <div className="flex flex-col items-center gap-4 rounded-[14px] bg-neutral-950 px-10 py-12 text-center text-neutral-100">
             <p className="text-lg font-medium">Finish your Character Bible first.</p>
             <p className="max-w-sm text-sm text-neutral-400">
-              Still in progress: {characterBibleGate.incompleteNames.join(", ")}.
+              Still in progress:{" "}
+              {characterBibleGate.incompleteNames.length > 5
+                ? `${characterBibleGate.incompleteNames.slice(0, 5).join(", ")}, and ${characterBibleGate.incompleteNames.length - 5} more`
+                : characterBibleGate.incompleteNames.join(", ")}
+              .
             </p>
             <Link
               href={`/character-bible?workspaceId=${workspaceId}&canvasId=${canvasId}`}
               className="rounded-xl bg-gradient-to-r from-red-600 to-orange-500 px-5 py-3 text-sm font-semibold text-white hover:from-red-500 hover:to-orange-400"
             >
               Go to Character Bible
+            </Link>
+            <Link
+              href="/dashboard"
+              className="text-sm text-neutral-400 hover:text-neutral-200"
+            >
+              Back to dashboard
             </Link>
           </div>
         </div>
