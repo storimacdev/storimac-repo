@@ -18,6 +18,8 @@ import {
 import { extractTurn, TurnValidationError } from "@/lib/canonEngine/extractTurn";
 import { RateLimitTimeoutError } from "@/lib/rateLimit/anthropicGate";
 import { ingestFoundation } from "@/lib/worldEngine/ingestFoundation";
+import { ingestFoundation as characterIngestFoundation } from "@/lib/characterEngine/ingestFoundation";
+import { checkCharacterBibleComplete } from "@/lib/worldEngine/characterBibleGate";
 import { WorldTurnSchema, EMIT_WORLD_TURN_TOOL } from "@/lib/worldEngine/worldTurnSchema";
 
 export const runtime = "nodejs";
@@ -69,6 +71,26 @@ export async function POST(req: NextRequest) {
     const membership = await getMembership(story.workspaceId, user.uid);
     if (!membership) {
       return NextResponse.json({ error: "Not a member of this workspace." }, { status: 403 });
+    }
+
+    // Character Bible completion gate - authoritative check, independent
+    // of the UI's own resume-time check (canvases/[canvasId]/route.ts).
+    // Rejects before this route's own worldEngine ingestFoundation call
+    // below, so a blocked request doesn't pay that fetch cost. A missing
+    // or malformed character Foundation is treated as "nothing to gate
+    // on yet" - the worldEngine ingestFoundation call below independently
+    // handles its own missing/error Foundation cases unchanged.
+    const characterFoundation = await characterIngestFoundation(storyId);
+    if (characterFoundation.status === "ok" || characterFoundation.status === "incomplete") {
+      const gate = checkCharacterBibleComplete(characterFoundation.foundation.cast, story.p2);
+      if (!gate.complete) {
+        return NextResponse.json(
+          {
+            error: `Finish your Character Bible before starting the World Bible. Still in progress: ${gate.incompleteNames.join(", ")}.`,
+          },
+          { status: 400 }
+        );
+      }
     }
 
     const foundationResult = await ingestFoundation(storyId);
