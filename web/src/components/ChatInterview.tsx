@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import CanonPanel, { type PanelElement, type GuardrailFlag } from "@/components/CanonPanel";
@@ -10,6 +10,7 @@ import UserMenu from "@/components/UserMenu";
 import { useUser } from "@/components/UserProvider";
 import { lastProjectPath } from "@/lib/lastProject";
 import { downloadText, downloadBlob } from "@/lib/download";
+import { useScrollToLatest } from "@/lib/useScrollToLatest";
 import type { FoundationDocument } from "@/lib/canonEngine/foundationDoc";
 
 type ChatMessage = {
@@ -104,7 +105,7 @@ export default function ChatInterview() {
   const [leftWidth, setLeftWidth] = useState(380);
   const [notesCollapsed, setNotesCollapsed] = useState(false);
   const [notesKey, setNotesKey] = useState<string | null>(null);
-  const listEndRef = useRef<HTMLDivElement | null>(null);
+  const { containerRef, endRef, isNearBottom, handleScroll, scrollToLatest } = useScrollToLatest();
 
   // Each new turn's notes start expanded - collapsing is a per-turn choice,
   // not a sticky "never show notes again" setting. Adjusting state during
@@ -143,6 +144,7 @@ export default function ChatInterview() {
         if (Array.isArray(data.elements)) setElements(data.elements);
         if (Array.isArray(data.guardrailFlags)) setGuardrailFlags(data.guardrailFlags);
         if (data.story?.pendingConflict) setConflict(data.story.pendingConflict);
+        requestAnimationFrame(() => scrollToLatest("auto"));
       } catch {
         if (!cancelled) setError("Couldn't reach the server. Is the dev server running?");
       } finally {
@@ -188,9 +190,7 @@ export default function ChatInterview() {
       setError("Couldn't reach the server. Is the dev server running?");
     } finally {
       setLoading(false);
-      requestAnimationFrame(() =>
-        listEndRef.current?.scrollIntoView({ behavior: "smooth" })
-      );
+      requestAnimationFrame(() => scrollToLatest("smooth"));
     }
   }
 
@@ -299,10 +299,14 @@ export default function ChatInterview() {
             {/* ---------- Left panel: chat / canon tabs + input ---------- */}
             <div
               data-testid="left-panel"
-              className="flex shrink-0 flex-col border-r border-red-900/40 bg-neutral-900/40"
+              className="relative flex shrink-0 flex-col border-r border-red-900/40 bg-neutral-900/40"
               style={{ width: leftWidth }}
             >
-              <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4">
+              <div
+                ref={containerRef}
+                onScroll={handleScroll}
+                className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4"
+              >
                 {resuming && <Bubble role="assistant" content="Loading your canvas…" pending />}
                 {!resuming && messages.length === 0 && <Bubble role="assistant" content={WELCOME} />}
                 {messages.map((m, i) => (
@@ -375,8 +379,17 @@ export default function ChatInterview() {
                     {error}
                   </div>
                 )}
-                <div ref={listEndRef} />
+                <div ref={endRef} />
               </div>
+
+              {!isNearBottom && (
+                <button
+                  onClick={() => scrollToLatest("smooth")}
+                  className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full bg-gradient-to-r from-red-600 to-orange-500 px-4 py-1.5 text-xs font-semibold text-white shadow-lg hover:from-red-500 hover:to-orange-400"
+                >
+                  ↓ Jump to latest
+                </button>
+              )}
 
               <div className="shrink-0 border-t border-red-900/40 p-3">
                 <div className="rounded-xl p-[1px]" style={{ background: BORDER_GRADIENT }}>
