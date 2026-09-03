@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 /** Shared scroll-position tracking for a chat-style message list - used
  * identically by all three interview screens (Story Foundation, Character
@@ -14,15 +14,15 @@ export function useScrollToLatest() {
   const endRef = useRef<HTMLDivElement | null>(null);
   const [isNearBottom, setIsNearBottom] = useState(true);
 
-  function handleScroll() {
+  const handleScroll = useCallback(() => {
     const el = containerRef.current;
     if (!el) return;
     setIsNearBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 100);
-  }
+  }, []);
 
-  function scrollToLatest(behavior: ScrollBehavior = "smooth") {
+  const scrollToLatest = useCallback((behavior: ScrollBehavior = "smooth") => {
     endRef.current?.scrollIntoView({ behavior });
-  }
+  }, []);
 
   return { containerRef, endRef, isNearBottom, handleScroll, scrollToLatest };
 }

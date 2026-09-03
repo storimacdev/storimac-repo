@@ -154,7 +154,7 @@ export default function ChatInterview() {
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, canvasId]);
+  }, [workspaceId, canvasId, scrollToLatest]);
 
   async function sendMessage(preset?: string) {
     const text = (preset ?? input).trim();
@@ -380,16 +380,15 @@ export default function ChatInterview() {
                   </div>
                 )}
                 <div ref={endRef} />
+                {!isNearBottom && (
+                  <button
+                    onClick={() => scrollToLatest("smooth")}
+                    className="sticky bottom-3 z-10 self-center rounded-full bg-gradient-to-r from-red-600 to-orange-500 px-4 py-1.5 text-xs font-semibold text-white shadow-lg hover:from-red-500 hover:to-orange-400"
+                  >
+                    ↓ Jump to latest
+                  </button>
+                )}
               </div>
-
-              {!isNearBottom && (
-                <button
-                  onClick={() => scrollToLatest("smooth")}
-                  className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full bg-gradient-to-r from-red-600 to-orange-500 px-4 py-1.5 text-xs font-semibold text-white shadow-lg hover:from-red-500 hover:to-orange-400"
-                >
-                  ↓ Jump to latest
-                </button>
-              )}
 
               <div className="shrink-0 border-t border-red-900/40 p-3">
                 <div className="rounded-xl p-[1px]" style={{ background: BORDER_GRADIENT }}>
