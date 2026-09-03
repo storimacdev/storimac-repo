@@ -381,7 +381,7 @@ export default function WorldInterview() {
               {characterBibleGate.incompleteNames.length > 5
                 ? `${characterBibleGate.incompleteNames.slice(0, 5).join(", ")}, and ${characterBibleGate.incompleteNames.length - 5} more`
                 : characterBibleGate.incompleteNames.join(", ")}
-              . If you already finished everyone, revisiting a character's chat moves them back to in-progress until they're signed off again — that's expected, not a bug.
+              . If you already finished everyone, revisiting a character&apos;s chat moves them back to in-progress until they&apos;re signed off again — that&apos;s expected, not a bug.
             </p>
             <Link
               href={`/character-bible?workspaceId=${workspaceId}&canvasId=${canvasId}`}
