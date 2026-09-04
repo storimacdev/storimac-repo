@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/session";
 import { errorResponse } from "@/lib/apiErrors";
 import { getMembership } from "@/lib/workspace/workspaceStore";
-import { getStory } from "@/lib/canonEngine/storyStore";
+import { getStory, setP1Locked } from "@/lib/canonEngine/storyStore";
 import { generateFoundationDocument, listDocumentVersions } from "@/lib/canonEngine/foundationDoc";
 
 export const runtime = "nodejs";
@@ -53,6 +53,7 @@ export async function POST(
     }
 
     const version = await generateFoundationDocument(canvasId);
+    await setP1Locked(canvasId, true);
     return NextResponse.json(
       {
         version: version.version,
@@ -60,6 +61,7 @@ export async function POST(
         summary_of_changes: version.summary_of_changes,
         markdown: version.markdown,
         json: version.json,
+        locked: true,
       },
       { status: 201 }
     );
