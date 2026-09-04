@@ -117,8 +117,11 @@ server-side in `world-chat/route.ts` rather than relying on the client.
 ## Edge cases
 
 - **Pre-existing stories** (no `p1Locked` field yet): read as `undefined`,
-  treated as unlocked everywhere (`story.p1Locked === true` is the only
-  check used — never a bare truthy check that could misread `undefined`).
+  treated as unlocked everywhere via a plain truthy check
+  (`if (story.p1Locked)`) — never a stricter `=== true` check, which is
+  unnecessary for a `boolean | null | undefined` field and only invites
+  drift from the plain-truthy convention this codebase already uses
+  elsewhere (e.g. `if (pendingConflict)` in `chat/route.ts`).
 - **Regenerate while already locked**: harmless no-op for the lock itself
   (`setP1Locked(id, true)` when already true) — Regenerate stays available
   while locked exactly as decided, since it recompiles from already-

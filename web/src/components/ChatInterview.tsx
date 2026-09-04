@@ -349,12 +349,15 @@ export default function ChatInterview() {
                     <p className="mt-1 text-sm text-red-100/90">
                       <b>{conflict.element_id.replace(/_/g, " ")}</b> is already confirmed. Pick how to resolve it:
                     </p>
+                    {p1Locked && (
+                      <p className="mt-1 text-xs text-red-300/80">Unlock the Story Foundation to resolve this.</p>
+                    )}
                     <div className="mt-3 flex flex-wrap gap-2">
                       {CONFLICT_CHOICES.map((c) => (
                         <button
                           key={c.letter}
                           onClick={() => sendMessage(c.message)}
-                          disabled={loading}
+                          disabled={loading || p1Locked}
                           className="rounded-lg border border-red-500/50 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200 transition hover:bg-red-500/25 disabled:opacity-40"
                         >
                           <span className="mr-1.5 inline-block rounded bg-gradient-to-r from-red-500 to-orange-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
