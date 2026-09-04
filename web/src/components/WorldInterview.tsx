@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Markdown from "@/components/Markdown";
 import UserMenu from "@/components/UserMenu";
 import { useUser } from "@/components/UserProvider";
+import { useScrollToLatest } from "@/lib/useScrollToLatest";
 import type { P3State } from "@/lib/canonEngine/storyStore";
 import { WCL_LABELS, WCL_LEVELS, type WclLevel } from "@/lib/worldEngine/wcl";
 import { pillarElementId } from "@/lib/worldEngine/pillarElementId";
@@ -71,7 +72,7 @@ export default function WorldInterview() {
   const [newPillarInput, setNewPillarInput] = useState("");
   const [elementStatuses, setElementStatuses] = useState<Record<string, PillarStatus>>({});
   const [elementStatusUpdating, setElementStatusUpdating] = useState(false);
-  const listEndRef = useRef<HTMLDivElement | null>(null);
+  const { containerRef, endRef, isNearBottom, handleScroll, scrollToLatest } = useScrollToLatest();
 
   useEffect(() => {
     if (!workspaceId || !canvasId) return;
@@ -103,6 +104,7 @@ export default function WorldInterview() {
         setElementStatuses(
           Object.fromEntries(rawElements.map((e) => [e.element_id, toPillarStatus(e.status)]))
         );
+        requestAnimationFrame(() => scrollToLatest("auto"));
       } catch {
         if (!cancelled) setError("Couldn't reach the server. Is the dev server running?");
       } finally {
@@ -112,7 +114,7 @@ export default function WorldInterview() {
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, canvasId]);
+  }, [workspaceId, canvasId, scrollToLatest]);
 
   useEffect(() => {
     if (!workspaceId || !canvasId) return;
@@ -192,9 +194,7 @@ export default function WorldInterview() {
       setError("Couldn't reach the server. Is the dev server running?");
     } finally {
       setLoading(false);
-      requestAnimationFrame(() =>
-        listEndRef.current?.scrollIntoView({ behavior: "smooth" })
-      );
+      requestAnimationFrame(() => scrollToLatest("smooth"));
     }
   }
 
@@ -418,10 +418,14 @@ export default function WorldInterview() {
           <div className="flex min-h-0 flex-1">
             <div
               data-testid="left-panel"
-              className="flex shrink-0 flex-col border-r border-red-900/40 bg-neutral-900/40"
+              className="relative flex shrink-0 flex-col border-r border-red-900/40 bg-neutral-900/40"
               style={{ width: leftWidth }}
             >
-              <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4">
+              <div
+                ref={containerRef}
+                onScroll={handleScroll}
+                className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4"
+              >
                 {resuming && <Bubble role="assistant" content="Loading your canvas…" pending />}
                 {!resuming && messages.length === 0 && <Bubble role="assistant" content={WELCOME} />}
                 {messages.map((m, i) => (
@@ -433,7 +437,15 @@ export default function WorldInterview() {
                     {error}
                   </div>
                 )}
-                <div ref={listEndRef} />
+                <div ref={endRef} />
+                {!isNearBottom && (
+                  <button
+                    onClick={() => scrollToLatest("smooth")}
+                    className="sticky bottom-3 z-10 self-center rounded-full bg-gradient-to-r from-red-600 to-orange-500 px-4 py-1.5 text-xs font-semibold text-white shadow-lg hover:from-red-500 hover:to-orange-400"
+                  >
+                    ↓ Jump to latest
+                  </button>
+                )}
               </div>
 
               <div className="shrink-0 border-t border-red-900/40 p-3">
