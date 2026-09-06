@@ -134,6 +134,12 @@ export async function POST(req: NextRequest) {
     if (!membership) {
       return NextResponse.json({ error: "Not a member of this workspace." }, { status: 403 });
     }
+    if (story.p1Locked) {
+      return NextResponse.json(
+        { error: "The Story Foundation is locked. Unlock it first to keep editing." },
+        { status: 409 }
+      );
+    }
 
     const turnId = randomUUID();
     const now = new Date().toISOString();

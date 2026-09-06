@@ -26,18 +26,19 @@ function envNumber(name: string, fallback: number): number {
   return parsed;
 }
 
-// Placeholder defaults pending real numbers from the Anthropic Console —
-// override via env vars once confirmed, no code change needed.
-const RPM_LIMIT = envNumber("ANTHROPIC_RPM_LIMIT", 40);
-const ITPM_LIMIT = envNumber("ANTHROPIC_ITPM_LIMIT", 30000);
-// 32000 gives ~7 concurrent 4096-token (the current extractTurn.ts default
-// max_tokens) reservations headroom before this gate itself becomes the
-// binding constraint - reconciliation/pruning take 45-60s to free capacity
-// (see the max_tokens comment in extractTurn.ts), far longer than
-// ANTHROPIC_GATE_MAX_WAIT_MS, so the *ratio* between this ceiling and
-// max_tokens matters more than the absolute number until real Anthropic
-// Console limits are confirmed.
-const OTPM_LIMIT = envNumber("ANTHROPIC_OTPM_LIMIT", 32000);
+// Defaults raised well above the account's actual usage tier (confirmed
+// 2026-09: no real Anthropic 429s, ample unused credit) — these placeholder
+// ceilings were the cause of the false-positive "StoriMac is handling a lot
+// of requests right now" errors users were hitting under ordinary load, not
+// real Anthropic capacity. Kept as a gate (not removed) so a genuine runaway
+// burst still degrades into a brief in-process wait instead of a raw error;
+// override via env vars if real Console numbers are obtained later.
+const RPM_LIMIT = envNumber("ANTHROPIC_RPM_LIMIT", 1000);
+const ITPM_LIMIT = envNumber("ANTHROPIC_ITPM_LIMIT", 200000);
+// Keeps the same ~7-concurrent-reservation headroom ratio against
+// extractTurn.ts's 4096-token max_tokens default that the original 32000
+// value targeted, scaled up with the other ceilings.
+const OTPM_LIMIT = envNumber("ANTHROPIC_OTPM_LIMIT", 60000);
 const MAX_WAIT_MS = envNumber("ANTHROPIC_GATE_MAX_WAIT_MS", 8000);
 const POLL_MS = envNumber("ANTHROPIC_GATE_POLL_MS", 250);
 // Overridable only so the Task 1 fixture script can verify pruning without

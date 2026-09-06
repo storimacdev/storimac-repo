@@ -102,6 +102,8 @@ export default function ChatInterview() {
   const [versions, setVersions] = useState<VersionRow[]>([]);
   const [generating, setGenerating] = useState(false);
   const [pdfGenerating, setPdfGenerating] = useState(false);
+  const [p1Locked, setP1Locked] = useState(false);
+  const [unlocking, setUnlocking] = useState(false);
   const [leftWidth, setLeftWidth] = useState(380);
   const [notesCollapsed, setNotesCollapsed] = useState(false);
   const [notesKey, setNotesKey] = useState<string | null>(null);
@@ -144,6 +146,7 @@ export default function ChatInterview() {
         if (Array.isArray(data.elements)) setElements(data.elements);
         if (Array.isArray(data.guardrailFlags)) setGuardrailFlags(data.guardrailFlags);
         if (data.story?.pendingConflict) setConflict(data.story.pendingConflict);
+        if (data.story?.p1Locked) setP1Locked(true);
         requestAnimationFrame(() => scrollToLatest("auto"));
       } catch {
         if (!cancelled) setError("Couldn't reach the server. Is the dev server running?");
@@ -235,6 +238,7 @@ export default function ChatInterview() {
         return;
       }
       setDoc(data);
+      if (typeof data.locked === "boolean") setP1Locked(data.locked);
       const listRes = await fetch(`/api/workspaces/${workspaceId}/canvases/${canvasId}/document`);
       const listData = await listRes.json();
       if (listRes.ok && Array.isArray(listData.versions)) setVersions(listData.versions);
@@ -242,6 +246,31 @@ export default function ChatInterview() {
       setError("Couldn't reach the server.");
     } finally {
       setGenerating(false);
+    }
+  }
+
+  async function handleUnlock() {
+    if (!workspaceId || !canvasId || unlocking) return;
+    const confirmed = window.confirm(
+      "Editing your Story Foundation may affect Character Bible and World Bible work already built on it. Unlock anyway?"
+    );
+    if (!confirmed) return;
+    setUnlocking(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/workspaces/${workspaceId}/canvases/${canvasId}/unlock`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Couldn't unlock.");
+        return;
+      }
+      setP1Locked(Boolean(data.locked));
+    } catch {
+      setError("Couldn't reach the server.");
+    } finally {
+      setUnlocking(false);
     }
   }
 
@@ -324,12 +353,15 @@ export default function ChatInterview() {
                     <p className="mt-1 text-sm text-red-100/90">
                       <b>{conflict.element_id.replace(/_/g, " ")}</b> is already confirmed. Pick how to resolve it:
                     </p>
+                    {p1Locked && (
+                      <p className="mt-1 text-xs text-red-300/80">Unlock the Story Foundation to resolve this.</p>
+                    )}
                     <div className="mt-3 flex flex-wrap gap-2">
                       {CONFLICT_CHOICES.map((c) => (
                         <button
                           key={c.letter}
                           onClick={() => sendMessage(c.message)}
-                          disabled={loading}
+                          disabled={loading || p1Locked}
                           className="rounded-lg border border-red-500/50 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200 transition hover:bg-red-500/25 disabled:opacity-40"
                         >
                           <span className="mr-1.5 inline-block rounded bg-gradient-to-r from-red-500 to-orange-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
@@ -390,6 +422,18 @@ export default function ChatInterview() {
                 )}
               </div>
 
+              {p1Locked && (
+                <div className="flex shrink-0 items-center justify-between gap-2 border-t border-red-900/40 bg-red-950/30 px-3 py-2 text-xs text-red-200">
+                  <span>Story Foundation is locked.</span>
+                  <button
+                    onClick={handleUnlock}
+                    disabled={unlocking}
+                    className="rounded-lg border border-red-500/50 px-2 py-1 text-xs font-semibold text-red-200 transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {unlocking ? "Unlocking…" : "Unlock to edit"}
+                  </button>
+                </div>
+              )}
               <div className="shrink-0 border-t border-red-900/40 p-3">
                 <div className="rounded-xl p-[1px]" style={{ background: BORDER_GRADIENT }}>
                   <div className="flex items-end gap-2 rounded-[11px] bg-neutral-900 p-2">
@@ -398,12 +442,13 @@ export default function ChatInterview() {
                       onChange={(e) => setInput(e.target.value)}
                       onKeyDown={onKeyDown}
                       rows={2}
-                      placeholder="Type your answer… (Enter to send)"
-                      className="min-w-0 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none"
+                      disabled={p1Locked}
+                      placeholder={p1Locked ? "Story Foundation is locked — unlock to edit." : "Type your answer… (Enter to send)"}
+                      className="min-w-0 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                     />
                     <button
                       onClick={() => sendMessage()}
-                      disabled={loading || resuming || !input.trim()}
+                      disabled={loading || resuming || !input.trim() || p1Locked}
                       className="shrink-0 rounded-lg bg-gradient-to-r from-red-600 to-orange-500 px-4 py-2 text-sm font-semibold text-white transition hover:from-red-500 hover:to-orange-400 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       Send

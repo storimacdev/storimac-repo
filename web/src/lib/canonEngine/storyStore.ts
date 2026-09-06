@@ -134,6 +134,15 @@ export interface Story {
    * it in Firestore.
    */
   p3?: P3State | null;
+  /**
+   * Project 1 completion lock. Set true by every successful Story
+   * Foundation Document generation (POST .../document); cleared only by
+   * the explicit unlock action (POST .../unlock). Optional/nullable since
+   * Stories created before this field existed won't have it in Firestore
+   * — treat undefined/null the same as false (unlocked) everywhere this
+   * is read.
+   */
+  p1Locked?: boolean | null;
 }
 
 export interface StoryMessage {
@@ -304,6 +313,13 @@ export async function setStage7Audit(
   await storiesCollection()
     .doc(storyId)
     .update({ stage7Audit: audit, updatedAt: new Date().toISOString() });
+}
+
+/** Project 1 completion lock (see the `p1Locked` field doc on `Story`) - same whole-value-replace convention as setPendingConflict/setStage7Audit above. */
+export async function setP1Locked(storyId: string, locked: boolean): Promise<void> {
+  await storiesCollection()
+    .doc(storyId)
+    .update({ p1Locked: locked, updatedAt: new Date().toISOString() });
 }
 
 /** Stores Project 2's per-character lock/progress (issue #26) - whole-object replace, same convention as setStage7Audit. */
