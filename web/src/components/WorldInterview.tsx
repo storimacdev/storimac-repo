@@ -231,6 +231,7 @@ export default function WorldInterview() {
       });
       const data = await res.json();
 
+      if (res.status === 409) return; // benign: someone else already resolved this dangling turn
       if (!res.ok) {
         setError(data.error ?? "Something went wrong.");
         return;

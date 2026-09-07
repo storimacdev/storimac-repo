@@ -117,7 +117,7 @@ export default function CharacterInterview() {
   // the resumed history ends in a user message with no reply - retry it
   // instead of leaving the session silently stuck.
   useEffect(() => {
-    if (resuming || !canvasId) return;
+    if (resuming || !canvasId || error) return;
     if (messages.length === 0) {
       sendMessage("Let's begin.");
       return;
@@ -126,7 +126,7 @@ export default function CharacterInterview() {
       retryLastTurn();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resuming, canvasId]);
+  }, [resuming, canvasId, error]);
 
   // Compiled Character Bible entries (issue #35) - fetched once on mount
   // so a resumed session with prior sign-offs shows the panel immediately,
@@ -221,6 +221,7 @@ export default function CharacterInterview() {
       });
       const data = await res.json();
 
+      if (res.status === 409) return; // benign: someone else already resolved this dangling turn
       if (!res.ok) {
         setError(data.error ?? "Something went wrong.");
         return;
