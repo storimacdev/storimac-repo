@@ -112,9 +112,19 @@ export default function CharacterInterview() {
   // evaluation + first Protagonist questions) automatically, once, the
   // first time a genuinely new session loads - otherwise the session sits
   // waiting for the author to type something before the model ever speaks.
+  // Also recovers a "dangling" turn (issue #108): if the model call for
+  // some prior message failed after that message was already persisted,
+  // the resumed history ends in a user message with no reply - retry it
+  // instead of leaving the session silently stuck.
   useEffect(() => {
-    if (resuming || messages.length > 0 || !canvasId) return;
-    sendMessage("Let's begin.");
+    if (resuming || !canvasId) return;
+    if (messages.length === 0) {
+      sendMessage("Let's begin.");
+      return;
+    }
+    if (messages[messages.length - 1].role === "user") {
+      retryLastTurn();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resuming, canvasId]);
 
@@ -144,6 +154,23 @@ export default function CharacterInterview() {
     }
   }
 
+  function applyTurnResponse(data: {
+    reply: string;
+    context?: string | null;
+    current_character?: string | null;
+    current_stage?: number;
+    character_signed_off?: boolean;
+  }) {
+    setMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
+    setContext(data.context ?? null);
+    setCurrentCharacter(data.current_character ?? null);
+    setCurrentStage(typeof data.current_stage === "number" ? data.current_stage : null);
+    setCharacterSignedOff(Boolean(data.character_signed_off));
+    if (data.character_signed_off) {
+      fetchBibleEntries();
+    }
+  }
+
   async function sendMessage(preset?: string) {
     const text = (preset ?? input).trim();
     if (!text || loading || !canvasId) return;
@@ -166,14 +193,40 @@ export default function CharacterInterview() {
         return;
       }
 
-      setMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
-      setContext(data.context ?? null);
-      setCurrentCharacter(data.current_character ?? null);
-      setCurrentStage(typeof data.current_stage === "number" ? data.current_stage : null);
-      setCharacterSignedOff(Boolean(data.character_signed_off));
-      if (data.character_signed_off) {
-        fetchBibleEntries();
+      applyTurnResponse(data);
+    } catch {
+      setError("Couldn't reach the server. Is the dev server running?");
+    } finally {
+      setLoading(false);
+      requestAnimationFrame(() => scrollToLatest("smooth"));
+    }
+  }
+
+  // Recovers a "dangling" turn (issue #108): if a prior turn's model call
+  // failed after the user's message was already persisted, the resumed
+  // history ends in a user message with no reply. Unlike sendMessage, this
+  // does not optimistically append a user bubble (it's already in
+  // `messages` from the resume fetch) and sends no `message` field - the
+  // server re-runs the turn against the already-persisted history.
+  async function retryLastTurn() {
+    if (loading || !canvasId) return;
+    setError(null);
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/character-chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storyId: canvasId, retry: true }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error ?? "Something went wrong.");
+        return;
       }
+
+      applyTurnResponse(data);
     } catch {
       setError("Couldn't reach the server. Is the dev server running?");
     } finally {
