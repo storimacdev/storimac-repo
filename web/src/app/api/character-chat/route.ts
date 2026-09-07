@@ -128,12 +128,17 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => null);
     const storyId: unknown = body?.storyId;
     const message: unknown = body?.message;
+    const retry = body?.retry === true;
 
     if (typeof storyId !== "string" || !storyId) {
       return NextResponse.json({ error: "Request must include `storyId`." }, { status: 400 });
     }
-    if (typeof message !== "string" || !message.trim()) {
-      return NextResponse.json({ error: "Request must include a non-empty `message`." }, { status: 400 });
+    let userMessage = "";
+    if (!retry) {
+      if (typeof message !== "string" || !message.trim()) {
+        return NextResponse.json({ error: "Request must include a non-empty `message`." }, { status: 400 });
+      }
+      userMessage = message.trim();
     }
 
     const story = await getStory(storyId);
@@ -183,11 +188,18 @@ export async function POST(req: NextRequest) {
 
     const turnId = randomUUID();
     const now = new Date().toISOString();
-    await appendMessage(
-      storyId,
-      { role: "user", content: message.trim(), ts: now, turnId },
-      CHARACTER_MESSAGES_COLLECTION
-    );
+    if (retry) {
+      const lastMessages = await listMessages(storyId, 1, CHARACTER_MESSAGES_COLLECTION);
+      if (lastMessages[0]?.role !== "user") {
+        return NextResponse.json({ error: "Nothing to retry." }, { status: 409 });
+      }
+    } else {
+      await appendMessage(
+        storyId,
+        { role: "user", content: userMessage, ts: now, turnId },
+        CHARACTER_MESSAGES_COLLECTION
+      );
+    }
 
     const recentMessages = await listMessages(storyId, CHARACTER_MESSAGE_WINDOW, CHARACTER_MESSAGES_COLLECTION);
 
