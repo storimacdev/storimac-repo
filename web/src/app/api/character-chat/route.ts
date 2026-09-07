@@ -333,7 +333,7 @@ export async function POST(req: NextRequest) {
         const fieldLines = confirmed
           .map((e) => `  - ${e.element_id.slice(id.length + 1)}: ${truncateFactValue(e.value)}`)
           .join("\n");
-        factLines.push(`- ${progress.characterName}:\n${fieldLines}`);
+        factLines.push(`- ${progress?.characterName ?? id}:\n${fieldLines}`);
       }
       if (factLines.length > 0) {
         system += `\n\n[Confirmed Facts So Far - computed by the app, trust this over re-deriving it. Internal grounding only, never narrate this raw data to the author. Do not re-ask about any fact listed here as Confirmed - treat it as already settled and move the interview forward.]\n${factLines.join("\n")}`;
