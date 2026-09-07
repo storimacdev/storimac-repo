@@ -309,17 +309,19 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Confirmed-facts grounding (issue #36) - the model's only other
-    // signal that a fact is already settled is the bounded
-    // CHARACTER_MESSAGE_WINDOW replayed transcript, which falls out of
-    // scope on a long interview or a resumed session (a fresh, short
-    // window). Mirrors the Relationship Graph block immediately above:
-    // unconditional injection for every character with a
-    // characterProgress entry (reusing the same relationshipGroundedIds
-    // array, not recomputed), since current_character isn't known until
-    // after this turn's model call - inject broadly and trust the model
-    // to use what's relevant. Only Confirmed facts appear; Working/
-    // Exploring facts are still legitimately being explored.
+    // Confirmed-facts grounding (issue #36, scoped by issue #107) - the
+    // model's only other signal that a fact is already settled is the
+    // bounded CHARACTER_MESSAGE_WINDOW replayed transcript, which falls
+    // out of scope on a long interview or a resumed session (a fresh,
+    // short window). Unlike the Relationship Graph block immediately
+    // above (O(characters), left unscoped), this one is O(characters x
+    // ~30 fields) with uncapped free-text values, so it's scoped to just
+    // the active character (known server-side via p2State.activeCharacterId,
+    // not the model's own self-reported current_character) plus every
+    // signed-off character - not every characterProgress entry - and
+    // each field's value is truncated (truncateFactValue). Only Confirmed
+    // facts appear; Working/Exploring facts are still legitimately being
+    // explored.
     const groundedCharacterIds = computeGroundedCharacterIds(p2State);
     if (groundedCharacterIds.length > 0) {
       const factElements = await listElements(storyId, CHARACTER_FACTS_COLLECTION);
