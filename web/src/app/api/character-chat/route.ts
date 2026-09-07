@@ -82,6 +82,32 @@ function resolveCharId(currentCharacter: string, cast: { name: string }[], turnI
   return slugifyCharacterName(currentCharacter);
 }
 
+// Confirmed-facts grounding scope (issue #107) - the app already knows
+// which single character is currently locked (p2State.activeCharacterId,
+// set by the sequential-interview FSM, issue #26) before this turn's
+// model call ever happens. That's a materially better scoping signal
+// than the model's own self-reported current_character field, and lets
+// the grounding block below stop dumping every character's facts on
+// every turn regardless of relevance.
+function computeGroundedCharacterIds(p2State: P2State): string[] {
+  const signedOffIds = Object.entries(p2State.characterProgress)
+    .filter(([, progress]) => progress.status === "signed_off")
+    .map(([id]) => id);
+  if (!p2State.activeCharacterId) return signedOffIds;
+  return signedOffIds.includes(p2State.activeCharacterId)
+    ? signedOffIds
+    : [p2State.activeCharacterId, ...signedOffIds];
+}
+
+// Defense-in-depth against a single character's free-text fact value
+// being very long - scoping (computeGroundedCharacterIds above) bounds
+// how many characters contribute to the block, this bounds how much any
+// one of them can contribute.
+function truncateFactValue(value: unknown): string {
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  return text.length > 200 ? `${text.slice(0, 200)}…` : text;
+}
+
 function toFactUpdate(u: FactUpdateInput, charId: string): ElementUpdate {
   const patch: ElementUpdate["patch"] = {};
   if (u.value !== undefined) patch.value = u.value;
@@ -294,15 +320,16 @@ export async function POST(req: NextRequest) {
     // after this turn's model call - inject broadly and trust the model
     // to use what's relevant. Only Confirmed facts appear; Working/
     // Exploring facts are still legitimately being explored.
-    if (relationshipGroundedIds.length > 0) {
+    const groundedCharacterIds = computeGroundedCharacterIds(p2State);
+    if (groundedCharacterIds.length > 0) {
       const factElements = await listElements(storyId, CHARACTER_FACTS_COLLECTION);
       const factLines: string[] = [];
-      for (const id of relationshipGroundedIds) {
+      for (const id of groundedCharacterIds) {
         const progress = p2State.characterProgress[id];
         const confirmed = factElements.filter((e) => e.element_id.startsWith(`${id}.`) && e.status === "Confirmed");
         if (confirmed.length === 0) continue;
         const fieldLines = confirmed
-          .map((e) => `  - ${e.element_id.slice(id.length + 1)}: ${typeof e.value === "string" ? e.value : JSON.stringify(e.value)}`)
+          .map((e) => `  - ${e.element_id.slice(id.length + 1)}: ${truncateFactValue(e.value)}`)
           .join("\n");
         factLines.push(`- ${progress.characterName}:\n${fieldLines}`);
       }
