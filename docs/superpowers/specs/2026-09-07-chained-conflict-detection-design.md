@@ -98,16 +98,55 @@ Both branches now go through the identical culprit-finding logic;
 — a causal-chain-downgraded fact's Foundation conflict must still be
 caught even though `enforcedUpdates` no longer shows it as Confirmed).
 
-## Data flow — no other change needed
+## Data flow — the route's persistence logic also needs a one-line fix
 
-`nextPendingConflict` already flows unchanged into `Story.p2PendingConflict`
-(the caller in `character-chat/route.ts` already does this for both the
-resolution and fresh-detection branches identically), which already drives
+`character-chat/route.ts` does NOT persist `conflictResult.nextPendingConflict`
+uniformly today. Its current persistence logic (around lines 624-640):
+
+```ts
+if (conflictResult.logEntry) {
+  // ... log the resolution ...
+  await setP2PendingConflict(storyId, null);
+} else if (!pendingConflictBefore && conflictResult.nextPendingConflict) {
+  // ... log the fresh detection ...
+  await setP2PendingConflict(storyId, conflictResult.nextPendingConflict);
+}
+```
+
+The `if (conflictResult.logEntry)` branch **unconditionally** persists
+`null` whenever a resolution happened this turn — which, before this fix,
+was always correct, since `processConflict`'s resolution branch always
+returned `nextPendingConflict: null`. Once the module fix above makes that
+branch sometimes return a real `nextPendingConflict` (the chained new
+conflict), this route code would silently overwrite it back to `null`
+immediately after `processConflict` computed it — reproducing the exact
+same silent-drop bug one layer higher, undoing the module fix entirely.
+
+The route fix: persist whatever `processConflict` actually decided, not a
+hardcoded `null`:
+
+```ts
+if (conflictResult.logEntry) {
+  // ... log the resolution (unchanged) ...
+  if (conflictResult.nextPendingConflict) {
+    console.warn(
+      `[character-chat] Story Foundation conflict detected for ${conflictResult.nextPendingConflict.field} on turn ${turnId} (chained after resolving a prior conflict): ${conflictResult.nextPendingConflict.conflictDescription}`
+    );
+  }
+  await setP2PendingConflict(storyId, conflictResult.nextPendingConflict);
+} else if (!pendingConflictBefore && conflictResult.nextPendingConflict) {
+  // ... unchanged ...
+}
+```
+
+The `else if` branch is untouched — it already handles the fresh-detection
+case (no resolution happened this turn) correctly and isn't affected by
+this fix. With this change, `nextPendingConflict` already flows into
+`Story.p2PendingConflict`, which already drives
 `buildConflictContextMessage`'s injection into the next turn's system
-prompt. The author sees the new conflict's three-choice prompt on their
-very next turn — the exact same mechanism already used for any other
-conflict. No route, schema, or UI change is needed; this is a pure
-`foundationConflict.ts` module fix.
+prompt — the author sees the new conflict's three-choice prompt on their
+very next turn, the exact same mechanism already used for any other
+conflict. No schema or UI change is needed.
 
 ## Invariant preserved
 
