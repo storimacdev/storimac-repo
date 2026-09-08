@@ -2,6 +2,20 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Revision note:** Task 1's `assignCharIds` as written below checked for
+> collisions against each name's base slug (a count per slug), not against
+> the actual `charId` values already assigned. A final whole-branch review
+> found this let a member's own name collide with another member's
+> disambiguated id (e.g. two "Villager"s plus a "Villager 2"), and let a
+> disambiguating suffix push a charId's length past `MAX_CHAR_ID_LENGTH`
+> (silently wiped every turn by `character-chat/route.ts`'s pre-existing,
+> unrelated self-heal logic). A follow-up fix commit (`8817a048`) replaced
+> the base-slug counter with a check against the actual ids already
+> issued, re-truncating before appending a suffix. See
+> `docs/superpowers/specs/2026-09-08-stable-cast-charid-design.md` (updated
+> in place) for the corrected design. Tasks 2-3 needed no changes — the
+> bug was confined to Task 1's helper.
+
 **Goal:** Fix issue #105 — cast members whose names slugify identically currently share fact storage, lock/progress state, and tier classification, because four independent call sites each re-derive `slugifyCharacterName(name)` on their own with no way to tell two colliding characters apart.
 
 **Architecture:** `CastMember` (`characterEngine/ingestFoundation.ts`) gains a `charId: string` field, assigned once inside `extractCast` — the first cast member to produce a given slug in an ingestion pass keeps the plain slug; any later member with the same slug gets a disambiguating `_2`/`_3`/... suffix. Every consumer that previously re-derived a slug independently now reads `member.charId` directly instead.
