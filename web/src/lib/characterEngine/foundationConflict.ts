@@ -96,6 +96,16 @@ function downgradeAllConfirmed(
   );
 }
 
+function findConflictCulprit(
+  updates: FactUpdateInput[],
+  alreadyConfirmedFields: Set<string>,
+  excludeField?: string
+): FactUpdateInput | undefined {
+  return updates.find(
+    (u) => u.state === "Confirmed" && !alreadyConfirmedFields.has(u.field) && u.field !== excludeField
+  );
+}
+
 /**
  * Resolves this turn's conflict state:
  * - A pending conflict for THIS character plus a `resolution` this turn
@@ -161,21 +171,40 @@ export function processConflict(params: ProcessConflictParams): ConflictProcessi
     }
     // "revert": resolvedUpdates stays as `remaining` - the field is dropped entirely.
 
-    return {
-      enforcedUpdates: resolvedUpdates,
-      nextPendingConflict: null,
-      logEntry: {
-        charId,
-        field: pendingConflict.field,
-        conflictDescription: pendingConflict.conflictDescription,
-        resolution,
-      },
-      resolvedField,
+    const logEntry: ConflictLogEntryDraft = {
+      charId,
+      field: pendingConflict.field,
+      conflictDescription: pendingConflict.conflictDescription,
+      resolution,
     };
+
+    // Issue #106: this same turn might ALSO declare a fresh conflict for a
+    // different field - the field just resolved above is excluded so it
+    // can't loop back into being flagged as its own new conflict.
+    if (conflictDetected) {
+      const culprit = findConflictCulprit(rawUpdates, alreadyConfirmedFields, pendingConflict.field);
+      if (culprit) {
+        return {
+          enforcedUpdates: downgradeAllConfirmed(resolvedUpdates, alreadyConfirmedFields),
+          nextPendingConflict: {
+            charId,
+            characterName,
+            field: culprit.field,
+            proposedValue: culprit.value ?? null,
+            conflictDescription: conflictDescription ?? "The model flagged a conflict but didn't provide a description.",
+            ts,
+          },
+          logEntry,
+          resolvedField,
+        };
+      }
+    }
+
+    return { enforcedUpdates: resolvedUpdates, nextPendingConflict: null, logEntry, resolvedField };
   }
 
   if (!pendingConflict && conflictDetected) {
-    const culprit = rawUpdates.find((u) => u.state === "Confirmed" && !alreadyConfirmedFields.has(u.field));
+    const culprit = findConflictCulprit(rawUpdates, alreadyConfirmedFields);
     if (culprit) {
       return {
         enforcedUpdates: downgradeAllConfirmed(enforcedUpdates, alreadyConfirmedFields),
