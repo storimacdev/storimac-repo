@@ -1,4 +1,3 @@
-import { slugifyCharacterName } from "@/lib/characterEngine/characterId";
 import type { CastMember } from "@/lib/characterEngine/ingestFoundation";
 import type { P2State } from "@/lib/canonEngine/storyStore";
 
@@ -20,7 +19,7 @@ export function checkCharacterBibleComplete(
   const progressValues = Object.values(progress);
   const incompleteNames = cast
     .filter((member) => {
-      if (progress[slugifyCharacterName(member.name)]?.status === "signed_off") return false;
+      if (progress[member.charId]?.status === "signed_off") return false;
       // A sign-off recorded under character-chat/route.ts's raw-slugify
       // fallback (resolveCharId) won't share this member's slug key, but
       // the progress entry still carries the human-readable name under
