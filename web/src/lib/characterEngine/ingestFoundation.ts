@@ -1,4 +1,5 @@
 import { listDocumentVersions, getDocumentVersion, type FoundationDocument, type StoredDocumentVersion } from "@/lib/canonEngine/foundationDoc";
+import { slugifyCharacterName } from "./characterId";
 
 /**
  * Project 2 Story Foundation ingestion (issue #24, narrowed scope 2026-07-30).
@@ -20,6 +21,37 @@ export interface CastMember {
   story_role: string;
   description: string;
   primary_function: string;
+  /**
+   * Stable identity for this cast member within one ingestion pass
+   * (issue #105) - the FIRST cast member to produce a given
+   * slugifyCharacterName(name) value in this pass keeps that plain slug;
+   * any LATER member whose name slugifies to a value already used gets a
+   * disambiguating "_2"/"_3"/... suffix (see assignCharIds below). Every
+   * consumer that used to re-derive slugifyCharacterName(name)
+   * independently (resolveCharId, the causal-chain tier lookup,
+   * checkCharacterBibleComplete) now reads this field instead, so two
+   * colliding cast members can no longer be confused with each other.
+   * NOT guaranteed stable across a Foundation Document regeneration
+   * (out of scope for issue #105) - only guaranteed unique within one
+   * ingestFoundation call's cast array.
+   */
+  charId: string;
+}
+
+/** Assigns issue #105's stable charId to each parsed cast member. The
+ * first member to produce a given base slug in this pass keeps the plain
+ * slug (byte-identical to pre-#105 behavior for a non-colliding cast);
+ * each later collision on the same base slug gets a "_2"/"_3"/...
+ * suffix, based on this pass's array order. */
+function assignCharIds(members: Omit<CastMember, "charId">[]): CastMember[] {
+  const seenCounts = new Map<string, number>();
+  return members.map((member) => {
+    const baseSlug = slugifyCharacterName(member.name);
+    const occurrence = (seenCounts.get(baseSlug) ?? 0) + 1;
+    seenCounts.set(baseSlug, occurrence);
+    const charId = occurrence === 1 ? baseSlug : `${baseSlug}_${occurrence}`;
+    return { ...member, charId };
+  });
 }
 
 export interface IngestedFoundation {
@@ -38,13 +70,13 @@ export type IngestFoundationResult =
   | { status: "error"; reason: string };
 
 function extractCast(raw: unknown[]): { cast: CastMember[]; skippedCount: number } {
-  const cast: CastMember[] = [];
+  const parsed: Omit<CastMember, "charId">[] = [];
   let skippedCount = 0;
   for (const entry of raw) {
     if (entry && typeof entry === "object") {
       const o = entry as Record<string, unknown>;
       if (typeof o.name === "string" && o.name.trim()) {
-        cast.push({
+        parsed.push({
           name: o.name.trim(),
           story_role: typeof o.story_role === "string" ? o.story_role : "",
           description: typeof o.description === "string" ? o.description : "",
@@ -53,12 +85,12 @@ function extractCast(raw: unknown[]): { cast: CastMember[]; skippedCount: number
         continue;
       }
     } else if (typeof entry === "string" && entry.trim()) {
-      cast.push({ name: entry.trim(), story_role: "", description: "", primary_function: "" });
+      parsed.push({ name: entry.trim(), story_role: "", description: "", primary_function: "" });
       continue;
     }
     skippedCount++;
   }
-  return { cast, skippedCount };
+  return { cast: assignCharIds(parsed), skippedCount };
 }
 
 const EMPTY_STORY_SPINE: FoundationDocument["11_story_spine"] = {
