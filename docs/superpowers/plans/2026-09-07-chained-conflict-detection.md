@@ -2,6 +2,21 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Revision note:** Tasks 1 and 2 below were executed and individually
+> reviewed clean as written — the "chain into a new pending conflict"
+> approach they describe. The final whole-branch review then found two
+> real problems with that approach (the just-resolved field could get
+> silently un-confirmed; a new conflict could carry a misattributed
+> description), and a follow-up fix commit revised both tasks' code to a
+> "suppress and defer" approach instead: no new pending conflict is
+> created within the same turn; the field is downgraded and surfaced only
+> via a warning log, to be caught by the existing fresh-detection branch
+> on a later turn. See `docs/superpowers/specs/2026-09-07-chained-conflict-detection-design.md`
+> (updated in place) for the current design. The task text below is left
+> as the historical record of what Tasks 1-2 actually implemented at the
+> time; it no longer describes the final shipped behavior on its own —
+> read it together with the fix commit.
+
 **Goal:** Fix issue #106 — a turn that resolves a pending Story-Foundation conflict AND also declares a fresh conflict for a different field currently drops the new one entirely; chain into the same detection logic already used for a first-time conflict, and fix the route's persistence logic so it doesn't overwrite the chained result back to `null`.
 
 **Architecture:** `web/src/lib/characterEngine/foundationConflict.ts`'s resolution branch currently returns immediately after handling the resolved field. It gains a fallthrough check (reusing a new shared helper, `findConflictCulprit`, also used by the existing fresh-detection branch) that looks for a fresh conflict among the turn's remaining proposals before returning. `web/src/app/api/character-chat/route.ts`'s persistence logic, which currently hardcodes `setP2PendingConflict(storyId, null)` whenever a resolution happened this turn, is changed to persist `conflictResult.nextPendingConflict` instead — whatever the module actually decided, not an assumption that it's always `null`.

@@ -1,5 +1,13 @@
 # Chained Conflict Detection on a Resolution Turn (Issue #106) — Design
 
+> **Revision note:** an earlier version of this spec had the resolution
+> branch start tracking a fresh conflict as a new `Story.p2PendingConflict`
+> within the same turn. A final whole-branch review found two real problems
+> with that approach (see "Why not chain into a new pending conflict"
+> below), and the design was revised to the suppress-and-defer approach
+> documented here before merge. No code implementing the earlier approach
+> shipped past the review stage.
+
 ## Problem
 
 `web/src/lib/characterEngine/foundationConflict.ts`'s `processConflict`
@@ -14,16 +22,18 @@ if (pendingConflict && pendingConflict.charId === charId && resolution) {
 }
 ```
 
-returns immediately once it's handled `pendingConflict.field`. It never
-inspects `conflictDetected` on that same turn. If a turn both resolves an
+returned immediately once it had handled `pendingConflict.field`. It never
+inspected `conflictDetected` on that same turn. If a turn both resolves an
 existing pending conflict AND the model's newly-proposed Confirmed
 fact(s) trigger a fresh `conflict_detected: true` for a *different*
-field, that new conflict is dropped entirely — no pending conflict
-recorded, nothing downgraded, nothing logged. The new fact passes
+field, that new conflict was dropped entirely — no pending conflict
+recorded, nothing downgraded, nothing logged. The new fact passed
 straight through to `applyStateDelta` as Confirmed, unnoticed.
 
+## Why not chain into a new pending conflict
+
 The fresh-detection branch immediately below already has everything
-needed to handle this correctly:
+needed to detect a fresh conflict:
 
 ```ts
 if (!pendingConflict && conflictDetected) {
@@ -39,12 +49,56 @@ if (!pendingConflict && conflictDetected) {
 }
 ```
 
-It's just unreachable from a resolution turn, since the resolution
-branch's early `return` happens first.
+The first version of this fix made the resolution branch fall through
+into this same logic — exclude the just-resolved field from the culprit
+search, then start tracking whatever's left as the new pending conflict,
+all within the same turn. A final whole-branch review found this
+introduces two real problems, both rooted in the fact that
+`conflictDetected`/`conflictDescription` are single **turn-level** fields
+(the model can only flag one conflict per turn, with one description),
+not per-field:
 
-## Fix: chain into the same detection logic
+1. **The just-resolved field gets silently un-confirmed.** When
+   `resolution === "update_foundation"`, the resolved field is re-added to
+   `resolvedUpdates` as `Confirmed` earlier in the same branch. Chaining
+   into `downgradeAllConfirmed(resolvedUpdates, alreadyConfirmedFields)`
+   sweeps EVERY Confirmed entry — including the one just resolved this
+   same turn — back to `Working`. The author's resolution gets logged as
+   "applied" but the fact itself would silently land as `Working` anyway,
+   with no warning.
+2. **A new conflict could carry the WRONG description.** On an
+   `update_foundation` turn, the model may legitimately re-set
+   `conflict_detected: true` just restating the conflict being resolved,
+   since `update_foundation` never actually edits the Foundation
+   Document — the contradiction technically still stands from the
+   model's point of view. If that same turn also has an unrelated new
+   Confirmed fact, the old chaining approach would find that unrelated
+   fact as the "culprit" and attach the OLD conflict's `conflictDescription`
+   (describing the field that was just resolved) to it — showing the
+   author a three-choice prompt about the wrong field with the wrong
+   explanation.
 
-Extract the culprit-finding predicate into a small shared helper:
+Both problems come from forcing "resolve field A" and "detect field B" to
+share the same turn-level `conflictDetected`/`conflictDescription` inputs
+and the same `downgradeAllConfirmed` sweep. The fix below avoids the
+coupling entirely instead of patching around it.
+
+## Fix: suppress and defer, don't chain
+
+A resolution turn that also has `conflictDetected: true` for a different
+field downgrades that field (and any other stray Confirmed proposal this
+turn, **excluding** the field that was just resolved) to `Working`, and
+signals this via a new result field, `suppressedConflictField`, so the
+route can log a warning. **No new pending conflict is created this same
+turn.** The field will be caught by the module's own existing,
+untouched fresh-detection branch on a later turn, once the model
+re-proposes it as Confirmed while nothing else is being resolved — at
+that point `conflictDetected`/`conflictDescription` genuinely describe
+only that field, with no sharing/misattribution risk.
+
+Extract the culprit-finding predicate into a small shared helper (used by
+both the fresh-detection branch and the resolution branch's suppression
+check):
 
 ```ts
 function findConflictCulprit(
@@ -58,13 +112,25 @@ function findConflictCulprit(
 }
 ```
 
-The fresh-detection branch calls it with no `excludeField` (unchanged
-behavior — nothing to exclude when there was no pending conflict this
-turn). The resolution branch, instead of returning immediately after
-building `resolvedUpdates`/`logEntry`/`resolvedField`, calls it against
-`rawUpdates` with `excludeField: pendingConflict.field` (the field that
-was JUST resolved this same turn must never be re-flagged as its own
-new conflict), and only then returns:
+A second small helper, mirroring `downgradeAllConfirmed` but sparing one
+named field:
+
+```ts
+function downgradeAllConfirmedExcept(
+  updates: FactUpdateInput[],
+  alreadyConfirmedFields: Set<string>,
+  excludeField: string
+): FactUpdateInput[] {
+  return updates.map((u) =>
+    u.state === "Confirmed" && !alreadyConfirmedFields.has(u.field) && u.field !== excludeField
+      ? { ...u, state: "Working" }
+      : u
+  );
+}
+```
+
+The resolution branch, instead of returning immediately after building
+`resolvedUpdates`/`logEntry`/`resolvedField`:
 
 ```ts
 if (pendingConflict && pendingConflict.charId === charId && resolution) {
@@ -73,64 +139,56 @@ if (pendingConflict && pendingConflict.charId === charId && resolution) {
     charId, field: pendingConflict.field, conflictDescription: pendingConflict.conflictDescription, resolution,
   };
 
+  let suppressedConflictField: string | null = null;
   if (conflictDetected) {
     const culprit = findConflictCulprit(rawUpdates, alreadyConfirmedFields, pendingConflict.field);
     if (culprit) {
-      return {
-        enforcedUpdates: downgradeAllConfirmed(resolvedUpdates, alreadyConfirmedFields),
-        nextPendingConflict: {
-          charId, characterName, field: culprit.field, proposedValue: culprit.value ?? null,
-          conflictDescription: conflictDescription ?? "The model flagged a conflict but didn't provide a description.",
-          ts,
-        },
-        logEntry,
-        resolvedField,
-      };
+      suppressedConflictField = culprit.field;
+      resolvedUpdates = downgradeAllConfirmedExcept(resolvedUpdates, alreadyConfirmedFields, pendingConflict.field);
     }
   }
 
-  return { enforcedUpdates: resolvedUpdates, nextPendingConflict: null, logEntry, resolvedField };
+  return { enforcedUpdates: resolvedUpdates, nextPendingConflict: null, logEntry, resolvedField, suppressedConflictField };
 }
 ```
 
-Both branches now go through the identical culprit-finding logic;
-`rawUpdates` is used in both (matching the module's existing rationale
-— a causal-chain-downgraded fact's Foundation conflict must still be
-caught even though `enforcedUpdates` no longer shows it as Confirmed).
+`nextPendingConflict` from this branch is always `null` again (same as
+before any #106 fix existed) — no new conflict object is ever
+constructed here, so there's nothing to misattribute a description to.
+`downgradeAllConfirmedExcept` explicitly spares `pendingConflict.field`,
+so the resolution this turn just applied survives.
 
-## Data flow — the route's persistence logic also needs a one-line fix
+The fresh-detection branch and the two other branches (re-gate, final
+fallthrough) are otherwise unchanged, each gaining only
+`suppressedConflictField: null` in their returned object (the field is
+required on `ConflictProcessingResult`, not optional).
 
-`character-chat/route.ts` does NOT persist `conflictResult.nextPendingConflict`
-uniformly today. Its current persistence logic (around lines 624-640):
+## Data flow — the route's persistence logic
+
+`character-chat/route.ts`'s existing persistence logic:
 
 ```ts
 if (conflictResult.logEntry) {
   // ... log the resolution ...
-  await setP2PendingConflict(storyId, null);
+  await setP2PendingConflict(storyId, conflictResult.nextPendingConflict);
 } else if (!pendingConflictBefore && conflictResult.nextPendingConflict) {
   // ... log the fresh detection ...
   await setP2PendingConflict(storyId, conflictResult.nextPendingConflict);
 }
 ```
 
-The `if (conflictResult.logEntry)` branch **unconditionally** persists
-`null` whenever a resolution happened this turn — which, before this fix,
-was always correct, since `processConflict`'s resolution branch always
-returned `nextPendingConflict: null`. Once the module fix above makes that
-branch sometimes return a real `nextPendingConflict` (the chained new
-conflict), this route code would silently overwrite it back to `null`
-immediately after `processConflict` computed it — reproducing the exact
-same silent-drop bug one layer higher, undoing the module fix entirely.
-
-The route fix: persist whatever `processConflict` actually decided, not a
-hardcoded `null`:
+stays as the general "persist whatever the module decided" shape
+(the more robust principle than hardcoding a literal `null`), and gains
+one addition: log a warning when `conflictResult.suppressedConflictField`
+is set, so the suppression is visible in server logs even though it
+produces no user-facing conflict prompt:
 
 ```ts
 if (conflictResult.logEntry) {
   // ... log the resolution (unchanged) ...
-  if (conflictResult.nextPendingConflict) {
+  if (conflictResult.suppressedConflictField) {
     console.warn(
-      `[character-chat] Story Foundation conflict detected for ${conflictResult.nextPendingConflict.field} on turn ${turnId} (chained after resolving a prior conflict): ${conflictResult.nextPendingConflict.conflictDescription}`
+      `[character-chat] conflict_detected still set for ${conflictResult.suppressedConflictField} on turn ${turnId} while resolving a different pending conflict for ${charId} - downgraded to Working instead of starting a second pending conflict this same turn`
     );
   }
   await setP2PendingConflict(storyId, conflictResult.nextPendingConflict);
@@ -139,36 +197,37 @@ if (conflictResult.logEntry) {
 }
 ```
 
-The `else if` branch is untouched — it already handles the fresh-detection
-case (no resolution happened this turn) correctly and isn't affected by
-this fix. With this change, `nextPendingConflict` already flows into
-`Story.p2PendingConflict`, which already drives
-`buildConflictContextMessage`'s injection into the next turn's system
-prompt — the author sees the new conflict's three-choice prompt on their
-very next turn, the exact same mechanism already used for any other
-conflict. No schema or UI change is needed.
+`conflictResult.nextPendingConflict` from the resolution branch is always
+`null` under this design, so this line persists `null` — the same
+effective result as before any #106 fix, just reached by respecting the
+module's return value rather than a hardcoded literal.
 
 ## Invariant preserved
 
-`Story.p2PendingConflict` is still ever at most one entry — resolving
-conflict N and detecting conflict N+1 happen within the same call, so
-the story is never persisted with two pending conflicts. This keeps the
-original singular-pending-conflict design decision (issue #30) intact,
-per this issue's own explicit constraint.
+`Story.p2PendingConflict` is still ever at most one entry, and — unlike
+the earlier chaining approach — this design never even attempts to write
+a second one within the same turn. The singular-pending-conflict design
+decision (issue #30) holds by construction, not by careful sequencing.
 
 ## Edge cases
 
 - **The just-resolved field re-appears as `conflictDetected`'s target**:
-  excluded via `excludeField`, so a stale/redundant `conflict_detected`
-  flag left over from restating the same conflict can't loop back into
-  re-flagging the field that was just settled this turn.
+  excluded via `excludeField` in `findConflictCulprit`, so a
+  stale/redundant `conflict_detected` flag left over from restating the
+  same conflict can't cause a suppression against the field that was
+  just settled this turn (`suppressedConflictField` stays `null`).
 - **`conflictDetected` is true but every remaining Confirmed proposal is
   already-confirmed or there simply are no remaining Confirmed
   proposals**: `findConflictCulprit` returns `undefined`, the `if
-  (culprit)` guard fails, and the function falls through to the final
-  `return` — same shape as the pre-existing fresh-detection branch's own
-  behavior when `conflictDetected` is true but no real culprit exists
-  (a model false-positive, effectively a no-op for the flag).
+  (culprit)` guard fails, `suppressedConflictField` stays `null`, and
+  `resolvedUpdates` is returned unchanged (no downgrade needed since
+  there was nothing to downgrade).
+- **The suppressed field's next natural turn**: once the model re-proposes
+  it as Confirmed on a later turn where nothing else is being resolved,
+  the pre-existing, untouched fresh-detection branch (`!pendingConflict &&
+  conflictDetected`) picks it up exactly as it would for any other fresh
+  conflict — `conflictDetected`/`conflictDescription` on that later turn
+  describe only that field, with no sharing/misattribution risk.
 - **A resolution turn under a different character than the one the
   conflict was raised against**: unaffected — that's the pre-existing,
   untouched final `return` case (a pending conflict for a different
@@ -182,13 +241,16 @@ per this issue's own explicit constraint.
   shipped) — this only touches `foundationConflict.ts`'s own resolution
   branch.
 - No change to `buildConflictContextMessage`'s wording or the three-choice
-  UI flow — the newly-chained conflict uses the exact same message-building
-  and resolution vocabulary as any other pending conflict.
-- No queueing of more than one conflict beyond what naturally falls out of
-  "resolve one, detect the next, in the same turn" — a third conflict
-  declared on the SAME turn as a second (i.e. the model flagging
-  `conflict_detected` for yet another field while also resolving one and
-  triggering a second) is not a real scenario the schema supports:
-  `conflict_detected`/`conflict_description` are singular per-turn fields,
-  not a list, so at most one fresh conflict can ever be declared on any
-  given turn regardless of how many Confirmed proposals that turn carries.
+  UI flow — nothing about the message-building or resolution vocabulary
+  changes; a suppressed field simply doesn't generate a pending conflict
+  this turn, so there's no new message to build.
+- No same-turn queueing of a second conflict — deliberately deferred by
+  one turn instead, per the "Why not chain" section above. A third
+  conflict declared on the SAME turn as a suppressed second one isn't a
+  real scenario the schema supports either way: `conflict_detected`/
+  `conflict_description` are singular per-turn fields, not a list.
+- A fresh conflict declared by a DIFFERENT character while character A's
+  conflict is still pending is a separate, pre-existing gap in the same
+  bug family (the fresh-detection branch is guarded by `!pendingConflict`
+  globally, not per-character) — out of scope for this issue, worth its
+  own follow-up.
