@@ -244,6 +244,26 @@ export async function POST(req: NextRequest) {
     let system = getSystemPrompt("sp02-cdc-systemprompt.md");
     system += `\n\n[Cast & Priority Matrix - computed by the app, trust this over re-deriving it. Internal grounding only, never narrate this raw data to the author - synthesize it into your own evaluation.]\n${castLines}`;
 
+    // Current Interview Lock grounding (issue #104) - the app's own
+    // authoritative p2State, not the model's last claimed stage, so a
+    // clamp (issue #26) converges the model's own next-turn behavior
+    // instead of only being corrected at the data layer after the fact.
+    // Rebuilt fresh every turn from persisted state (not just the
+    // session's first turn), so it stays accurate across a resume or
+    // after any clamp with no separate resume-specific code path.
+    const activeProgress = p2State.activeCharacterId
+      ? p2State.characterProgress[p2State.activeCharacterId]
+      : null;
+    const otherProgressLines = Object.entries(p2State.characterProgress)
+      .filter(([id]) => id !== p2State.activeCharacterId)
+      .map(([, progress]) => `- ${progress.characterName}: ${progress.status} (Stage ${progress.stage} - ${P2_STAGE_NAMES[progress.stage]})`)
+      .join("\n");
+    system += `\n\n[Current Interview Lock - computed by the app, trust this over your own prior belief or memory of this session. Internal grounding only, never narrate this raw data to the author.]\n${
+      activeProgress
+        ? `Currently locked to: ${activeProgress.characterName}, Stage ${activeProgress.stage} (${P2_STAGE_NAMES[activeProgress.stage]}).`
+        : "No character is currently locked - free to start or resume anyone."
+    }${otherProgressLines ? `\nOther characters:\n${otherProgressLines}` : ""}`;
+
     // Story Spine & Dramatic Engine grounding (issue #30) - the only Story
     // Foundation content the model can check a proposed fact against for
     // contradiction; without this it has nothing to compare to. Scoped to
