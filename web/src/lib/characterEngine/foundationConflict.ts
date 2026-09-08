@@ -43,6 +43,20 @@ export interface ConflictProcessingResult {
    * re-check is what actually decides whether it stays Confirmed.
    */
   resolvedField: string | null;
+  /**
+   * Set only on a resolution turn where `conflictDetected` pointed at a
+   * DIFFERENT field than the one just resolved (issue #106). Rather than
+   * starting to track that field as a second pending conflict in the same
+   * turn - which would fight over the single turn-level
+   * conflictDetected/conflictDescription fields with the resolution this
+   * turn already applied, and could misattach the OLD conflict's
+   * description to the wrong field - the app downgrades it (and any
+   * other stray Confirmed proposal this turn) to Working and logs a
+   * warning. It will be caught by ordinary fresh detection on a later
+   * turn if the model re-proposes it as Confirmed once nothing is being
+   * resolved.
+   */
+  suppressedConflictField: string | null;
 }
 
 export interface ProcessConflictParams {
@@ -96,6 +110,18 @@ function downgradeAllConfirmed(
   );
 }
 
+function downgradeAllConfirmedExcept(
+  updates: FactUpdateInput[],
+  alreadyConfirmedFields: Set<string>,
+  excludeField: string
+): FactUpdateInput[] {
+  return updates.map((u) =>
+    u.state === "Confirmed" && !alreadyConfirmedFields.has(u.field) && u.field !== excludeField
+      ? { ...u, state: "Working" }
+      : u
+  );
+}
+
 function findConflictCulprit(
   updates: FactUpdateInput[],
   alreadyConfirmedFields: Set<string>,
@@ -116,6 +142,13 @@ function findConflictCulprit(
  *   conflict was raised against is ignored entirely (the conflict stays
  *   open for its own character) - reachable via issue #26's
  *   switch_override while a conflict is pending.
+ * - That same resolution turn might ALSO have `conflictDetected` set for a
+ *   DIFFERENT field (issue #106) - rather than starting a second pending
+ *   conflict in the same turn, that field (and any other stray Confirmed
+ *   proposal this turn, excluding the one just resolved) is downgraded to
+ *   Working and signaled via `suppressedConflictField`; a later turn's
+ *   fresh detection (below) catches it for real once nothing is being
+ *   resolved.
  * - No pending conflict, but `conflictDetected` is true and at least one
  *   Confirmed proposal exists in `rawUpdates` (checked against the
  *   ORIGINAL proposals, not the post-#28 `enforcedUpdates`, so a fact
@@ -178,29 +211,26 @@ export function processConflict(params: ProcessConflictParams): ConflictProcessi
       resolution,
     };
 
-    // Issue #106: this same turn might ALSO declare a fresh conflict for a
-    // different field - the field just resolved above is excluded so it
-    // can't loop back into being flagged as its own new conflict.
+    // Issue #106: this same turn might ALSO have conflictDetected set for a
+    // different field - rather than starting a second pending conflict in
+    // the same turn (which would fight over the single turn-level
+    // conflictDetected/conflictDescription fields with the resolution just
+    // applied above, and could misattach this turn's description to the
+    // wrong field), downgrade it and signal suppressedConflictField for the
+    // route to log. A later turn's ordinary fresh-detection branch below
+    // will catch it for real once nothing is being resolved. The field
+    // just resolved above is excluded from the downgrade so this doesn't
+    // silently un-confirm the author's own resolution.
+    let suppressedConflictField: string | null = null;
     if (conflictDetected) {
       const culprit = findConflictCulprit(rawUpdates, alreadyConfirmedFields, pendingConflict.field);
       if (culprit) {
-        return {
-          enforcedUpdates: downgradeAllConfirmed(resolvedUpdates, alreadyConfirmedFields),
-          nextPendingConflict: {
-            charId,
-            characterName,
-            field: culprit.field,
-            proposedValue: culprit.value ?? null,
-            conflictDescription: conflictDescription ?? "The model flagged a conflict but didn't provide a description.",
-            ts,
-          },
-          logEntry,
-          resolvedField,
-        };
+        suppressedConflictField = culprit.field;
+        resolvedUpdates = downgradeAllConfirmedExcept(resolvedUpdates, alreadyConfirmedFields, pendingConflict.field);
       }
     }
 
-    return { enforcedUpdates: resolvedUpdates, nextPendingConflict: null, logEntry, resolvedField };
+    return { enforcedUpdates: resolvedUpdates, nextPendingConflict: null, logEntry, resolvedField, suppressedConflictField };
   }
 
   if (!pendingConflict && conflictDetected) {
@@ -218,6 +248,7 @@ export function processConflict(params: ProcessConflictParams): ConflictProcessi
         },
         logEntry: null,
         resolvedField: null,
+        suppressedConflictField: null,
       };
     }
   }
@@ -228,10 +259,11 @@ export function processConflict(params: ProcessConflictParams): ConflictProcessi
       nextPendingConflict: pendingConflict,
       logEntry: null,
       resolvedField: null,
+      suppressedConflictField: null,
     };
   }
 
-  return { enforcedUpdates, nextPendingConflict: pendingConflict, logEntry: null, resolvedField: null };
+  return { enforcedUpdates, nextPendingConflict: pendingConflict, logEntry: null, resolvedField: null, suppressedConflictField: null };
 }
 
 /**

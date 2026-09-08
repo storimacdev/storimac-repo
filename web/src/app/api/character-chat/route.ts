@@ -631,9 +631,9 @@ export async function POST(req: NextRequest) {
         ts: new Date().toISOString(),
         turnId,
       });
-      if (conflictResult.nextPendingConflict) {
+      if (conflictResult.suppressedConflictField) {
         console.warn(
-          `[character-chat] Story Foundation conflict detected for ${conflictResult.nextPendingConflict.field} on turn ${turnId} (chained after resolving a prior conflict): ${conflictResult.nextPendingConflict.conflictDescription}`
+          `[character-chat] conflict_detected still set for ${conflictResult.suppressedConflictField} on turn ${turnId} while resolving a different pending conflict for ${charId} - downgraded to Working instead of starting a second pending conflict this same turn`
         );
       }
       await setP2PendingConflict(storyId, conflictResult.nextPendingConflict);
