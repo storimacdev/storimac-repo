@@ -1,5 +1,5 @@
 import { listDocumentVersions, getDocumentVersion, type FoundationDocument, type StoredDocumentVersion } from "@/lib/canonEngine/foundationDoc";
-import { slugifyCharacterName } from "./characterId";
+import { MAX_CHAR_ID_LENGTH, slugifyCharacterName } from "./characterId";
 
 /**
  * Project 2 Story Foundation ingestion (issue #24, narrowed scope 2026-07-30).
@@ -33,7 +33,8 @@ export interface CastMember {
    * colliding cast members can no longer be confused with each other.
    * NOT guaranteed stable across a Foundation Document regeneration
    * (out of scope for issue #105) - only guaranteed unique within one
-   * ingestFoundation call's cast array.
+   * ingestFoundation call's cast array, and capped at MAX_CHAR_ID_LENGTH
+   * even after a disambiguating suffix is appended.
    */
   charId: string;
 }
@@ -44,12 +45,17 @@ export interface CastMember {
  * each later collision on the same base slug gets a "_2"/"_3"/...
  * suffix, based on this pass's array order. */
 function assignCharIds(members: Omit<CastMember, "charId">[]): CastMember[] {
-  const seenCounts = new Map<string, number>();
+  const used = new Set<string>();
   return members.map((member) => {
     const baseSlug = slugifyCharacterName(member.name);
-    const occurrence = (seenCounts.get(baseSlug) ?? 0) + 1;
-    seenCounts.set(baseSlug, occurrence);
-    const charId = occurrence === 1 ? baseSlug : `${baseSlug}_${occurrence}`;
+    let charId = baseSlug;
+    let occurrence = 1;
+    while (used.has(charId)) {
+      occurrence++;
+      const suffix = `_${occurrence}`;
+      charId = `${baseSlug.slice(0, MAX_CHAR_ID_LENGTH - suffix.length)}${suffix}`;
+    }
+    used.add(charId);
     return { ...member, charId };
   });
 }

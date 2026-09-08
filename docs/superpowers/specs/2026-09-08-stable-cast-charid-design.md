@@ -76,16 +76,40 @@ satisfying the issue's own "existing behavior for the common case is
 unchanged" acceptance criterion literally. Any LATER cast member in the
 same pass whose name slugifies to a value already used gets a
 disambiguating numeric suffix appended (`_2`, `_3`, ...), based on that
-pass's cast-array order:
+pass's cast-array order.
+
+> **Revision note:** the first version of this function checked for
+> collisions against each name's *base slug* (a `Map<string, number>`
+> counting how many times each base slug had been seen), not against the
+> actual `charId` values already handed out. A final whole-branch review
+> found two real bugs that fall out of that: (1) a cast member whose OWN
+> name happens to slugify to `"<base>_2"` could collide with a different
+> member's disambiguated id (e.g. two "Villager"s plus a "Villager 2" all
+> produce `"villager"`/`"villager_2"`/`"villager_2"` — a genuine
+> duplicate); (2) appending a suffix after `slugifyCharacterName`'s own
+> 60-char cap can push the result past `MAX_CHAR_ID_LENGTH`, which
+> `character-chat/route.ts`'s pre-existing (unrelated, already-shipped)
+> self-heal logic then treats as corrupted and silently deletes every
+> turn — permanently resetting that character's interview progress. The
+> version below checks against the actual ids already assigned (a
+> `Set<string>`, re-looping and re-truncating until a genuinely free id
+> under the cap is found) instead of a base-slug counter, closing both
+> gaps while keeping every no-collision/two-way/three-way trace
+> byte-identical to the original version's output.
 
 ```ts
 function assignCharIds(members: Omit<CastMember, "charId">[]): CastMember[] {
-  const seenCounts = new Map<string, number>();
+  const used = new Set<string>();
   return members.map((member) => {
     const baseSlug = slugifyCharacterName(member.name);
-    const occurrence = (seenCounts.get(baseSlug) ?? 0) + 1;
-    seenCounts.set(baseSlug, occurrence);
-    const charId = occurrence === 1 ? baseSlug : `${baseSlug}_${occurrence}`;
+    let charId = baseSlug;
+    let occurrence = 1;
+    while (used.has(charId)) {
+      occurrence++;
+      const suffix = `_${occurrence}`;
+      charId = `${baseSlug.slice(0, MAX_CHAR_ID_LENGTH - suffix.length)}${suffix}`;
+    }
+    used.add(charId);
     return { ...member, charId };
   });
 }
