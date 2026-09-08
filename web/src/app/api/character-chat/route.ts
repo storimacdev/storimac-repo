@@ -631,7 +631,12 @@ export async function POST(req: NextRequest) {
         ts: new Date().toISOString(),
         turnId,
       });
-      await setP2PendingConflict(storyId, null);
+      if (conflictResult.nextPendingConflict) {
+        console.warn(
+          `[character-chat] Story Foundation conflict detected for ${conflictResult.nextPendingConflict.field} on turn ${turnId} (chained after resolving a prior conflict): ${conflictResult.nextPendingConflict.conflictDescription}`
+        );
+      }
+      await setP2PendingConflict(storyId, conflictResult.nextPendingConflict);
     } else if (!pendingConflictBefore && conflictResult.nextPendingConflict) {
       console.warn(
         `[character-chat] Story Foundation conflict detected for ${conflictResult.nextPendingConflict.field} on turn ${turnId}: ${conflictResult.nextPendingConflict.conflictDescription}`
