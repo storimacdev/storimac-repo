@@ -23,7 +23,7 @@ import {
 import { applyStateDelta, listElements, getElement, CanonConflictError, CHARACTER_FACTS_COLLECTION, type ElementUpdate } from "@/lib/canonEngine/canonStore";
 import { extractTurn, TurnValidationError } from "@/lib/canonEngine/extractTurn";
 import { RateLimitTimeoutError } from "@/lib/rateLimit/anthropicGate";
-import { ingestFoundation } from "@/lib/characterEngine/ingestFoundation";
+import { ingestFoundation, type CastMember } from "@/lib/characterEngine/ingestFoundation";
 import { computePriorityMatrix } from "@/lib/characterEngine/priorityMatrix";
 import { getDepthLabel } from "@/lib/characterEngine/depthLabels";
 import { isKnownFieldId, CHARACTER_RELATIONSHIPS_COLLECTION } from "@/lib/characterEngine/factRegistry";
@@ -65,16 +65,16 @@ const CHARACTER_MESSAGE_WINDOW = 20;
 // falling back to raw slugify (logged) only when the cast list can't
 // disambiguate - e.g. a character the model introduced that isn't in the
 // Foundation yet.
-function resolveCharId(currentCharacter: string, cast: { name: string }[], turnId: string): string {
+function resolveCharId(currentCharacter: string, cast: CastMember[], turnId: string): string {
   const normalized = currentCharacter.trim().toLowerCase();
   const exact = cast.find((m) => m.name.trim().toLowerCase() === normalized);
-  if (exact) return slugifyCharacterName(exact.name);
+  if (exact) return exact.charId;
 
   const prefixMatches = cast.filter((m) => {
     const castName = m.name.trim().toLowerCase();
     return castName.startsWith(normalized) || normalized.startsWith(castName);
   });
-  if (prefixMatches.length === 1) return slugifyCharacterName(prefixMatches[0].name);
+  if (prefixMatches.length === 1) return prefixMatches[0].charId;
 
   console.warn(
     `[character-chat] current_character "${currentCharacter}" on turn ${turnId} didn't match a unique cast member (${prefixMatches.length} candidates) - falling back to raw slugify`
@@ -429,7 +429,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const castIndex = foundation.cast.findIndex((m) => slugifyCharacterName(m.name) === charId);
+    const castIndex = foundation.cast.findIndex((m) => m.charId === charId);
     const tier = castIndex >= 0 ? matrix[castIndex].tier : null;
 
     // Roots being confirmed in this same turn's batch - a Firestore read for
