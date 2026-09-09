@@ -112,14 +112,28 @@ JSON. Fields are extracted by the document's own stable field-name keys
 hardcoded section number": these are the compiled document's own literal
 field names, not a numeric array index.
 
-If `story.p1Locked` is falsy, or no versions exist yet: returns `p1: null`
-and one gap — `{ project: "P1", field: "document", reason: "Story
-Foundation Document has not been generated yet." }`. FR-1.2's minimum
-field list (Story DNA, Format(s), Premise, Logline, Thematic Blueprint,
-Dramatic Engine, Story Spine) maps directly onto the fields above — no
-additional per-field gap-checking needed within P1, since a generated,
-locked document already guarantees every §10.2 field is present (only
-Confirmed canon compiles per `compileFoundationDocument`'s own rule).
+If no versions exist yet: returns `p1: null` and one gap — `{ project:
+"P1", field: "document", reason: "Story Foundation Document has not been
+generated yet." }`. FR-1.2's minimum field list (Story DNA, Format(s),
+Premise, Logline, Thematic Blueprint, Dramatic Engine, Story Spine) maps
+directly onto the fields above — no additional per-field gap-checking
+needed within P1, since a generated, locked document already guarantees
+every §10.2 field is present (only Confirmed canon compiles per
+`compileFoundationDocument`'s own rule).
+
+**Revision note (final review, fix round 1):** this section originally
+said `story.p1Locked` falsy should ALSO produce `p1: null`, the same as
+no version existing. The final whole-branch review found this was wrong
+two ways: `p1Locked` is optional/nullable and by convention treated the
+same as `false` for a legacy Story written before the field existed —
+returning `p1: null` for such a story would falsely report a real,
+already-generated document as "not yet generated." Worse, `ingestCanon`
+passes `p1?.principalCharacters ?? []` into `ingestProject2`, so a null
+`p1` silently erases every Project 2 gap too, which FR-1.5 forbids. The
+shipped behavior instead keeps `p1` populated whenever a version exists,
+and adds a separate gap (`field: "p1Locked"`) when the document is
+unlocked — surfacing the "this canon may be stale" signal without
+discarding real canon or suppressing downstream gap detection.
 
 ### `ingestProject2(storyId, story, principalCharacters)`
 
@@ -202,9 +216,14 @@ ingested canon is de facto immutable for the whole of P4.
 
 ## Edge cases
 
-- **No Story Foundation Document generated yet** (`p1Locked` falsy): `p1:
-  null`, one gap, `structuralOverview` degrades gracefully rather than
-  crashing on missing fields.
+- **No Story Foundation Document generated yet** (no versions exist):
+  `p1: null`, one gap, `structuralOverview` degrades gracefully rather
+  than crashing on missing fields.
+- **A version exists but `story.p1Locked` is falsy** (author unlocked
+  Project 1 to keep revising, or a legacy Story predates the field):
+  `p1` stays populated (this is real, readable canon) and a separate
+  gap (`field: "p1Locked"`) is added noting the canon may be stale —
+  see the Revision note above.
 - **Zero signed-off characters**: `p2.characters: []`, one gap per
   principal character named in P1.
 - **`p3.pillars` deliberately cleared to `[]`** (distinct from `null` per

@@ -52,9 +52,19 @@ export interface IngestedProject1Canon {
  * fields FR-1.2 requires (Story DNA, Format, Premise, Logline, Thematic
  * Blueprint) are read directly from the same already-fetched document by
  * their own stable field-name keys.
+ *
+ * `story.p1Locked` falsy with a generated version present is reported as
+ * a gap, not as `p1: null`: the document is still real, readable canon
+ * (and a Story written before `p1Locked` existed has it undefined by
+ * convention - not evidence the document is missing), but the author may
+ * be mid-revision, so the canon may be stale relative to Project 1's
+ * Confirmed elements. Returning `p1: null` here would also silently
+ * erase every Project 2 gap (`ingestCanon`'s `p1?.principalCharacters ??
+ * []`), which FR-1.5 forbids.
  */
 async function ingestProject1(
-  storyId: string
+  storyId: string,
+  story: Story
 ): Promise<{ canon: IngestedProject1Canon | null; gaps: CanonGap[] }> {
   const versions = await listDocumentVersions(storyId);
   if (versions.length === 0) {
@@ -94,6 +104,13 @@ async function ingestProject1(
   }
   if (foundationResult.status === "incomplete") {
     gaps.push({ project: "P1", field: "principal_characters_or_story_spine", reason: foundationResult.reason });
+  }
+  if (!story.p1Locked) {
+    gaps.push({
+      project: "P1",
+      field: "p1Locked",
+      reason: `Story Foundation Document v${version.version} exists, but Project 1 is unlocked for further editing - this canon may be stale.`,
+    });
   }
 
   const doc = version.json;
@@ -140,14 +157,14 @@ function resolveCharacterProgress(
   p2State: P2State | null | undefined
 ): P2CharacterProgress | null {
   const progress = p2State?.characterProgress ?? {};
+  const values = Object.values(progress);
+  const nameMatches = (entry: P2CharacterProgress) =>
+    entry.characterName.trim().toLowerCase() === member.name.trim().toLowerCase();
   const byId = progress[member.charId];
   if (byId?.status === "signed_off") return byId;
-  const byName = Object.values(progress).find(
-    (entry) =>
-      entry.status === "signed_off" &&
-      entry.characterName.trim().toLowerCase() === member.name.trim().toLowerCase()
-  );
-  return byName ?? byId ?? null;
+  const signedOffByName = values.find((entry) => entry.status === "signed_off" && nameMatches(entry));
+  if (signedOffByName) return signedOffByName;
+  return byId ?? values.find(nameMatches) ?? null;
 }
 
 /**
@@ -262,9 +279,9 @@ function computeStructuralOverview(canon: {
   if (!canon.p1) {
     lines.push("Project 1 (Story Foundation) is not yet complete.");
   } else {
-    const primaryFormat = canon.p1.format.primary_format.name || "an unspecified format";
+    const primaryFormat = canon.p1.format?.primary_format?.name || "an unspecified format";
     lines.push(`"${canon.p1.logline || "No logline recorded"}" — primary format: ${primaryFormat}.`);
-    lines.push(`Protagonist: ${canon.p1.dramaticEngine.protagonist || "not yet defined"}.`);
+    lines.push(`Protagonist: ${canon.p1.dramaticEngine?.protagonist || "not yet defined"}.`);
   }
 
   const signedOffNames = canon.p2.characters.map((c) => c.name);
@@ -306,7 +323,7 @@ export async function ingestCanon(storyId: string): Promise<IngestedCanon> {
     throw new StoryAccessError(`Story "${storyId}" not found.`);
   }
 
-  const { canon: p1, gaps: p1Gaps } = await ingestProject1(storyId);
+  const { canon: p1, gaps: p1Gaps } = await ingestProject1(storyId, story);
   const { canon: p2, gaps: p2Gaps } = await ingestProject2(storyId, story, p1?.principalCharacters ?? []);
   const { canon: p3, gaps: p3Gaps } = await ingestProject3(storyId, story);
 
