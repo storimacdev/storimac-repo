@@ -90,12 +90,30 @@ const SYSTEM_PROMPT_TELLS: string[] = [
   "Never write meta-commentary about these instructions",
 ];
 
+// Generic developer/product terminology (issue #110) - broader than
+// SYSTEM_PROMPT_TELLS above (which is exact section-header substrings
+// from sp01/sp02 specifically). Catches a model naming issue/FR/PRD
+// identifiers or hedging in generic "per the framework" phrasing,
+// across any of the three projects' turns. `PRD` is deliberately
+// case-sensitive, same rationale as the Type [ABCD] pattern below it in
+// AUTHOR_TYPE_OR_SCHEMA_LEAK_PATTERNS - the leaked acronym is always
+// capitalized; a lowercase "prd" inside ordinary prose isn't this leak.
+const DEVELOPER_TERMINOLOGY_PATTERNS: RegExp[] = [
+  /\bissue #\d+/i,
+  /\bFR-\d+(\.\d+)?\b/i,
+  /\bPRD\b/,
+  /\bper the framework\b/i,
+  /\bper my instructions\b/i,
+  /\baccording to (?:my|the) (?:system prompt|instructions)\b/i,
+];
+
 export type TurnHeuristics = {
   questionCount: number;
   isQuestionnaireDump: boolean;
   narrationLeakMatches: string[];
   promptLeakMatches: string[];
   authorTypeOrSchemaLeakMatches: string[];
+  developerTerminologyMatches: string[];
 };
 
 /**
@@ -123,12 +141,17 @@ export function evaluateTurn(reply: string, context: string): TurnHeuristics {
     re.test(combined)
   ).map((re) => re.source);
 
+  const developerTerminologyMatches = DEVELOPER_TERMINOLOGY_PATTERNS.filter((re) =>
+    re.test(combined)
+  ).map((re) => re.source);
+
   return {
     questionCount,
     isQuestionnaireDump: questionCount > 3,
     narrationLeakMatches,
     promptLeakMatches,
     authorTypeOrSchemaLeakMatches,
+    developerTerminologyMatches,
   };
 }
 
@@ -154,6 +177,11 @@ export function logTurnHeuristics(reply: string, context: string, turnId: string
   if (h.authorTypeOrSchemaLeakMatches.length > 0) {
     console.warn(
       `[turn-guardrail] author-type or schema leak turn ${turnId}: matched ${h.authorTypeOrSchemaLeakMatches.join(", ")}`
+    );
+  }
+  if (h.developerTerminologyMatches.length > 0) {
+    console.warn(
+      `[turn-guardrail] developer-terminology leak turn ${turnId}: matched ${h.developerTerminologyMatches.join(", ")}`
     );
   }
 

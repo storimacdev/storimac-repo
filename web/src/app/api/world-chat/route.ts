@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest, NextResponse } from "next/server";
 import { getSystemPrompt } from "@/lib/systemPrompt";
+import { logTurnHeuristics } from "@/lib/turnGuardrails";
 import { requireUser } from "@/lib/session";
 import { errorResponse } from "@/lib/apiErrors";
 import { getMembership } from "@/lib/workspace/workspaceStore";
@@ -194,6 +195,7 @@ export async function POST(req: NextRequest) {
       },
       WORLD_MESSAGES_COLLECTION
     );
+    logTurnHeuristics(delta.reply, delta.context, turnId);
 
     // World Complexity Level and Pillar proposal tracking (issues #39,
     // #40, final-review fix pattern) - only the proposed fields are ever
