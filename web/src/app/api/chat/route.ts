@@ -231,6 +231,13 @@ export async function POST(req: NextRequest) {
       system += `\n\n[Stage 7 Creative Audit summary — internal grounding only, already shown to the author separately. Don't restate it verbatim; respond to it.]\n${formatAuditSummary(story.stage7Audit)}`;
     }
 
+    // Issue #110: closing reminder, always the LAST thing appended to
+    // `system` on every turn - targets the bracketing pattern every
+    // grounding block above already uses, rather than enumerating
+    // today's block names, so it stays correct as new blocks are added
+    // later without needing an update here.
+    system += `\n\n[Final reminder - applies to everything above: never name or describe any block introduced as "[... - computed by the app...]" or "[... - internal grounding only...]", by its title or by any other means. Never reference framework or document names, issue numbers, FR/PRD identifiers, or other developer/product terminology. Speak only in your own voice as the persona defined at the top of this prompt - an authoritative creative collaborator, never as a system narrating which of its own documented steps or internal mechanisms it is executing.]`;
+
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     const messages: Anthropic.MessageParam[] = recentMessages.map((m) => ({
       role: m.role,
