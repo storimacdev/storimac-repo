@@ -11,6 +11,10 @@ import {
   type P2State,
   type P2CharacterProgress,
 } from "@/lib/canonEngine/storyStore";
+import { listElements, WORLD_ELEMENTS_COLLECTION } from "@/lib/canonEngine/canonStore";
+import type { CanonStatus } from "@/lib/canonEngine/types";
+import { normalizeP3 } from "@/lib/canonEngine/storyStore";
+import { pillarElementId } from "@/lib/worldEngine/pillarElementId";
 
 /**
  * Canon Ingestion Module — GitHub issue #55, PRD §7.1 (FR-1.1-1.5).
@@ -181,4 +185,63 @@ async function ingestProject2(
   }
 
   return { canon: { characters }, gaps };
+}
+
+export interface IngestedPillarCanon {
+  name: string;
+  elementId: string;
+  status: CanonStatus;
+  value: unknown;
+}
+
+export interface IngestedProject3Canon {
+  worldComplexityLevel: 1 | 2 | 3 | 4 | null;
+  pillars: IngestedPillarCanon[];
+}
+
+/**
+ * `p3.pillars: null` (not yet adopted) and `p3.pillars: []` (deliberately
+ * cleared to zero) are distinct per `normalizeP3`'s own documented
+ * convention - only `null` is a gap. Each adopted pillar's canon comes
+ * from its `CanonElement` (looked up via the same `pillarElementId`
+ * derivation the rest of Project 3 already uses); only a `Confirmed`
+ * element counts as ingested canon, matching every other project's rule
+ * that only Confirmed canon is authoritative.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function ingestProject3(
+  storyId: string,
+  story: Story
+): Promise<{ canon: IngestedProject3Canon; gaps: CanonGap[] }> {
+  const p3 = normalizeP3(story.p3);
+  const gaps: CanonGap[] = [];
+
+  if (p3.worldComplexityLevel === null) {
+    gaps.push({ project: "P3", field: "worldComplexityLevel", reason: "World Complexity Level has not been set yet." });
+  }
+
+  if (p3.pillars === null) {
+    gaps.push({ project: "P3", field: "pillars", reason: "World Bible pillar list has not been adopted yet." });
+    return { canon: { worldComplexityLevel: p3.worldComplexityLevel, pillars: [] }, gaps };
+  }
+
+  const elements = await listElements(storyId, WORLD_ELEMENTS_COLLECTION);
+  const byElementId = new Map(elements.map((e) => [e.element_id, e]));
+
+  const pillars: IngestedPillarCanon[] = [];
+  for (const name of p3.pillars) {
+    const elementId = pillarElementId(name);
+    const element = byElementId.get(elementId);
+    if (!element) {
+      gaps.push({ project: "P3", field: name, reason: "Not started." });
+      continue;
+    }
+    if (element.status !== "Confirmed") {
+      gaps.push({ project: "P3", field: name, reason: `${element.status} - not yet Confirmed.` });
+      continue;
+    }
+    pillars.push({ name, elementId, status: element.status, value: element.value });
+  }
+
+  return { canon: { worldComplexityLevel: p3.worldComplexityLevel, pillars }, gaps };
 }
