@@ -135,13 +135,14 @@ function resolveCharacterProgress(
   p2State: P2State | null | undefined
 ): P2CharacterProgress | null {
   const progress = p2State?.characterProgress ?? {};
-  if (progress[member.charId]) {
-    return progress[member.charId];
-  }
+  const byId = progress[member.charId];
+  if (byId?.status === "signed_off") return byId;
   const byName = Object.values(progress).find(
-    (entry) => entry.characterName.trim().toLowerCase() === member.name.trim().toLowerCase()
+    (entry) =>
+      entry.status === "signed_off" &&
+      entry.characterName.trim().toLowerCase() === member.name.trim().toLowerCase()
   );
-  return byName ?? null;
+  return byName ?? byId ?? null;
 }
 
 /**
