@@ -4,6 +4,13 @@ import {
   type FoundationDocument,
 } from "@/lib/canonEngine/foundationDoc";
 import { extractIngestedFoundation, type CastMember } from "@/lib/characterEngine/ingestFoundation";
+import {
+  listCharacterBibleEntries,
+  type CharacterBibleEntry,
+  type Story,
+  type P2State,
+  type P2CharacterProgress,
+} from "@/lib/canonEngine/storyStore";
 
 /**
  * Canon Ingestion Module — GitHub issue #55, PRD §7.1 (FR-1.1-1.5).
@@ -98,4 +105,79 @@ async function ingestProject1(
   };
 
   return { canon, gaps };
+}
+
+export interface IngestedCharacterCanon {
+  charId: string;
+  name: string;
+  want: string;
+  need: string;
+  coreFlaw: string;
+  coreWound: string;
+  arcTimeline: CharacterBibleEntry["milestone_arc_timeline"];
+}
+
+export interface IngestedProject2Canon {
+  characters: IngestedCharacterCanon[];
+}
+
+/**
+ * Matches a Project 1 cast member to its Project 2 progress the same way
+ * `characterBibleGate.ts`'s `checkCharacterBibleComplete` already does:
+ * charId first (the normal case, since `p2State.characterProgress` is
+ * keyed by charId), falling back to a case-insensitive name match for a
+ * sign-off recorded under `character-chat/route.ts`'s raw-slugify
+ * fallback key. Returns null when the character has no P2 progress at
+ * all (never started).
+ */
+function resolveCharacterProgress(
+  member: CastMember,
+  p2State: P2State | null | undefined
+): P2CharacterProgress | null {
+  const progress = p2State?.characterProgress ?? {};
+  if (progress[member.charId]) {
+    return progress[member.charId];
+  }
+  const byName = Object.values(progress).find(
+    (entry) => entry.characterName.trim().toLowerCase() === member.name.trim().toLowerCase()
+  );
+  return byName ?? null;
+}
+
+/**
+ * Project 2 canon is every signed-off character's compiled
+ * `CharacterBibleEntry` (issue #34) - unconditional, regardless of
+ * whether it matches a Project 1 principal character by name. Gaps are
+ * computed separately: any Project 1 principal character without a
+ * `signed_off` P2 status, via `resolveCharacterProgress` above.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function ingestProject2(
+  storyId: string,
+  story: Story,
+  principalCharacters: CastMember[]
+): Promise<{ canon: IngestedProject2Canon; gaps: CanonGap[] }> {
+  const entries = await listCharacterBibleEntries(storyId);
+  const characters: IngestedCharacterCanon[] = entries.map((e) => ({
+    charId: e.charId,
+    name: e.metadata.character_name,
+    want: e.psychological_engine.want,
+    need: e.psychological_engine.need,
+    coreFlaw: e.psychological_engine.core_flaw,
+    coreWound: e.psychological_engine.core_wound,
+    arcTimeline: e.milestone_arc_timeline,
+  }));
+
+  const gaps: CanonGap[] = [];
+  for (const member of principalCharacters) {
+    const progress = resolveCharacterProgress(member, story.p2);
+    if (progress?.status === "signed_off") continue;
+    gaps.push({
+      project: "P2",
+      field: member.name,
+      reason: progress ? `${progress.status} - not yet signed off.` : "Never started in Character Development.",
+    });
+  }
+
+  return { canon: { characters }, gaps };
 }
