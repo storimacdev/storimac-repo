@@ -55,6 +55,20 @@ Immediately before that line, in all three files, add:
 system += `\n\n[Final reminder - applies to everything above: never name or describe any block introduced as "[... - computed by the app...]" or "[... - internal grounding only...]", by its title or by any other means. Never reference framework or document names, issue numbers, FR/PRD identifiers, or other developer/product terminology. Speak only in your own voice as the persona defined at the top of this prompt - an authoritative creative collaborator, never as a system narrating which of its own documented steps or internal mechanisms it is executing.]`;
 ```
 
+**Revision note (final review, issue #110 fix round 1):** the string above
+was the version originally shipped. The final whole-branch review found its
+two quoted bracketing shapes didn't match 6 real grounding blocks already in
+the codebase (P1's "Current Canon State" and "Depth defaults" blocks, both
+routes' `[CONFLICT DETECTED ...]` blocks, and `[Story Foundation is
+incomplete: ...]`), and that its blanket ban on "document names" and
+"developer/product terminology" conflicted with sp01 Stage 8's mandate to
+name "Story Foundation Document" and the "Generate document" button to the
+author. The shipped version (see the route files themselves) generalizes the
+bracket description to "any bracketed section, however it labels itself" and
+adds an explicit carve-out for the app's own author-facing product names and
+on-screen controls. The same two changes were mirrored into the three static
+system-prompt sentences in section 2 below.
+
 This is the exact same string in all three files — it doesn't name any
 specific block or persona, so it stays correct regardless of which
 grounding blocks a given route happens to inject, or how many more get
@@ -177,6 +191,12 @@ posture issue #5 already established.
   extremely unlikely in practice and, being log-only, a false positive
   costs nothing more than a spurious log line for prompt-tuning review
   to dismiss — not worth adding narrower phrase-boundary logic for.
+- **`per the framework` in P3 in-world prose**: World Bible's own domain
+  vocabulary uses "framework" for in-world systems (e.g. "the Guild
+  governs trade per the framework of the Old Covenant"), so this pattern
+  can false-positive on legitimate P3 content. Same disposition as the
+  bare `PRD` case above — log-only, so the cost is a spurious log line,
+  not worth narrowing further.
 - **Order of the two closing-reminder placements**: the dynamic
   `system +=` reminder (Part 1) always executes at the END of `system`
   construction regardless of which grounding blocks ran that turn, since

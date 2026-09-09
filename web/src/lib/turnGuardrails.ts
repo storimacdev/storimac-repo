@@ -1,15 +1,16 @@
 /**
  * App-layer checks on each model turn — GitHub issue #5 (Project 1),
- * extended for Project 2 by issue #27's AC3. These never block or alter
- * the reply; they log server-side (console.warn, never shown to the
- * author) so questionnaire-dump turns and internal-narration leaks can be
- * caught in prompt-tuning review, per the PRD's own framing of this as a
- * logging heuristic, not a hard guarantee the app can enforce on model
- * output. Both `chat/route.ts` (P1, sp01) and `character-chat/route.ts`
- * (P2, sp02) call the same `logTurnHeuristics` - the pattern lists below
- * carry both projects' known leak surfaces rather than being split per
- * project, since a single shared turn-shape (`reply`/`context`) is being
- * checked either way.
+ * extended for Project 2 by issue #27's AC3, and for Project 3 plus a
+ * fourth developer-terminology category by issue #110. These never block
+ * or alter the reply; they log server-side (console.warn, never shown to
+ * the author) so questionnaire-dump turns and internal-narration leaks can
+ * be caught in prompt-tuning review, per the PRD's own framing of this as
+ * a logging heuristic, not a hard guarantee the app can enforce on model
+ * output. `chat/route.ts` (P1, sp01), `character-chat/route.ts` (P2,
+ * sp02), and `world-chat/route.ts` (P3, sp03) all call the same
+ * `logTurnHeuristics` - the pattern lists below carry all three projects'
+ * known leak surfaces rather than being split per project, since a single
+ * shared turn-shape (`reply`/`context`) is being checked either way.
  */
 
 // Phrases that would mean the model is narrating its own internal
@@ -95,7 +96,7 @@ const SYSTEM_PROMPT_TELLS: string[] = [
 // from sp01/sp02 specifically). Catches a model naming issue/FR/PRD
 // identifiers or hedging in generic "per the framework" phrasing,
 // across any of the three projects' turns. `PRD` is deliberately
-// case-sensitive, same rationale as the Type [ABCD] pattern below it in
+// case-sensitive, same rationale as the Type [ABCD] pattern above it in
 // AUTHOR_TYPE_OR_SCHEMA_LEAK_PATTERNS - the leaked acronym is always
 // capitalized; a lowercase "prd" inside ordinary prose isn't this leak.
 const DEVELOPER_TERMINOLOGY_PATTERNS: RegExp[] = [
@@ -119,11 +120,11 @@ export type TurnHeuristics = {
 /**
  * `reply` and `context` are scanned differently: the questionnaire-dump
  * check is specifically about `reply`'s numbered-list format, so it stays
- * reply-only. The narration/prompt-leak/author-type-or-schema-leak checks
- * are about the model leaking internal bookkeeping or echoing its own
- * instructions - sp01 §8 forbids that "in either field" now that reasoning
- * prose lives in `context` instead of `reply`, so all three are scanned
- * for both fields.
+ * reply-only. The narration/prompt-leak/author-type-or-schema-leak/
+ * developer-terminology checks are about the model leaking internal
+ * bookkeeping or echoing its own instructions - sp01 §8 forbids that "in
+ * either field" now that reasoning prose lives in `context` instead of
+ * `reply`, so all four are scanned for both fields.
  */
 export function evaluateTurn(reply: string, context: string): TurnHeuristics {
   const questionCount = (reply.match(/\?/g) ?? []).length;
