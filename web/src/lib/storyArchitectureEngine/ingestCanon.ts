@@ -5,6 +5,8 @@ import {
 } from "@/lib/canonEngine/foundationDoc";
 import { extractIngestedFoundation, type CastMember } from "@/lib/characterEngine/ingestFoundation";
 import {
+  getStory,
+  StoryAccessError,
   listCharacterBibleEntries,
   type CharacterBibleEntry,
   type Story,
@@ -51,7 +53,6 @@ export interface IngestedProject1Canon {
  * Blueprint) are read directly from the same already-fetched document by
  * their own stable field-name keys.
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function ingestProject1(
   storyId: string
 ): Promise<{ canon: IngestedProject1Canon | null; gaps: CanonGap[] }> {
@@ -156,7 +157,6 @@ function resolveCharacterProgress(
  * computed separately: any Project 1 principal character without a
  * `signed_off` P2 status, via `resolveCharacterProgress` above.
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function ingestProject2(
   storyId: string,
   story: Story,
@@ -208,7 +208,6 @@ export interface IngestedProject3Canon {
  * element counts as ingested canon, matching every other project's rule
  * that only Confirmed canon is authoritative.
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function ingestProject3(
   storyId: string,
   story: Story
@@ -244,4 +243,75 @@ async function ingestProject3(
   }
 
   return { canon: { worldComplexityLevel: p3.worldComplexityLevel, pillars }, gaps };
+}
+
+/**
+ * FR-1.4: a structural-overview summary for onboarding (issue #57
+ * decides how/when it's shown - this module only produces the string).
+ * Deterministic templating from fields already extracted above - no LLM
+ * call. Names counts and short excerpts of what exists; never reproduces
+ * a full Story Spine or arc timeline verbatim.
+ */
+function computeStructuralOverview(canon: {
+  p1: IngestedProject1Canon | null;
+  p2: IngestedProject2Canon;
+  p3: IngestedProject3Canon;
+}): string {
+  const lines: string[] = [];
+
+  if (!canon.p1) {
+    lines.push("Project 1 (Story Foundation) is not yet complete.");
+  } else {
+    const primaryFormat = canon.p1.format.primary_format.name || "an unspecified format";
+    lines.push(`"${canon.p1.logline || "No logline recorded"}" — primary format: ${primaryFormat}.`);
+    lines.push(`Protagonist: ${canon.p1.dramaticEngine.protagonist || "not yet defined"}.`);
+  }
+
+  const signedOffNames = canon.p2.characters.map((c) => c.name);
+  lines.push(
+    signedOffNames.length > 0
+      ? `${signedOffNames.length} character${signedOffNames.length === 1 ? "" : "s"} fully developed: ${signedOffNames.join(", ")}.`
+      : "No characters fully developed yet."
+  );
+
+  const confirmedPillarCount = canon.p3.pillars.length;
+  lines.push(
+    confirmedPillarCount > 0
+      ? `${confirmedPillarCount} world pillar${confirmedPillarCount === 1 ? "" : "s"} confirmed.`
+      : "No world pillars confirmed yet."
+  );
+
+  return lines.join(" ");
+}
+
+export interface IngestedCanon {
+  storyId: string;
+  p1: IngestedProject1Canon | null;
+  p2: IngestedProject2Canon;
+  p3: IngestedProject3Canon;
+  gaps: CanonGap[];
+  structuralOverview: string;
+}
+
+/**
+ * Public entry point (issue #55). Fetches the Story once, ingests all
+ * three upstream projects directly from Firestore, and returns one
+ * structured object plus every gap found (FR-1.5 - canon is never
+ * silently invented). Read-only: never writes to any Story field or any
+ * project's own canon collections.
+ */
+export async function ingestCanon(storyId: string): Promise<IngestedCanon> {
+  const story = await getStory(storyId);
+  if (!story) {
+    throw new StoryAccessError(`Story "${storyId}" not found.`);
+  }
+
+  const { canon: p1, gaps: p1Gaps } = await ingestProject1(storyId);
+  const { canon: p2, gaps: p2Gaps } = await ingestProject2(storyId, story, p1?.principalCharacters ?? []);
+  const { canon: p3, gaps: p3Gaps } = await ingestProject3(storyId, story);
+
+  const gaps = [...p1Gaps, ...p2Gaps, ...p3Gaps];
+  const structuralOverview = computeStructuralOverview({ p1, p2, p3 });
+
+  return { storyId, p1, p2, p3, gaps, structuralOverview };
 }
