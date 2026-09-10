@@ -241,15 +241,21 @@ export const CRITICAL_BEAT_LOOKUP: Record<string, CriticalBeatLookupEntry> = bui
 
 `CRITICAL_BEAT_LOOKUP` is **derived**, not hand-authored: a
 `buildCriticalBeatLookup()` function (private to this module) flattens
-every step's `criticalBeats` array (each step contributes 0 or 1
-top-level entries) plus Step 9's one finale phase that carries a beat
-(`finalePhases[3].criticalBeat`), keyed by `tag`. Because there is only
-one place (`STRUCTURAL_STEPS`) where beat data is actually written
-down, the lookup can never drift out of sync with the steps array — the
-exact function body is a mechanical fold over `STRUCTURAL_STEPS` and is
-left to the implementation plan rather than fixed here. The
-implementation plan's manual-trace verification confirms the resulting
-lookup has exactly 10 entries, matching AC3's "the 10 tags."
+every step's `criticalBeats` array (each step contributes exactly one
+entry), keyed by `tag`. Because there is only one place
+(`STRUCTURAL_STEPS`) where beat data is actually written down, the
+lookup can never drift out of sync with the steps array.
+
+**Revision note (final review):** an earlier draft of this paragraph
+said the builder also walks Step 9's `finalePhases[3].criticalBeat`.
+The shipped implementation doesn't need to: every step's top-level
+`criticalBeats` array — including Step 9's — already carries that
+step's one beat, so folding only over `criticalBeats` already covers
+all 10 tags. `finalePhases` exists purely to describe the Finale's
+required phase ordering for a future reader/consumer; it is not a
+second data source the lookup needs to fold over. The implementation
+plan's manual-trace verification confirms the resulting lookup has
+exactly 10 entries, matching AC3's "the 10 tags."
 
 ## Verbatim text handling
 
@@ -275,10 +281,14 @@ lives. Two things are deliberately **not** touched:
   extracted.
 
 Step 6 and Step 9 have no freestanding placement parenthetical to strip
-in their Core Purpose prose at all (Step 6's "50% mark" comes from the
-issue's own AC1 text, matching the framework doc's separate step-header
-line; Step 9's Finale has no percentage anywhere in the source) — both
-are transcribed as-is.
+in their Core Purpose prose at all. Step 6's `"50% mark"` is
+corroborated by the framework's own Core Purpose prose ("Central 50%
+pivot point where plot and theme cross paths...") and stated as an
+explicit parenthetical in issue #58's own AC1 text — it is the one
+placement mark not mechanically extractable from a parenthetical in the
+Core Purpose text itself, unlike Steps 2/3/4/5/7/8. Step 9's Finale has
+no percentage anywhere in either source document. Both steps'
+`corePurpose` strings are transcribed as-is, with nothing stripped.
 
 ## Why this satisfies each acceptance criterion
 
