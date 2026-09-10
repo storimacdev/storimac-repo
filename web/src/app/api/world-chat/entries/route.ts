@@ -1,22 +1,13 @@
-import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/session";
 import { errorResponse } from "@/lib/apiErrors";
 import { getMembership } from "@/lib/workspace/workspaceStore";
 import { getStory, type Story } from "@/lib/canonEngine/storyStore";
-import { getElement, listElements, upsertElement, WORLD_ENTRIES_COLLECTION } from "@/lib/canonEngine/canonStore";
-import { isValidTransition } from "@/lib/canonEngine/transitions";
-import type { CanonElement, CanonStatus } from "@/lib/canonEngine/types";
-import { deriveEntryId } from "@/lib/worldEngine/worldEntryId";
-import {
-  checkImportanceDepthMismatch,
-  type EntryImportance,
-  type EntryDepth,
-  type WorldEntryValue,
-  type OutstandingQuestion,
-} from "@/lib/worldEngine/worldEntry";
+import type { EntryImportance, EntryDepth, OutstandingQuestion } from "@/lib/worldEngine/worldEntry";
 import { ingestFoundation as characterIngestFoundation } from "@/lib/characterEngine/ingestFoundation";
 import { checkCharacterBibleComplete } from "@/lib/worldEngine/characterBibleGate";
+import { createWorldEntry, updateWorldEntry, toApiEntry } from "@/lib/worldEngine/worldEntryStore";
+import { getElement, listElements, WORLD_ENTRIES_COLLECTION } from "@/lib/canonEngine/canonStore";
 
 export const runtime = "nodejs";
 
@@ -25,25 +16,13 @@ const VALID_DEPTH: EntryDepth[] = [1, 2, 3, 4, 5];
 
 /**
  * The Universal World Entry Model's CRUD surface - GitHub issue #42.
- * Entries are plain CanonElement records in WORLD_ENTRIES_COLLECTION
- * (a sibling to WORLD_ELEMENTS_COLLECTION, which stays pillar-status
- * only). Matches canon-status/route.ts's exact conventions: requireUser
- * + getMembership on every call, body-param addressing (no dynamic
- * route segments), Parked/Deferred translation at the API boundary.
+ * Thin request-parsing wrapper around worldEngine/worldEntryStore.ts's
+ * create/update logic (extracted in issue #43 so the chat-turn handler
+ * can call the same functions) - this file owns only HTTP-shape
+ * concerns: body validation, auth/membership/Character-Bible gating,
+ * and translating store results to responses.
  */
-function toApiEntry(element: CanonElement) {
-  return {
-    entryId: element.element_id,
-    status: element.status === "Parked" ? "Deferred" : element.status,
-    value: element.value as WorldEntryValue,
-    dependsOn: element.depends_on,
-  };
-}
 
-/** Same gate every other P3 write path already applies (world-chat,
- * wcl, pillars, canon-status routes) - an author can't create/edit
- * World Entries before their Character Bible is done, matching the
- * existing P2->P3 sequencing rule this route had omitted. */
 async function characterBibleGateError(storyId: string, p2: Story["p2"]): Promise<string | null> {
   const characterFoundation = await characterIngestFoundation(storyId);
   if (characterFoundation.status === "ok" || characterFoundation.status === "incomplete") {
@@ -53,6 +32,15 @@ async function characterBibleGateError(storyId: string, p2: Story["p2"]): Promis
     }
   }
   return null;
+}
+
+function isValidOutstandingQuestions(value: unknown): value is OutstandingQuestion[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (q) => q && typeof q === "object" && typeof (q as OutstandingQuestion).item === "string" && typeof (q as OutstandingQuestion).notes === "string"
+    )
+  );
 }
 
 export async function POST(req: NextRequest) {
@@ -91,13 +79,7 @@ export async function POST(req: NextRequest) {
     if (dependsOn !== undefined && (!Array.isArray(dependsOn) || !dependsOn.every((d) => typeof d === "string"))) {
       return NextResponse.json({ error: "`dependsOn`, if provided, must be an array of strings." }, { status: 400 });
     }
-    if (
-      outstandingQuestions !== undefined &&
-      (!Array.isArray(outstandingQuestions) ||
-        !outstandingQuestions.every(
-          (q) => q && typeof q === "object" && typeof q.item === "string" && typeof q.notes === "string"
-        ))
-    ) {
+    if (outstandingQuestions !== undefined && !isValidOutstandingQuestions(outstandingQuestions)) {
       return NextResponse.json(
         { error: "`outstandingQuestions`, if provided, must be an array of `{ item: string, notes: string }`." },
         { status: 400 }
@@ -118,37 +100,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: gateError }, { status: 400 });
     }
 
-    const existing = await listElements(storyId, WORLD_ENTRIES_COLLECTION);
-    const existingIds = new Set(existing.map((e) => e.element_id));
-    const entryId = deriveEntryId(name, existingIds);
-
-    const value: WorldEntryValue = {
-      name: name.trim(),
-      category: category.trim(),
+    const { element, warning } = await createWorldEntry(storyId, {
+      name,
+      category,
       narrativeRole: typeof narrativeRole === "string" ? narrativeRole : "",
       importance: importance as EntryImportance,
       depth: depth as EntryDepth,
       functionalDescription: typeof functionalDescription === "string" ? functionalDescription : "",
       governingRules: typeof governingRules === "string" ? governingRules : "",
-      outstandingQuestions: Array.isArray(outstandingQuestions) ? (outstandingQuestions as OutstandingQuestion[]) : [],
-    };
+      outstandingQuestions: isValidOutstandingQuestions(outstandingQuestions) ? outstandingQuestions : undefined,
+      dependsOn: Array.isArray(dependsOn) ? (dependsOn as string[]) : undefined,
+    });
 
-    const element = await upsertElement(
-      storyId,
-      entryId,
-      {
-        status: "Exploring",
-        value,
-        depends_on: Array.isArray(dependsOn) ? (dependsOn as string[]) : [],
-      },
-      randomUUID(),
-      false,
-      WORLD_ENTRIES_COLLECTION
-    );
-
-    const mismatch = checkImportanceDepthMismatch(value.importance, value.depth);
-
-    return NextResponse.json({ entry: toApiEntry(element), warning: mismatch });
+    return NextResponse.json({ entry: toApiEntry(element), warning });
   } catch (err) {
     return errorResponse(err);
   }
@@ -179,14 +143,6 @@ export async function GET(req: NextRequest) {
   }
 }
 
-/**
- * Patches an entry's value fields, `dependsOn`, and/or `status`.
- * Status changes go through `isValidTransition` exactly like
- * canon-status/route.ts does for pillars - `allowConfirmedOverride:
- * true` because every call here is an explicit author/API action, not
- * a model turn, but the transition table still runs first so a client
- * bug can't produce a nonsensical transition.
- */
 export async function PATCH(req: NextRequest) {
   try {
     const user = await requireUser();
@@ -222,13 +178,7 @@ export async function PATCH(req: NextRequest) {
     if (body?.depth !== undefined && ![1, 2, 3, 4, 5].includes(body.depth)) {
       return NextResponse.json({ error: "`depth`, if provided, must be an integer 1-5." }, { status: 400 });
     }
-    if (
-      body?.outstandingQuestions !== undefined &&
-      (!Array.isArray(body.outstandingQuestions) ||
-        !body.outstandingQuestions.every(
-          (q: unknown) => q && typeof q === "object" && typeof (q as OutstandingQuestion).item === "string" && typeof (q as OutstandingQuestion).notes === "string"
-        ))
-    ) {
+    if (body?.outstandingQuestions !== undefined && !isValidOutstandingQuestions(body.outstandingQuestions)) {
       return NextResponse.json(
         { error: "`outstandingQuestions`, if provided, must be an array of `{ item: string, notes: string }`." },
         { status: 400 }
@@ -249,34 +199,12 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: gateError }, { status: 400 });
     }
 
-    const existing = await getElement(storyId, entryId, WORLD_ENTRIES_COLLECTION);
-    if (!existing) {
+    const existsCheck = await getElement(storyId, entryId, WORLD_ENTRIES_COLLECTION);
+    if (!existsCheck) {
       return NextResponse.json({ error: "World Entry not found." }, { status: 404 });
     }
 
-    const valueFieldsPresent =
-      body?.name !== undefined ||
-      body?.category !== undefined ||
-      body?.narrativeRole !== undefined ||
-      body?.importance !== undefined ||
-      body?.depth !== undefined ||
-      body?.functionalDescription !== undefined ||
-      body?.governingRules !== undefined ||
-      body?.outstandingQuestions !== undefined;
-    const leavingConfirmed = status !== undefined && status !== "Confirmed";
-    if (existing.status === "Confirmed" && valueFieldsPresent && !leavingConfirmed) {
-      return NextResponse.json(
-        {
-          error:
-            "This entry is Confirmed canon. Change its status away from Confirmed before editing its content (Conflict Resolution for Confirmed canon isn't available yet - issue #47).",
-        },
-        { status: 400 }
-      );
-    }
-
-    const currentValue = existing.value as WorldEntryValue;
-    const nextValue: WorldEntryValue = {
-      ...currentValue,
+    const result = await updateWorldEntry(storyId, entryId, {
       ...(typeof body?.name === "string" ? { name: body.name } : {}),
       ...(typeof body?.category === "string" ? { category: body.category } : {}),
       ...(typeof body?.narrativeRole === "string" ? { narrativeRole: body.narrativeRole } : {}),
@@ -284,32 +212,18 @@ export async function PATCH(req: NextRequest) {
       ...(body?.depth !== undefined ? { depth: body.depth as EntryDepth } : {}),
       ...(typeof body?.functionalDescription === "string" ? { functionalDescription: body.functionalDescription } : {}),
       ...(typeof body?.governingRules === "string" ? { governingRules: body.governingRules } : {}),
-      ...(Array.isArray(body?.outstandingQuestions) ? { outstandingQuestions: body.outstandingQuestions as OutstandingQuestion[] } : {}),
-    };
+      ...(isValidOutstandingQuestions(body?.outstandingQuestions) ? { outstandingQuestions: body.outstandingQuestions } : {}),
+      ...(Array.isArray(body?.dependsOn) && body.dependsOn.every((d: unknown) => typeof d === "string")
+        ? { dependsOn: body.dependsOn as string[] }
+        : {}),
+      ...(status !== undefined ? { status: status as "Exploring" | "Working" | "Confirmed" | "Deferred" } : {}),
+    });
 
-    const patch: { value: WorldEntryValue; depends_on?: string[]; status?: CanonStatus } = { value: nextValue };
-
-    if (Array.isArray(body?.dependsOn) && body.dependsOn.every((d: unknown) => typeof d === "string")) {
-      patch.depends_on = body.dependsOn;
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: 400 });
     }
 
-    if (status !== undefined) {
-      const nextStatus: CanonStatus = status === "Deferred" ? "Parked" : status;
-      if (!isValidTransition(existing.status, nextStatus)) {
-        const currentLabel = existing.status === "Parked" ? "Deferred" : existing.status;
-        return NextResponse.json(
-          { error: `Can't change status from ${currentLabel} to ${status}.` },
-          { status: 400 }
-        );
-      }
-      patch.status = nextStatus;
-    }
-
-    const element = await upsertElement(storyId, entryId, patch, randomUUID(), true, WORLD_ENTRIES_COLLECTION);
-
-    const mismatch = checkImportanceDepthMismatch(nextValue.importance, nextValue.depth);
-
-    return NextResponse.json({ entry: toApiEntry(element), warning: mismatch });
+    return NextResponse.json({ entry: toApiEntry(result.element), warning: result.warning });
   } catch (err) {
     return errorResponse(err);
   }
