@@ -26,6 +26,13 @@ export const CHARACTER_FACTS_COLLECTION = "characterFacts";
  * via the existing `collection` parameter on every function below. */
 export const WORLD_ELEMENTS_COLLECTION = "worldElements";
 
+/** Project 3's standalone-world-asset registry (issue #42) - a sibling
+ * to WORLD_ELEMENTS_COLLECTION above (pillar status only, issue #41).
+ * Entries are plain CanonElement records here too - "Systemic
+ * Relationships" (cross-references) use the existing generic
+ * `depends_on` field, no separate field needed. */
+export const WORLD_ENTRIES_COLLECTION = "worldEntries";
+
 function elementsCollection(storyId: string, collection: string = "elements") {
   return getDb().collection("stories").doc(storyId).collection(collection);
 }
