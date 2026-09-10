@@ -1,5 +1,5 @@
 import type { IngestedCanon } from "./ingestCanon";
-import { STRUCTURAL_ACTS } from "./structuralFramework";
+import { STRUCTURAL_ACTS, STRUCTURAL_STEPS } from "./structuralFramework";
 import { getConfirmedUnits, type StructuralUnit } from "./stateLedger";
 
 /**
@@ -31,23 +31,40 @@ export function compileScreenplayArchitectureDocument(
 
   sections.push(
     "## 1. Screenplay Metadata\n" +
-      `- Story ID: ${storyId}\n` +
+      `- ID: ${storyId}\n` +
+      "- Working Title: (not yet exposed by ingestCanon - see issue #55)\n" +
+      "- Version: (not yet tracked - issue #70's scope)\n" +
+      "- Date: (not yet tracked - issue #70's scope)\n" +
+      "- Status: (not yet tracked - issue #70's scope)\n" +
+      "- Author: (not yet tracked - issue #70's scope)\n" +
       "- Diagnosed Complexity: N/A (Complexity Level diagnosis removed in Framework v3.0 - see issue #56)\n" +
-      `- Projected Scene Count: ${confirmed.length} Confirmed unit(s) so far (target range: 75-150 scenes)`
+      `- Projected Scene Count & Estimated Runtime: ${confirmed.length} Confirmed unit(s) so far (target range: 75-150 scenes; Estimated Runtime not yet tracked - issue #70's scope)`
   );
 
   sections.push(
     "## 2. Story DNA Blueprint\n" +
       (canon.p1
-        ? `- Core Promise: ${canon.p1.storyDna.core_story_promise || "(not yet Confirmed)"}\n` +
-          `- Format: ${canon.p1.format.primary_format.name || "(not yet Confirmed)"}\n` +
-          `- Core Dramatic Question: ${canon.p1.thematicBlueprint.core_dramatic_question || "(not yet Confirmed)"}`
+        ? `- Summary of Core Promise: ${canon.p1.storyDna.core_story_promise || "(not yet Confirmed)"}\n` +
+          "- Genre: (not yet exposed by ingestCanon - see issue #55)\n" +
+          "- Tone: (not yet exposed by ingestCanon - see issue #55)\n" +
+          `- Theme: ${canon.p1.thematicBlueprint.theme_statement || canon.p1.thematicBlueprint.external_theme || "(not yet Confirmed)"}\n` +
+          `- Core Dramatic Question: ${canon.p1.thematicBlueprint.core_dramatic_question || "(not yet Confirmed)"}\n` +
+          `- Format (supplementary context, not one of issue #70's listed fields): ${canon.p1.format.primary_format.name || "(not yet Confirmed)"}`
         : "- Project 1 (Story Foundation) is not yet complete.")
   );
 
   sections.push(
     "## 3. Structural Act & Set Piece Overview\n" +
-      STRUCTURAL_ACTS.map((act) => `- Act ${act.id} (${act.name}): Steps ${act.stepNumbers.join(", ")}`).join("\n")
+      STRUCTURAL_ACTS.map((act) => {
+        const setPieceTitles = STRUCTURAL_STEPS.filter(
+          (step) => act.stepNumbers.includes(step.stepNumber) && step.type === "Set Piece"
+        ).map((step) => step.title);
+        return `- Act ${act.id} (${act.name}): Steps ${act.stepNumbers.join(", ")}${
+          setPieceTitles.length > 0
+            ? ` (anchoring Set Piece${setPieceTitles.length > 1 ? "s" : ""}: ${setPieceTitles.join("; ")})`
+            : ""
+        }`;
+      }).join("\n")
   );
 
   sections.push(
