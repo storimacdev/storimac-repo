@@ -184,3 +184,36 @@ export const STRUCTURAL_STEPS: StructuralStep[] = [
     finalePhases: null,
   },
 ];
+
+export interface CriticalBeatLookupEntry {
+  tag: string;
+  stepNumber: number;
+  actId: ActId;
+  placementMark: string | null;
+}
+
+/**
+ * Derived from `STRUCTURAL_STEPS` — never hand-duplicated, so it can't
+ * drift out of sync (issue #58's AC3: "the 10 tags exposed as a
+ * lookup"). Every step's own `criticalBeats` array already carries
+ * every one of the 10 tags (including Step 9's, which also appears in
+ * `finalePhases[3].criticalBeat` for phase-ordering detail that this
+ * lookup doesn't need) - folding only over `criticalBeats` is
+ * sufficient and simpler than also walking `finalePhases`.
+ */
+function buildCriticalBeatLookup(): Record<string, CriticalBeatLookupEntry> {
+  const lookup: Record<string, CriticalBeatLookupEntry> = {};
+  for (const step of STRUCTURAL_STEPS) {
+    for (const beat of step.criticalBeats) {
+      lookup[beat.tag] = {
+        tag: beat.tag,
+        stepNumber: step.stepNumber,
+        actId: step.actId,
+        placementMark: beat.placementMark,
+      };
+    }
+  }
+  return lookup;
+}
+
+export const CRITICAL_BEAT_LOOKUP: Record<string, CriticalBeatLookupEntry> = buildCriticalBeatLookup();
