@@ -73,6 +73,11 @@ export interface P3State {
   worldComplexityLevel: 1 | 2 | 3 | 4 | null;
   proposedPillars: string[] | null;
   pillars: string[] | null;
+  /** Issue #43: the pillar currently locked for Stage 3's Discover/
+   * Develop/Validate cycle - mirrors P2State.activeCharacterId, per
+   * issue #54's platform decision (one continuous thread, not
+   * per-pillar sessions). `null` means no pillar is currently active. */
+  activePillar: string | null;
 }
 
 /** Fills in `null` defaults for any P3 sub-field missing from a Story
@@ -86,6 +91,7 @@ export function normalizeP3(p3: P3State | null | undefined): P3State {
     worldComplexityLevel: null,
     proposedPillars: null,
     pillars: null,
+    activePillar: null,
     ...p3,
   };
 }
@@ -372,6 +378,17 @@ export async function setP3Pillars(storyId: string, pillars: string[]): Promise<
   await storiesCollection()
     .doc(storyId)
     .update({ "p3.pillars": pillars, updatedAt: new Date().toISOString() });
+}
+
+/** Sets Project 3's currently-locked pillar for the Stage 3 Discover/
+ * Develop/Validate cycle (issue #43) - null clears the lock. Uses a
+ * dotted-field-path update, same convention as every other P3 sub-field
+ * writer, so it can never clobber the other P3 fields regardless of
+ * which writer reads a stale snapshot first. */
+export async function setP3ActivePillar(storyId: string, pillar: string | null): Promise<void> {
+  await storiesCollection()
+    .doc(storyId)
+    .update({ "p3.activePillar": pillar, updatedAt: new Date().toISOString() });
 }
 
 /** Records or clears Project 2's pending Story Foundation conflict (issue #30); pass null to clear once resolved. */
