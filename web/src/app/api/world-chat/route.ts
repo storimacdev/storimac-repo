@@ -12,10 +12,13 @@ import {
   listMessages,
   setP3ProposedLevel,
   setP3ProposedPillars,
+  setP3ActivePillar,
   normalizeP3,
   type P3State,
   WORLD_MESSAGES_COLLECTION,
 } from "@/lib/canonEngine/storyStore";
+import { createWorldEntry, updateWorldEntry } from "@/lib/worldEngine/worldEntryStore";
+import type { ImportanceDepthCheck } from "@/lib/worldEngine/worldEntry";
 import { extractTurn, TurnValidationError } from "@/lib/canonEngine/extractTurn";
 import { RateLimitTimeoutError } from "@/lib/rateLimit/anthropicGate";
 import { ingestFoundation } from "@/lib/worldEngine/ingestFoundation";
@@ -213,11 +216,58 @@ export async function POST(req: NextRequest) {
       p3ForResponse = { ...p3ForResponse, proposedPillars: delta.proposed_pillars };
     }
 
+    // Stage 3 Discover/Develop/Validate cycle (issue #43) - the model's
+    // active_pillar/proposed_entry/validated_status are always advisory;
+    // the app only ever persists them through the same validated store
+    // functions (and their existing Confirmed-value guard, isValidTransition
+    // check) the direct entries API already enforces. A failed store call
+    // here degrades gracefully - logged, never a hard error to the author,
+    // since this is an untrusted model claim, not a direct author action.
+    if (delta.active_pillar !== p3ForResponse.activePillar) {
+      await setP3ActivePillar(storyId, delta.active_pillar);
+      p3ForResponse = { ...p3ForResponse, activePillar: delta.active_pillar };
+    }
+
+    let entryWarning: ImportanceDepthCheck | null = null;
+    if (delta.proposed_entry) {
+      const entryInput = {
+        name: delta.proposed_entry.name,
+        category: delta.proposed_entry.category,
+        narrativeRole: delta.proposed_entry.narrative_role,
+        importance: delta.proposed_entry.importance,
+        depth: delta.proposed_entry.depth,
+        functionalDescription: delta.proposed_entry.functional_description,
+        governingRules: delta.proposed_entry.governing_rules,
+      };
+      if (delta.proposed_entry.entry_id === null) {
+        const { warning } = await createWorldEntry(storyId, entryInput);
+        entryWarning = warning;
+      } else {
+        const result = await updateWorldEntry(storyId, delta.proposed_entry.entry_id, entryInput);
+        if (result.ok) {
+          entryWarning = result.warning;
+        } else {
+          console.warn(`[world-chat] proposed_entry update rejected for turn ${turnId}: ${result.error}`);
+        }
+        if (result.ok && delta.validated_status !== null) {
+          const validation = await updateWorldEntry(storyId, delta.proposed_entry.entry_id, {
+            status: delta.validated_status,
+          });
+          if (validation.ok) {
+            entryWarning = validation.warning;
+          } else {
+            console.warn(`[world-chat] validated_status rejected for turn ${turnId}: ${validation.error}`);
+          }
+        }
+      }
+    }
+
     return NextResponse.json({
       reply: delta.reply,
       context: delta.context,
       current_stage: delta.current_stage,
       p3: p3ForResponse,
+      entryWarning,
     });
   } catch (err) {
     if (err instanceof Anthropic.APIError) {
