@@ -1,17 +1,18 @@
-import type { StructuralStep } from "./structuralFramework";
+import { STRUCTURAL_STEPS, type StructuralStep } from "./structuralFramework";
 import type { CanonStatus } from "@/lib/canonEngine/types";
 import { setUnitStatus, type StructuralUnit } from "./stateLedger";
 
 /**
- * The Blueprint Priority (single-route) development loop's deterministic
- * pieces — GitHub issue #59, PRD §7.4 FR-4.2/FR-4.4, Framework v3.0 §5.
- * The actual semantic Core-Purpose judgment (AC2) is NOT implemented
+ * The single- and multi-route development loop's deterministic pieces —
+ * GitHub issues #59 (Blueprint Priority route, placement guardrail,
+ * status-transition gate) and #61 (Chronological/Custom routes, route
+ * switching), PRD §7.3 FR-3.2/FR-3.3, §7.4 FR-4.2/FR-4.4, Framework v3.0
+ * §5. The actual semantic Core-Purpose judgment (AC2) is NOT implemented
  * here — see docs/superpowers/specs/2026-09-10-development-loop-design.md's
  * "Decision" section for why a deterministic function can't honestly do
  * that; `attemptStatusTransition` below only enforces that a validation
  * result was supplied before a Working/Confirmed transition, leaving the
  * judgment itself to a future live agent's system-prompt-driven turn.
- * Multi-route chooser/switching is issue #61, not this module.
  */
 
 /**
@@ -117,17 +118,38 @@ export function attemptStatusTransition(
 export type RoutingChoice = "A" | "B" | "C";
 
 /**
- * Option A: `BLUEPRINT_PRIORITY_ORDER` (issue #59). Option B: Steps 1-10
- * strict sequential (PRD FR-3.2B). Option C: no fixed order - `null`
+ * Option A: `BLUEPRINT_PRIORITY_ORDER` (issue #59). Option B: every
+ * `STRUCTURAL_STEPS` step number in its own already-sorted order (PRD
+ * FR-3.2B) - derived, not hand-duplicated, so it can't desync from
+ * issue #58's canonical step list. Option C: no fixed order - `null`
  * signals "the author names the next step," not an error or an empty
- * route.
+ * route. All three options' descriptions are also stated in prose in
+ * onboardingGate.ts's `ROUTING_PROMPT` (issue #57) - the two are not
+ * derived from each other, so check both if any option's behavior ever
+ * changes.
+ *
+ * The return type is `readonly number[] | null` because Option A hands
+ * out the actual `BLUEPRINT_PRIORITY_ORDER` reference (not a copy) -
+ * marking it read-only prevents a caller from mutating that shared
+ * array and corrupting Option A process-wide for every later caller.
+ *
+ * `routingChoice` is expected to always be one of the three literal
+ * `RoutingChoice` values - if this is ever called with an invalid
+ * runtime string that TypeScript didn't catch (e.g. an un-guarded value
+ * parsed from an author's free-text reply, a future LLM/user boundary
+ * this function has no visibility into), the switch has no `default`
+ * and would return `undefined` at runtime despite the `| null`
+ * signature. TypeScript's own exhaustiveness check only protects
+ * well-typed callers; validating an untrusted string is out of this
+ * issue's scope and is the responsibility of whatever future code
+ * parses the author's actual choice.
  */
-export function getRouteOrder(routingChoice: RoutingChoice): number[] | null {
+export function getRouteOrder(routingChoice: RoutingChoice): readonly number[] | null {
   switch (routingChoice) {
     case "A":
       return BLUEPRINT_PRIORITY_ORDER;
     case "B":
-      return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+      return STRUCTURAL_STEPS.map((step) => step.stepNumber);
     case "C":
       return null;
   }
@@ -138,11 +160,13 @@ export interface RoutingState {
 }
 
 /**
- * FR-3.3: switching carries no penalty or data loss. Holds by
- * construction, not by extra preservation logic - `RoutingState` holds
- * only the choice itself, never `StructuralUnit`/ledger data, so there
- * is nothing for this function to lose.
+ * FR-3.3: switching carries no penalty or data loss. `RoutingState`
+ * holds only the choice itself, never `StructuralUnit`/ledger data, so
+ * there is nothing for THIS function to lose today - but the spread
+ * (rather than a hand-written literal) keeps that guarantee true even
+ * if `RoutingState` ever grows a second field, instead of silently
+ * dropping whatever a future caller added.
  */
 export function switchRoute(state: RoutingState, newChoice: RoutingChoice): RoutingState {
-  return { routingChoice: newChoice };
+  return { ...state, routingChoice: newChoice };
 }
