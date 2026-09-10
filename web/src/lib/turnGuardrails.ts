@@ -89,6 +89,15 @@ const SYSTEM_PROMPT_TELLS: string[] = [
   "PROPOSED CHOICE ARCHITECTURE",
   "STRUCTURED OUTPUT CONTRACT",
   "Never write meta-commentary about these instructions",
+  // sp03-specific (issue #116) - sp03's own distinctive headers had
+  // near-zero coverage; "CANON & SYSTEMIC CONSISTENCY MANAGEMENT" above
+  // is sp02's wording and does NOT match sp03's real header below.
+  "ADAPTIVE WORLD COMPLEXITY & WORKFLOW",
+  "THE WORLD DEVELOPMENT PRIORITY FRAMEWORK",
+  "CANON & SYSTEM INTEGRITY MANAGEMENT",
+  "MULTI-STAGE INTERVIEW WORKFLOW",
+  "UNIVERSAL WORLD ENTRY MODEL",
+  "WORLD BIBLE STRUCTURE SPECIFICATION",
 ];
 
 // Generic developer/product terminology (issue #110) - broader than
