@@ -113,3 +113,36 @@ export function attemptStatusTransition(
   }
   return { unit: setUnitStatus(unit, targetStatus, now), accepted: true };
 }
+
+export type RoutingChoice = "A" | "B" | "C";
+
+/**
+ * Option A: `BLUEPRINT_PRIORITY_ORDER` (issue #59). Option B: Steps 1-10
+ * strict sequential (PRD FR-3.2B). Option C: no fixed order - `null`
+ * signals "the author names the next step," not an error or an empty
+ * route.
+ */
+export function getRouteOrder(routingChoice: RoutingChoice): number[] | null {
+  switch (routingChoice) {
+    case "A":
+      return BLUEPRINT_PRIORITY_ORDER;
+    case "B":
+      return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    case "C":
+      return null;
+  }
+}
+
+export interface RoutingState {
+  routingChoice: RoutingChoice;
+}
+
+/**
+ * FR-3.3: switching carries no penalty or data loss. Holds by
+ * construction, not by extra preservation logic - `RoutingState` holds
+ * only the choice itself, never `StructuralUnit`/ledger data, so there
+ * is nothing for this function to lose.
+ */
+export function switchRoute(state: RoutingState, newChoice: RoutingChoice): RoutingState {
+  return { routingChoice: newChoice };
+}
