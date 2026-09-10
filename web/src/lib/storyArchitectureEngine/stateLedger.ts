@@ -57,3 +57,25 @@ export function addCanonRefs(unit: StructuralUnit, refs: string[], now?: string)
     lastUpdated: nowOrDefault(now),
   };
 }
+
+/** Replaces the array entry whose `unitId` matches, or appends if none
+ * does - the one array-level operation a caller needs to maintain a
+ * `StructuralUnit[]` session ledger immutably, turn by turn. */
+export function upsertUnit(units: StructuralUnit[], unit: StructuralUnit): StructuralUnit[] {
+  const index = units.findIndex((u) => u.unitId === unit.unitId);
+  if (index === -1) {
+    return [...units, unit];
+  }
+  return units.map((u, i) => (i === index ? unit : u));
+}
+
+export function findUnit(units: StructuralUnit[], unitId: string): StructuralUnit | null {
+  return units.find((u) => u.unitId === unitId) ?? null;
+}
+
+/** AC2: only `Confirmed` units are eligible for a compiled document's
+ * binding sections - a future compiler (issue #60) calls this instead
+ * of re-deriving the Confirmed-only rule itself. */
+export function getConfirmedUnits(units: StructuralUnit[]): StructuralUnit[] {
+  return units.filter((u) => u.status === "Confirmed");
+}
