@@ -28,6 +28,21 @@ export const WorldTurnSchema = z.object({
   current_stage: z.number().int().min(1).max(5),
   proposed_wcl: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).nullable(),
   proposed_pillars: z.array(z.string().min(1)).nullable(),
+  active_pillar: z.string().nullable(),
+  cycle_phase: z.enum(["Discover", "Develop", "Validate"]).nullable(),
+  proposed_entry: z
+    .object({
+      entry_id: z.string().nullable(),
+      name: z.string().min(1),
+      category: z.string().min(1),
+      narrative_role: z.string(),
+      importance: z.enum(["Critical", "Major", "Supporting", "Minor", "Incidental"]),
+      depth: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
+      functional_description: z.string(),
+      governing_rules: z.string(),
+    })
+    .nullable(),
+  validated_status: z.enum(["Working", "Confirmed", "Deferred"]).nullable(),
 });
 
 export type WorldTurn = z.infer<typeof WorldTurnSchema>;
@@ -66,7 +81,62 @@ export const EMIT_WORLD_TURN_TOOL: Anthropic.Tool = {
         description:
           "The ordered list of relevant World Pillars you've identified for this world (e.g. Technology, Government & Bureaucracy, Economy, Culture, Geography, Underworld, History), most important first, so the app can offer it to the author as a starting list to confirm, edit, or reorder. Report the list again on every turn you've assessed one, even if unchanged from a prior turn. Use null only if you haven't identified a pillar list yet this turn.",
       },
+      active_pillar: {
+        type: ["string", "null"],
+        description:
+          "During Stage 3 (Prioritize & Deep Dive), the single pillar you are currently deep-diving with the author, exactly matching one of the adopted pillar names. Null before Stage 3 starts, or in the gap between finishing one pillar and starting the next. Report it again every turn it's active, even if unchanged.",
+      },
+      cycle_phase: {
+        type: ["string", "null"],
+        enum: ["Discover", "Develop", "Validate", null],
+        description:
+          "Which phase of the Discover/Develop/Validate cycle this turn's reply belongs to, for the currently active pillar. Null when active_pillar is null.",
+      },
+      proposed_entry: {
+        type: ["object", "null"],
+        properties: {
+          entry_id: {
+            type: ["string", "null"],
+            description:
+              "The id of an existing draft entry this turn is updating (from a prior turn's created/updated entry). Null when this turn proposes a brand-new entry instead.",
+          },
+          name: { type: "string", description: "The entry's Name." },
+          category: { type: "string", description: "The entry's Category (e.g. Location, Technology, Religion, Historical Event)." },
+          narrative_role: { type: "string", description: "The entry's Narrative Role - its explicit reason for existing." },
+          importance: {
+            type: "string",
+            enum: ["Critical", "Major", "Supporting", "Minor", "Incidental"],
+            description: "The entry's Narrative Importance tag.",
+          },
+          depth: {
+            type: "number",
+            enum: [1, 2, 3, 4, 5],
+            description: "The entry's Development Depth level (1 Reference - 5 Exhaustive).",
+          },
+          functional_description: { type: "string", description: "The entry's Functional Description, bounded by its depth level." },
+          governing_rules: { type: "string", description: "The entry's Governing Rules & Constraints." },
+        },
+        required: ["entry_id", "name", "category", "narrative_role", "importance", "depth", "functional_description", "governing_rules"],
+        description:
+          "A structured draft of the World Entry currently being developed or validated, during the Develop or Validate phase of the active pillar's cycle. Null outside those phases, or when nothing concrete has been drafted yet this turn.",
+      },
+      validated_status: {
+        type: ["string", "null"],
+        enum: ["Working", "Confirmed", "Deferred", null],
+        description:
+          "Set only on the turn where the author has just given a clear verdict on the entry named in proposed_entry (or its entry_id): Working (provisional), Confirmed (approved as canon), or Deferred (postponed). Null on every other turn, including every Discover/Develop-phase turn.",
+      },
     },
-    required: ["reply", "context", "current_stage", "proposed_wcl", "proposed_pillars"],
+    required: [
+      "reply",
+      "context",
+      "current_stage",
+      "proposed_wcl",
+      "proposed_pillars",
+      "active_pillar",
+      "cycle_phase",
+      "proposed_entry",
+      "validated_status",
+    ],
   },
 };
