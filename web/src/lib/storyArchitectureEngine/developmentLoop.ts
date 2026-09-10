@@ -1,4 +1,6 @@
 import type { StructuralStep } from "./structuralFramework";
+import type { CanonStatus } from "@/lib/canonEngine/types";
+import { setUnitStatus, type StructuralUnit } from "./stateLedger";
 
 /**
  * The Blueprint Priority (single-route) development loop's deterministic
@@ -52,4 +54,40 @@ export function checkPlacementDeviation(step: StructuralStep, proposedPositionPe
     };
   }
   return { flagged: false, message: null };
+}
+
+export interface ContentValidationResult {
+  valid: boolean;
+  reason?: string;
+}
+
+export interface StatusTransitionAttempt {
+  unit: StructuralUnit;
+  accepted: boolean;
+  reason?: string;
+}
+
+const STATUSES_REQUIRING_VALIDATION: CanonStatus[] = ["Working", "Confirmed"];
+
+/**
+ * AC2: validates before marking Working/Confirmed. The validation
+ * judgment itself is supplied by the caller (a future live agent's
+ * semantic turn) - this function only enforces that a passing result
+ * was supplied before allowing the transition. A rejected attempt
+ * returns the ORIGINAL unit unchanged, never a partial update.
+ */
+export function attemptStatusTransition(
+  unit: StructuralUnit,
+  targetStatus: CanonStatus,
+  validation: ContentValidationResult
+): StatusTransitionAttempt {
+  const requiresValidation = STATUSES_REQUIRING_VALIDATION.includes(targetStatus);
+  if (requiresValidation && !validation.valid) {
+    return {
+      unit,
+      accepted: false,
+      reason: validation.reason ?? "Proposed content does not satisfy this step's Core Purpose.",
+    };
+  }
+  return { unit: setUnitStatus(unit, targetStatus), accepted: true };
 }
