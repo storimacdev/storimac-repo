@@ -220,46 +220,56 @@ export async function POST(req: NextRequest) {
     // active_pillar/proposed_entry/validated_status are always advisory;
     // the app only ever persists them through the same validated store
     // functions (and their existing Confirmed-value guard, isValidTransition
-    // check) the direct entries API already enforces. A failed store call
-    // here degrades gracefully - logged, never a hard error to the author,
-    // since this is an untrusted model claim, not a direct author action.
-    if (delta.active_pillar !== p3ForResponse.activePillar) {
-      await setP3ActivePillar(storyId, delta.active_pillar);
-      p3ForResponse = { ...p3ForResponse, activePillar: delta.active_pillar };
-    }
-
+    // check) the direct entries API already enforces. Both an explicit
+    // {ok:false} rejection AND a thrown exception (a Firestore transaction
+    // error, a stale-by-commit-time race in applyStateDelta) degrade
+    // gracefully - logged, never a hard error to the author. The
+    // assistant's reply/context for this turn were already persisted
+    // above; an uncaught throw here would 500 the whole response after
+    // the turn already exists in the transcript, stranding the author
+    // (a retry would immediately 409 "Nothing to retry") - the try/catch
+    // below exists specifically to prevent that.
     let entryWarning: ImportanceDepthCheck | null = null;
-    if (delta.proposed_entry) {
-      const entryInput = {
-        name: delta.proposed_entry.name,
-        category: delta.proposed_entry.category,
-        narrativeRole: delta.proposed_entry.narrative_role,
-        importance: delta.proposed_entry.importance,
-        depth: delta.proposed_entry.depth,
-        functionalDescription: delta.proposed_entry.functional_description,
-        governingRules: delta.proposed_entry.governing_rules,
-      };
-      if (delta.proposed_entry.entry_id === null) {
-        const { warning } = await createWorldEntry(storyId, entryInput);
-        entryWarning = warning;
-      } else {
-        const result = await updateWorldEntry(storyId, delta.proposed_entry.entry_id, entryInput);
-        if (result.ok) {
-          entryWarning = result.warning;
+    try {
+      if (delta.active_pillar !== p3ForResponse.activePillar) {
+        await setP3ActivePillar(storyId, delta.active_pillar);
+        p3ForResponse = { ...p3ForResponse, activePillar: delta.active_pillar };
+      }
+
+      if (delta.proposed_entry) {
+        const entryInput = {
+          name: delta.proposed_entry.name,
+          category: delta.proposed_entry.category,
+          narrativeRole: delta.proposed_entry.narrative_role,
+          importance: delta.proposed_entry.importance,
+          depth: delta.proposed_entry.depth,
+          functionalDescription: delta.proposed_entry.functional_description,
+          governingRules: delta.proposed_entry.governing_rules,
+        };
+        if (delta.proposed_entry.entry_id === null) {
+          const { warning } = await createWorldEntry(storyId, entryInput);
+          entryWarning = warning;
         } else {
-          console.warn(`[world-chat] proposed_entry update rejected for turn ${turnId}: ${result.error}`);
-        }
-        if (result.ok && delta.validated_status !== null) {
-          const validation = await updateWorldEntry(storyId, delta.proposed_entry.entry_id, {
-            status: delta.validated_status,
-          });
-          if (validation.ok) {
-            entryWarning = validation.warning;
+          const result = await updateWorldEntry(storyId, delta.proposed_entry.entry_id, entryInput);
+          if (result.ok) {
+            entryWarning = result.warning;
           } else {
-            console.warn(`[world-chat] validated_status rejected for turn ${turnId}: ${validation.error}`);
+            console.warn(`[world-chat] proposed_entry update rejected for turn ${turnId}: ${result.error}`);
+          }
+          if (result.ok && delta.validated_status !== null) {
+            const validation = await updateWorldEntry(storyId, delta.proposed_entry.entry_id, {
+              status: delta.validated_status,
+            });
+            if (validation.ok) {
+              entryWarning = validation.warning;
+            } else {
+              console.warn(`[world-chat] validated_status rejected for turn ${turnId}: ${validation.error}`);
+            }
           }
         }
       }
+    } catch (stage3Err) {
+      console.warn(`[world-chat] Stage 3 lock/entry persistence failed for turn ${turnId}:`, stage3Err);
     }
 
     return NextResponse.json({
