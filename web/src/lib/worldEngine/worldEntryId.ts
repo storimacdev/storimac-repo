@@ -20,7 +20,11 @@ export function slugifyEntryName(name: string): string {
  * re-truncates before each candidate suffix so the result never
  * exceeds MAX_ENTRY_ID_LENGTH even after a suffix is appended. */
 export function deriveEntryId(name: string, existingIds: Set<string>): string {
-  const base = slugifyEntryName(name);
+  // Falls back to a fixed base when the name has no [a-z0-9] characters
+  // at all (e.g. "東京", "...") - mirrors pillarElementId.ts's own
+  // `|| "unnamed"` fallback, so an empty slug never reaches Firestore
+  // as a document id (which throws).
+  const base = slugifyEntryName(name) || "entry";
   let id = base;
   let occurrence = 1;
   while (existingIds.has(id)) {

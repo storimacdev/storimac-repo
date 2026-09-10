@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/session";
 import { errorResponse } from "@/lib/apiErrors";
 import { getMembership } from "@/lib/workspace/workspaceStore";
-import { getStory } from "@/lib/canonEngine/storyStore";
+import { getStory, type Story } from "@/lib/canonEngine/storyStore";
 import { getElement, listElements, upsertElement, WORLD_ENTRIES_COLLECTION } from "@/lib/canonEngine/canonStore";
 import { isValidTransition } from "@/lib/canonEngine/transitions";
 import type { CanonElement, CanonStatus } from "@/lib/canonEngine/types";
@@ -13,7 +13,10 @@ import {
   type EntryImportance,
   type EntryDepth,
   type WorldEntryValue,
+  type OutstandingQuestion,
 } from "@/lib/worldEngine/worldEntry";
+import { ingestFoundation as characterIngestFoundation } from "@/lib/characterEngine/ingestFoundation";
+import { checkCharacterBibleComplete } from "@/lib/worldEngine/characterBibleGate";
 
 export const runtime = "nodejs";
 
@@ -37,6 +40,21 @@ function toApiEntry(element: CanonElement) {
   };
 }
 
+/** Same gate every other P3 write path already applies (world-chat,
+ * wcl, pillars, canon-status routes) - an author can't create/edit
+ * World Entries before their Character Bible is done, matching the
+ * existing P2->P3 sequencing rule this route had omitted. */
+async function characterBibleGateError(storyId: string, p2: Story["p2"]): Promise<string | null> {
+  const characterFoundation = await characterIngestFoundation(storyId);
+  if (characterFoundation.status === "ok" || characterFoundation.status === "incomplete") {
+    const gate = checkCharacterBibleComplete(characterFoundation.foundation.cast, p2);
+    if (!gate.complete) {
+      return `Finish your Character Bible before continuing the World Bible. Still in progress: ${gate.incompleteNames.join(", ")}.`;
+    }
+  }
+  return null;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const user = await requireUser();
@@ -50,6 +68,7 @@ export async function POST(req: NextRequest) {
     const functionalDescription: unknown = body?.functionalDescription;
     const governingRules: unknown = body?.governingRules;
     const dependsOn: unknown = body?.dependsOn;
+    const outstandingQuestions: unknown = body?.outstandingQuestions;
 
     if (typeof storyId !== "string" || !storyId) {
       return NextResponse.json({ error: "Request must include `storyId`." }, { status: 400 });
@@ -72,6 +91,18 @@ export async function POST(req: NextRequest) {
     if (dependsOn !== undefined && (!Array.isArray(dependsOn) || !dependsOn.every((d) => typeof d === "string"))) {
       return NextResponse.json({ error: "`dependsOn`, if provided, must be an array of strings." }, { status: 400 });
     }
+    if (
+      outstandingQuestions !== undefined &&
+      (!Array.isArray(outstandingQuestions) ||
+        !outstandingQuestions.every(
+          (q) => q && typeof q === "object" && typeof q.item === "string" && typeof q.notes === "string"
+        ))
+    ) {
+      return NextResponse.json(
+        { error: "`outstandingQuestions`, if provided, must be an array of `{ item: string, notes: string }`." },
+        { status: 400 }
+      );
+    }
 
     const story = await getStory(storyId);
     if (!story) {
@@ -80,6 +111,11 @@ export async function POST(req: NextRequest) {
     const membership = await getMembership(story.workspaceId, user.uid);
     if (!membership) {
       return NextResponse.json({ error: "Not a member of this workspace." }, { status: 403 });
+    }
+
+    const gateError = await characterBibleGateError(storyId, story.p2);
+    if (gateError) {
+      return NextResponse.json({ error: gateError }, { status: 400 });
     }
 
     const existing = await listElements(storyId, WORLD_ENTRIES_COLLECTION);
@@ -94,7 +130,7 @@ export async function POST(req: NextRequest) {
       depth: depth as EntryDepth,
       functionalDescription: typeof functionalDescription === "string" ? functionalDescription : "",
       governingRules: typeof governingRules === "string" ? governingRules : "",
-      outstandingQuestions: [],
+      outstandingQuestions: Array.isArray(outstandingQuestions) ? (outstandingQuestions as OutstandingQuestion[]) : [],
     };
 
     const element = await upsertElement(
@@ -186,6 +222,18 @@ export async function PATCH(req: NextRequest) {
     if (body?.depth !== undefined && ![1, 2, 3, 4, 5].includes(body.depth)) {
       return NextResponse.json({ error: "`depth`, if provided, must be an integer 1-5." }, { status: 400 });
     }
+    if (
+      body?.outstandingQuestions !== undefined &&
+      (!Array.isArray(body.outstandingQuestions) ||
+        !body.outstandingQuestions.every(
+          (q: unknown) => q && typeof q === "object" && typeof (q as OutstandingQuestion).item === "string" && typeof (q as OutstandingQuestion).notes === "string"
+        ))
+    ) {
+      return NextResponse.json(
+        { error: "`outstandingQuestions`, if provided, must be an array of `{ item: string, notes: string }`." },
+        { status: 400 }
+      );
+    }
 
     const story = await getStory(storyId);
     if (!story) {
@@ -196,9 +244,34 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Not a member of this workspace." }, { status: 403 });
     }
 
+    const gateError = await characterBibleGateError(storyId, story.p2);
+    if (gateError) {
+      return NextResponse.json({ error: gateError }, { status: 400 });
+    }
+
     const existing = await getElement(storyId, entryId, WORLD_ENTRIES_COLLECTION);
     if (!existing) {
       return NextResponse.json({ error: "World Entry not found." }, { status: 404 });
+    }
+
+    const valueFieldsPresent =
+      body?.name !== undefined ||
+      body?.category !== undefined ||
+      body?.narrativeRole !== undefined ||
+      body?.importance !== undefined ||
+      body?.depth !== undefined ||
+      body?.functionalDescription !== undefined ||
+      body?.governingRules !== undefined ||
+      body?.outstandingQuestions !== undefined;
+    const leavingConfirmed = status !== undefined && status !== "Confirmed";
+    if (existing.status === "Confirmed" && valueFieldsPresent && !leavingConfirmed) {
+      return NextResponse.json(
+        {
+          error:
+            "This entry is Confirmed canon. Change its status away from Confirmed before editing its content (Conflict Resolution for Confirmed canon isn't available yet - issue #47).",
+        },
+        { status: 400 }
+      );
     }
 
     const currentValue = existing.value as WorldEntryValue;
@@ -211,6 +284,7 @@ export async function PATCH(req: NextRequest) {
       ...(body?.depth !== undefined ? { depth: body.depth as EntryDepth } : {}),
       ...(typeof body?.functionalDescription === "string" ? { functionalDescription: body.functionalDescription } : {}),
       ...(typeof body?.governingRules === "string" ? { governingRules: body.governingRules } : {}),
+      ...(Array.isArray(body?.outstandingQuestions) ? { outstandingQuestions: body.outstandingQuestions as OutstandingQuestion[] } : {}),
     };
 
     const patch: { value: WorldEntryValue; depends_on?: string[]; status?: CanonStatus } = { value: nextValue };

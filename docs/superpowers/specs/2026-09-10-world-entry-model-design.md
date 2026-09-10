@@ -44,11 +44,17 @@ already has exactly the fields this model needs:
 - `depends_on` → **directly satisfies "Systemic Relationships"**
   (cross-references to other entries) — this is exactly what
   `depends_on` was designed for (`ARCHITECTURE.md` §6: "needed by
-  Project 3's Dependency Review"), and `canonStore.ts`'s
-  `listDependents`/`listDownstreamImpact` already exist, waiting for
-  real data to query. Building a separate `systemicRelationships` field
+  Project 3's Dependency Review"). **Correction (final review):**
+  `canonStore.ts`'s `listDependents`/`listDownstreamImpact` exist but
+  are hardcoded to the default `"elements"` collection today (a
+  pre-existing gap affecting P2's `characterFacts` too, not P3-specific)
+  — they cannot query `WORLD_ENTRIES_COLLECTION` yet. Issue #48 must add
+  a `collection` parameter to those functions (the same parameter every
+  other `canonStore` function already has) before `depends_on` is
+  actually queryable for any non-P1 collection. Building a separate
+  `systemicRelationships` field would still be the wrong call — it
   would mean re-deriving dependency-graph machinery issue #48 already
-  has a home for.
+  has a home for, just not yet extended to reach this collection.
 - `history`, `rationale`, `retrieval_code` → inherited for free
   (retrieval_code stays unused/null for P3, same as P2).
 
@@ -93,7 +99,7 @@ export function slugifyEntryName(name: string): string {
 }
 
 export function deriveEntryId(name: string, existingIds: Set<string>): string {
-  const base = slugifyEntryName(name);
+  const base = slugifyEntryName(name) || "entry"; // fallback for a name with no [a-z0-9] chars at all, mirrors pillarElementId.ts
   let id = base;
   let occurrence = 1;
   while (existingIds.has(id)) {
@@ -135,11 +141,14 @@ export interface ImportanceDepthCheck {
 }
 ```
 
-`checkImportanceDepthMismatch(importance, depth)` — grounded exactly in
-sp03 §3's own three stated rules (not invented): Level 5 "reserve for
-Critical items only"; a Minor/Incidental element written at Level 4/5
-is the AC's own explicit example; a Critical element stuck at Level 1
-is the AC's other explicit example.
+`checkImportanceDepthMismatch(importance, depth)` — none of its three
+rules are invented: "Level 5 is reserved for Critical items only" is
+sp03 §3's own stated rule verbatim; "a Minor element at Level 4/5" and
+"a Critical element stuck at Level 1" are issue #44's own explicit AC
+examples (not stated in sp03 §3 itself); "Incidental" additionally
+triggers the same rule as "Minor" as this module's own extension (it
+sits below Minor on sp03's Importance scale), not literally in the AC
+text either.
 
 ### 4. API routes
 
@@ -193,3 +202,10 @@ New file `web/src/app/api/world-chat/entries/route.ts`, matching
   #48.
 - Any change to `worldElements` (pillar status) — stays exactly as
   issue #41 shipped it.
+- Project 4's canon ingestion (`storyArchitectureEngine/ingestCanon.ts`)
+  seeing these entries — `ingestProject3` only reads
+  `WORLD_ELEMENTS_COLLECTION` (pillar status) today; it has no visibility
+  into `WORLD_ENTRIES_COLLECTION` at all. This is a real, currently
+  undisclosed gap (found in final review) between "World Entries exist"
+  and "Project 4 can see them" — worth its own follow-up issue once P4's
+  ingestion needs richer P3 content than pillar status alone.

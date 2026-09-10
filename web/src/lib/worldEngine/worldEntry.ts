@@ -4,9 +4,11 @@
  * #42, #44, sp03 §3/§7 (Universal World Entry Model / Priority
  * Framework). None of the three mismatch rules below are invented:
  * "Level 5 is reserved for Critical items only" is sp03 §3's own stated
- * rule verbatim; "a Minor/Incidental element at Level 4/5" and "a
- * Critical element stuck at Level 1" are issue #44's own explicit AC
- * examples (not stated in sp03 §3 itself).
+ * rule verbatim. "A Minor element at Level 4/5" and "a Critical element
+ * stuck at Level 1" are issue #44's own explicit AC examples (not
+ * stated in sp03 §3 itself) - "Incidental" is this module's own
+ * extension of the Minor rule (it sits below Minor on sp03's Importance
+ * scale), not literally in the AC text either.
  */
 
 export type EntryImportance = "Critical" | "Major" | "Supporting" | "Minor" | "Incidental";

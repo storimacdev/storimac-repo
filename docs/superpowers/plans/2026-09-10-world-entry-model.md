@@ -111,10 +111,14 @@ export function deriveEntryId(name: string, existingIds: Set<string>): string {
  * The Universal World Entry Model's structured value shape and the
  * Importance x Development Depth soft-warning matrix - GitHub issues
  * #42, #44, sp03 §3/§7 (Universal World Entry Model / Priority
- * Framework). The three mismatch rules below are sp03 §3's own stated
- * rules verbatim, not invented: Level 5 is reserved for Critical items
- * only; a Minor/Incidental element at Level 4/5 and a Critical element
- * stuck at Level 1 are the issue's own explicit examples.
+ * Framework). None of the three mismatch rules below are invented:
+ * "Level 5 is reserved for Critical items only" is sp03 §3's own stated
+ * rule verbatim; "a Minor element at Level 4/5" and "a Critical element
+ * stuck at Level 1" are issue #44's own explicit AC examples (not
+ * stated in sp03 §3 itself); "Incidental" additionally triggers the
+ * same rule as "Minor" as this module's own extension (it sits below
+ * Minor on sp03's Importance scale), not literally in the AC text
+ * either.
  */
 
 export type EntryImportance = "Critical" | "Major" | "Supporting" | "Minor" | "Incidental";
