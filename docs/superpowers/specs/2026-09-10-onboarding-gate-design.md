@@ -8,6 +8,13 @@ milestone checklist of which of the 10 structural steps are addressable
 given canon, and an explicit routing-choice prompt (Option A/B/C) — with
 no prose/scene content produced before this gate completes.
 
+Issue #57 explicitly supersedes the original PRD §7.3 numbering: the old
+FR-3.1's clause (b), "state the diagnosed Complexity Level," is dropped
+entirely (issue #56 replaces upfront Complexity Level diagnosis with a
+silent, continuous Dynamic Scene Density & Pacing Monitor instead) — this
+design's `OnboardingOutput` correctly has no Complexity Level field, and
+this isn't an accidental omission.
+
 ## Scope boundary
 
 Same reasoning as issues #55 and #58: this issue produces the
