@@ -6,9 +6,10 @@ import Link from "next/link";
 import Markdown from "@/components/Markdown";
 import UserMenu from "@/components/UserMenu";
 import WorldSidePanel from "@/components/WorldSidePanel";
+import ConflictCard from "@/components/ConflictCard";
 import { useUser } from "@/components/UserProvider";
 import { useScrollToLatest } from "@/lib/useScrollToLatest";
-import type { P3State } from "@/lib/canonEngine/storyStore";
+import type { P3State, P3PendingConflict } from "@/lib/canonEngine/storyStore";
 import { WCL_LABELS, WCL_LEVELS, type WclLevel } from "@/lib/worldEngine/wcl";
 import { pillarElementId } from "@/lib/worldEngine/pillarElementId";
 import { isValidTransition } from "@/lib/canonEngine/transitions";
@@ -60,6 +61,8 @@ export default function WorldInterview() {
   const [leftWidth, setLeftWidth] = useState(380);
   const [wclState, setWclState] = useState<P3State | null>(null);
   const [characterBibleGate, setCharacterBibleGate] = useState<CharacterBibleGateResult | null>(null);
+  const [pendingConflict, setPendingConflictState] = useState<P3PendingConflict | null>(null);
+  const [cascadeReview, setCascadeReview] = useState<{ entryId: string; name: string }[] | null>(null);
   const [wclUpdating, setWclUpdating] = useState(false);
   const [pillarDraft, setPillarDraft] = useState<string[]>([]);
   const [pillarDraftTouched, setPillarDraftTouched] = useState(false);
@@ -95,6 +98,7 @@ export default function WorldInterview() {
         }
         setWclState((data.story?.p3 as P3State | undefined) ?? null);
         setCharacterBibleGate((data.characterBibleGate as CharacterBibleGateResult | undefined) ?? null);
+        setPendingConflictState((data.story?.p3PendingConflict as P3PendingConflict | undefined) ?? null);
         const rawElements = (data.worldElements ?? []) as { element_id: string; status: CanonStatus }[];
         setElementStatuses(
           Object.fromEntries(rawElements.map((e) => [e.element_id, toPillarStatus(e.status)]))
@@ -161,7 +165,14 @@ export default function WorldInterview() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resuming, canvasId, characterBibleGate, error]);
 
-  function applyTurnResponse(data: { reply: string; context?: string | null; current_stage?: number; p3?: P3State }) {
+  function applyTurnResponse(data: {
+    reply: string;
+    context?: string | null;
+    current_stage?: number;
+    p3?: P3State;
+    pendingConflict?: P3PendingConflict | null;
+    cascadeReview?: { entryId: string; name: string }[] | null;
+  }) {
     setMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
     setContext(data.context ?? null);
     setCurrentStage(typeof data.current_stage === "number" ? data.current_stage : null);
@@ -175,6 +186,8 @@ export default function WorldInterview() {
         activePillar: incoming.activePillar,
       }));
     }
+    setPendingConflictState(data.pendingConflict ?? null);
+    setCascadeReview(data.cascadeReview ?? null);
   }
 
   async function sendMessage(preset?: string) {
@@ -206,6 +219,15 @@ export default function WorldInterview() {
       setLoading(false);
       requestAnimationFrame(() => scrollToLatest("smooth"));
     }
+  }
+
+  function chooseConflictResolution(choice: "revert" | "revise" | "defer") {
+    const labels: Record<"revert" | "revise" | "defer", string> = {
+      revert: "A — Revert the new idea and keep things as they are.",
+      revise: "B — Revise the existing canon to match the new idea.",
+      defer: "C — Defer this decision for now.",
+    };
+    sendMessage(labels[choice]);
   }
 
   // Recovers a "dangling" turn (issue #108): if a prior turn's model call
@@ -476,6 +498,14 @@ export default function WorldInterview() {
                   <Bubble key={i} role={m.role} content={m.content} />
                 ))}
                 {loading && <Bubble role="assistant" content="…" pending />}
+                {pendingConflict && (
+                  <ConflictCard
+                    conflict={pendingConflict}
+                    cascadeReview={cascadeReview}
+                    onChoose={chooseConflictResolution}
+                    disabled={loading}
+                  />
+                )}
                 {error && (
                   <div className="mt-2 rounded-lg border border-red-900 bg-red-950/60 px-4 py-3 text-sm text-red-200">
                     {error}
