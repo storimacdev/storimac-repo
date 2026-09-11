@@ -88,7 +88,12 @@ export interface UpdateWorldEntryInput {
 
 export type UpdateWorldEntryResult =
   | { ok: true; element: CanonElement; warning: ImportanceDepthCheck }
-  | { ok: false; error: string };
+  | {
+      ok: false;
+      error: string;
+      reason: "not_found" | "invalid_transition" | "confirmed_conflict";
+      conflict?: { entryId: string; entryName: string; oldValue: WorldEntryValue; newValue: WorldEntryValue };
+    };
 
 export async function updateWorldEntry(
   storyId: string,
@@ -97,7 +102,7 @@ export async function updateWorldEntry(
 ): Promise<UpdateWorldEntryResult> {
   const existing = await getElement(storyId, entryId, WORLD_ENTRIES_COLLECTION);
   if (!existing) {
-    return { ok: false, error: "World Entry not found." };
+    return { ok: false, error: "World Entry not found.", reason: "not_found" };
   }
 
   const valueFieldsPresent =
@@ -110,13 +115,6 @@ export async function updateWorldEntry(
     input.governingRules !== undefined ||
     input.outstandingQuestions !== undefined;
   const leavingConfirmed = input.status !== undefined && input.status !== "Confirmed";
-  if (existing.status === "Confirmed" && valueFieldsPresent && !leavingConfirmed) {
-    return {
-      ok: false,
-      error:
-        "This entry is Confirmed canon. Change its status away from Confirmed before editing its content (Conflict Resolution for Confirmed canon isn't available yet - issue #47).",
-    };
-  }
 
   const currentValue = existing.value as WorldEntryValue;
   const nextValue: WorldEntryValue = {
@@ -131,6 +129,20 @@ export async function updateWorldEntry(
     ...(input.outstandingQuestions !== undefined ? { outstandingQuestions: input.outstandingQuestions } : {}),
   };
 
+  if (existing.status === "Confirmed" && valueFieldsPresent && !leavingConfirmed) {
+    // issue #47: this used to be a hard block ("Conflict Resolution for
+    // Confirmed canon isn't available yet"). Now it hands the caller
+    // everything needed to open the real three-way flow instead of just
+    // failing - the direct CRUD API (entries/route.ts) still just
+    // returns `error` generically and is unaffected by this change.
+    return {
+      ok: false,
+      reason: "confirmed_conflict",
+      error: "This entry is Confirmed canon and the proposed change conflicts with it.",
+      conflict: { entryId, entryName: currentValue.name, oldValue: currentValue, newValue: nextValue },
+    };
+  }
+
   const patch: { value: WorldEntryValue; depends_on?: string[]; status?: CanonStatus } = { value: nextValue };
 
   if (input.dependsOn !== undefined) {
@@ -141,7 +153,7 @@ export async function updateWorldEntry(
     const nextStatus: CanonStatus = input.status === "Deferred" ? "Parked" : input.status;
     if (!isValidTransition(existing.status, nextStatus)) {
       const currentLabel = existing.status === "Parked" ? "Deferred" : existing.status;
-      return { ok: false, error: `Can't change status from ${currentLabel} to ${input.status}.` };
+      return { ok: false, error: `Can't change status from ${currentLabel} to ${input.status}.`, reason: "invalid_transition" };
     }
     patch.status = nextStatus;
   }
@@ -150,7 +162,10 @@ export async function updateWorldEntry(
   // guard above already blocks any content edit to a Confirmed entry
   // regardless of caller - both the direct PATCH API and the world-chat
   // turn handler (issue #43) reach this same guard before this call, so
-  // neither can use this override to bypass it.
+  // neither can use this override to bypass it. The Conflict Resolution
+  // flow (issue #47) legitimately bypasses this guard entirely by
+  // calling upsertElement directly instead of this function - see
+  // conflictResolution.ts.
   const element = await upsertElement(storyId, entryId, patch, randomUUID(), true, WORLD_ENTRIES_COLLECTION);
 
   return { ok: true, element, warning: checkImportanceDepthMismatch(nextValue.importance, nextValue.depth) };
