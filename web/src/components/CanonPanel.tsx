@@ -29,7 +29,7 @@ export type GuardrailFlag = { turnId: string; questionCount: number; ts: string 
 
 type AggregateStatus = "Exploring" | "Working" | "Confirmed";
 
-// Same three-color family as STATUS_STYLES above (muted/amber/emerald),
+// Same three-color family as CANON_STATUS_BADGE_STYLES above (muted/amber/emerald),
 // applied to the whole stage pill instead of one element's badge.
 const AGGREGATE_STYLES: Record<AggregateStatus, string> = {
   Exploring: "bg-neutral-800 text-neutral-400 border border-neutral-700",
