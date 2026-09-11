@@ -17,8 +17,11 @@ import {
   type P3State,
   WORLD_MESSAGES_COLLECTION,
   appendOutstandingQuestions,
+  setP3PendingConflict,
+  type P3PendingConflict,
 } from "@/lib/canonEngine/storyStore";
 import { createWorldEntry, updateWorldEntry } from "@/lib/worldEngine/worldEntryStore";
+import { buildConflictContextMessage, resolveP3Conflict } from "@/lib/worldEngine/conflictResolution";
 import { listElements, WORLD_ENTRIES_COLLECTION } from "@/lib/canonEngine/canonStore";
 import type { ImportanceDepthCheck } from "@/lib/worldEngine/worldEntry";
 import { extractTurn, TurnValidationError } from "@/lib/canonEngine/extractTurn";
@@ -170,6 +173,13 @@ export async function POST(req: NextRequest) {
       system += `\n\n[World Entries So Far - computed by the app, trust this over re-deriving it. Internal grounding only, never narrate this raw data to the author. When continuing, revising, or validating any entry listed here, set proposed_entry.entry_id to its id exactly as shown - never invent a new id and never leave entry_id null for an entry that already appears here, or you will create an unwanted duplicate.]\n${entryLines.join("\n")}`;
     }
 
+    // Conflict Resolution Protocol grounding (issue #47) - only while a
+    // conflict is genuinely open; cleared once resolved (Step 5 below).
+    const pendingConflictBefore = story.p3PendingConflict ?? null;
+    if (pendingConflictBefore) {
+      system += buildConflictContextMessage(pendingConflictBefore);
+    }
+
     // Issue #110: closing reminder, always the LAST thing appended to
     // `system` on every turn - targets any bracketed grounding block
     // above, whatever it calls itself, rather than enumerating today's
@@ -305,6 +315,39 @@ export async function POST(req: NextRequest) {
       p3ForResponse = { ...p3ForResponse, proposedPillars: delta.proposed_pillars };
     }
 
+    // Conflict Resolution Protocol (issue #47) - resolves an already-open
+    // conflict if the author just picked a choice, or opens a new
+    // Foundation-level one if the model self-reported a contradiction
+    // this turn. Runs before Stage 3 below so that block can check
+    // whether a conflict is still open and, if so, skip all Stage 3
+    // writes this turn (halts forward progress per the AC).
+    let pendingConflictForResponse: P3PendingConflict | null = pendingConflictBefore;
+    let cascadeReview: { entryId: string; name: string }[] | null = null;
+    try {
+      if (pendingConflictBefore && delta.resolution !== null) {
+        const result = await resolveP3Conflict({
+          storyId,
+          conflict: pendingConflictBefore,
+          resolution: delta.resolution,
+          turnId,
+          resolvedBy: user.uid,
+        });
+        cascadeReview = result.cascadeReview;
+        pendingConflictForResponse = null;
+        await setP3PendingConflict(storyId, null);
+      } else if (!pendingConflictBefore && delta.conflict_detected) {
+        const newConflict: P3PendingConflict = {
+          kind: "foundation",
+          description: delta.conflict_description ?? "The model flagged a contradiction but gave no description.",
+          ts: new Date().toISOString(),
+        };
+        pendingConflictForResponse = newConflict;
+        await setP3PendingConflict(storyId, newConflict);
+      }
+    } catch (conflictErr) {
+      console.warn(`[world-chat] conflict resolution failed for turn ${turnId}:`, conflictErr);
+    }
+
     // Stage 3 Discover/Develop/Validate cycle (issue #43) - the model's
     // active_pillar/proposed_entry/validated_status are always advisory;
     // the app only ever persists them through the same validated store
@@ -320,12 +363,17 @@ export async function POST(req: NextRequest) {
     // below exists specifically to prevent that.
     let entryWarning: ImportanceDepthCheck | null = null;
     try {
-      if (delta.active_pillar !== p3ForResponse.activePillar) {
+      if (pendingConflictForResponse) {
+        // A conflict is still open (either just detected this turn, or
+        // still awaiting the author's choice from an earlier turn) -
+        // halt Stage 3 forward progress entirely this turn, matching
+        // Project 1/2's existing single-pending-conflict convention.
+      } else if (delta.active_pillar !== p3ForResponse.activePillar) {
         await setP3ActivePillar(storyId, delta.active_pillar);
         p3ForResponse = { ...p3ForResponse, activePillar: delta.active_pillar };
       }
 
-      if (delta.proposed_entry) {
+      if (!pendingConflictForResponse && delta.proposed_entry) {
         const entryInput = {
           name: delta.proposed_entry.name,
           category: delta.proposed_entry.category,
@@ -352,6 +400,17 @@ export async function POST(req: NextRequest) {
           const result = await updateWorldEntry(storyId, delta.proposed_entry.entry_id, entryInput);
           if (result.ok) {
             entryWarning = result.warning;
+          } else if (result.reason === "confirmed_conflict" && result.conflict) {
+            const newConflict: P3PendingConflict = {
+              kind: "confirmed_entry",
+              entryId: result.conflict.entryId,
+              entryName: result.conflict.entryName,
+              oldValue: result.conflict.oldValue,
+              newValue: result.conflict.newValue,
+              ts: new Date().toISOString(),
+            };
+            pendingConflictForResponse = newConflict;
+            await setP3PendingConflict(storyId, newConflict);
           } else {
             console.warn(`[world-chat] proposed_entry update rejected for turn ${turnId}: ${result.error}`);
           }
@@ -377,6 +436,8 @@ export async function POST(req: NextRequest) {
       current_stage: delta.current_stage,
       p3: p3ForResponse,
       entryWarning,
+      pendingConflict: pendingConflictForResponse,
+      cascadeReview,
     });
   } catch (err) {
     if (err instanceof Anthropic.APIError) {
