@@ -52,6 +52,9 @@ export const WorldTurnSchema = z.object({
     .nullable(),
   validated_status: z.enum(["Working", "Confirmed", "Deferred"]).nullable(),
   deferred_items: z.array(WorldDeferredItemSchema),
+  conflict_detected: z.boolean(),
+  conflict_description: z.string().nullable(),
+  resolution: z.enum(["revert", "revise", "defer"]).nullable(),
 });
 
 export type WorldTurn = z.infer<typeof WorldTurnSchema>;
@@ -157,6 +160,22 @@ export const EMIT_WORLD_TURN_TOOL: Anthropic.Tool = {
         description:
           "Any out-of-scope items you noticed this turn but did not act on - log them here instead of developing them, so the author doesn't lose the thread. Empty array if nothing out-of-scope came up this turn.",
       },
+      conflict_detected: {
+        type: "boolean",
+        description:
+          "True only on the turn where you notice the author's new idea contradicts the immutable Story Foundation (not a Confirmed World Entry - that's detected separately by the app). False on every other turn, including every turn while a conflict is already pending your author's choice.",
+      },
+      conflict_description: {
+        type: ["string", "null"],
+        description:
+          "A concise description of the Story-Foundation contradiction, set only when conflict_detected is true this turn or a Foundation-level conflict is still pending from an earlier turn. Null otherwise.",
+      },
+      resolution: {
+        type: ["string", "null"],
+        enum: ["revert", "revise", "defer", null],
+        description:
+          "Set only on the turn where the author has just given a clear verdict on a pending conflict (Foundation or Confirmed-canon, whichever is currently open - the app will tell you which via a [CONFLICT DETECTED...] note): revert (keep things as they are), revise (accept the new idea, updating canon), or defer (park the decision for now). Null on every other turn.",
+      },
     },
     required: [
       "reply",
@@ -169,6 +188,9 @@ export const EMIT_WORLD_TURN_TOOL: Anthropic.Tool = {
       "proposed_entry",
       "validated_status",
       "deferred_items",
+      "conflict_detected",
+      "conflict_description",
+      "resolution",
     ],
   },
 };
