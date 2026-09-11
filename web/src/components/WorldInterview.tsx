@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Markdown from "@/components/Markdown";
 import UserMenu from "@/components/UserMenu";
+import WorldSidePanel from "@/components/WorldSidePanel";
 import { useUser } from "@/components/UserProvider";
 import { useScrollToLatest } from "@/lib/useScrollToLatest";
 import type { P3State } from "@/lib/canonEngine/storyStore";
@@ -585,6 +586,15 @@ export default function WorldInterview() {
                     <div className="h-10 w-10 animate-pulse rounded-full bg-gradient-to-br from-red-600/60 to-purple-600/60" />
                     <p className="text-sm">Developing this world…</p>
                   </div>
+                )}
+
+                {!resuming && (
+                  <WorldSidePanel
+                    storyId={canvasId}
+                    currentStage={currentStage}
+                    activePillar={wclState?.activePillar ?? null}
+                    refreshToken={messages.length}
+                  />
                 )}
 
                 {!resuming && wclState && (
