@@ -16,6 +16,7 @@ import {
   normalizeP3,
   type P3State,
   WORLD_MESSAGES_COLLECTION,
+  appendOutstandingQuestions,
 } from "@/lib/canonEngine/storyStore";
 import { createWorldEntry, updateWorldEntry } from "@/lib/worldEngine/worldEntryStore";
 import { listElements, WORLD_ENTRIES_COLLECTION } from "@/lib/canonEngine/canonStore";
@@ -26,6 +27,7 @@ import { ingestFoundation } from "@/lib/worldEngine/ingestFoundation";
 import { ingestFoundation as characterIngestFoundation } from "@/lib/characterEngine/ingestFoundation";
 import { checkCharacterBibleComplete } from "@/lib/worldEngine/characterBibleGate";
 import { WorldTurnSchema, EMIT_WORLD_TURN_TOOL } from "@/lib/worldEngine/worldTurnSchema";
+import { detectProseGeneration, buildScopeRedirectNote } from "@/lib/worldEngine/scopeGuardrail";
 
 export const runtime = "nodejs";
 
@@ -209,11 +211,44 @@ export async function POST(req: NextRequest) {
       throw err;
     }
 
+    // Scope-boundary guardrail (issue #46) - Layer 1 (model self-report
+    // via deferred_items) and Layer 2 (rules-based prose/dialogue
+    // detection, Project 5 only - see the design doc for why only P5
+    // gets a rules-based check) both run BEFORE the reply is persisted
+    // or returned, so neither a leaked prose draft nor an unflagged
+    // deferral topic ever enters the transcript the next turn's
+    // replayed-message window would re-surface.
+    const proseDetected = detectProseGeneration(delta.reply);
+    const deferredItems = [...delta.deferred_items];
+    if (proseDetected && !deferredItems.some((d) => d.defer_to_project === "Project 5")) {
+      deferredItems.push({
+        item: "Drafted narrative prose or dialogue",
+        defer_to_project: "Project 5",
+        notes: "Blocked automatically by the scope-boundary guardrail before being shown to the author.",
+      });
+    }
+
+    let finalReply = delta.reply;
+    if (proseDetected) {
+      // Layer 2 fired: genuine off-scope content was generated. Per the
+      // AC ("offer to log it... instead of executing the work"), the
+      // drafted prose must never reach the author - full replace, the
+      // one place this feature discards model output.
+      finalReply = buildScopeRedirectNote(deferredItems);
+    } else if (deferredItems.length > 0) {
+      // Layer 1 only: the model already recognized the topic and, per
+      // prompt instruction, is expected to have already steered the
+      // conversation in its own reply - append a deterministic note as
+      // a consistency guarantee rather than discarding the turn's
+      // otherwise-legitimate content.
+      finalReply = `${delta.reply}\n\n${buildScopeRedirectNote(deferredItems)}`;
+    }
+
     await appendMessage(
       storyId,
       {
         role: "assistant",
-        content: delta.reply,
+        content: finalReply,
         ts: new Date().toISOString(),
         turnId,
         context: delta.context,
@@ -221,7 +256,22 @@ export async function POST(req: NextRequest) {
       },
       WORLD_MESSAGES_COLLECTION
     );
-    logTurnHeuristics(delta.reply, delta.context, turnId);
+    logTurnHeuristics(finalReply, delta.context, turnId);
+
+    if (deferredItems.length > 0) {
+      try {
+        await appendOutstandingQuestions(
+          storyId,
+          deferredItems.map((d) => ({
+            item: d.item,
+            defer_to: d.defer_to_project,
+            notes: d.notes,
+          }))
+        );
+      } catch (guardrailErr) {
+        console.warn(`[world-chat] scope-guardrail deferred-item logging failed for turn ${turnId}:`, guardrailErr);
+      }
+    }
 
     // World Complexity Level and Pillar proposal tracking (issues #39,
     // #40, final-review fix pattern) - only the proposed fields are ever
@@ -306,7 +356,7 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({
-      reply: delta.reply,
+      reply: finalReply,
       context: delta.context,
       current_stage: delta.current_stage,
       p3: p3ForResponse,
