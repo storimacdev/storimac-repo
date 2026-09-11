@@ -13,6 +13,7 @@ import { pillarElementId } from "@/lib/worldEngine/pillarElementId";
 import { isValidTransition } from "@/lib/canonEngine/transitions";
 import type { CanonStatus } from "@/lib/canonEngine/types";
 import type { CharacterBibleGateResult } from "@/lib/worldEngine/characterBibleGate";
+import { CANON_STATUS_BADGE_STYLES } from "@/lib/canonEngine/statusBadge";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -30,13 +31,6 @@ const BORDER_GRADIENT =
 type PillarStatus = "Exploring" | "Working" | "Confirmed" | "Deferred";
 
 const PILLAR_STATUSES: PillarStatus[] = ["Exploring", "Working", "Confirmed", "Deferred"];
-
-const STATUS_BADGE_STYLES: Record<PillarStatus, string> = {
-  Exploring: "bg-neutral-700 text-neutral-300",
-  Working: "bg-amber-500/20 text-amber-300 border border-amber-500/40",
-  Confirmed: "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40",
-  Deferred: "bg-sky-500/20 text-sky-300 border border-sky-500/40",
-};
 
 // The shared Canon Engine's status type uses "Parked"; every P3 boundary
 // (this UI, the canon-status route) speaks "Deferred" instead, matching
@@ -625,7 +619,7 @@ export default function WorldInterview() {
                             {wclState.pillars !== null && (
                               <>
                                 <span
-                                  className={`rounded-full px-2 py-0.5 text-[9px] font-medium ${STATUS_BADGE_STYLES[status]}`}
+                                  className={`rounded-full px-2 py-0.5 text-[9px] font-medium ${CANON_STATUS_BADGE_STYLES[status]}`}
                                 >
                                   {status}
                                 </span>

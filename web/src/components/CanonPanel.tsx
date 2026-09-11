@@ -1,6 +1,7 @@
 "use client";
 
 import { PROJECT1_STAGES, getDefaultDepthMode, type StageDefinition } from "@/lib/canonEngine/stageDefinitions";
+import { CANON_STATUS_BADGE_STYLES } from "@/lib/canonEngine/statusBadge";
 
 /**
  * Read-only Story Canon panel — GitHub issue #11, PRD §7. Shows all 8
@@ -25,13 +26,6 @@ export type PanelElement = {
 };
 
 export type GuardrailFlag = { turnId: string; questionCount: number; ts: string };
-
-const STATUS_STYLES: Record<PanelElement["status"], string> = {
-  Exploring: "bg-neutral-700 text-neutral-300",
-  Working: "bg-amber-500/20 text-amber-300 border border-amber-500/40",
-  Confirmed: "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40",
-  Parked: "bg-sky-500/20 text-sky-300 border border-sky-500/40",
-};
 
 type AggregateStatus = "Exploring" | "Working" | "Confirmed";
 
@@ -179,7 +173,7 @@ export default function CanonPanel({
                             {el?.depth_mode ?? getDefaultDepthMode(stage.stage, id)}
                           </span>
                         )}
-                        <span className={`rounded-full px-2 py-0.5 text-[9px] font-medium ${STATUS_STYLES[status]}`}>
+                        <span className={`rounded-full px-2 py-0.5 text-[9px] font-medium ${CANON_STATUS_BADGE_STYLES[status]}`}>
                           {status}
                         </span>
                       </span>
