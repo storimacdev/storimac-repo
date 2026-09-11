@@ -60,6 +60,18 @@ export interface P2PendingConflict {
   ts: string;
 }
 
+/** Project 3's pending conflict (issue #47) - either a proposed edit
+ * contradicting a Confirmed World Entry (detected structurally, hence
+ * old_value/new_value under the same entryId - same shape as P1's own
+ * StoryPendingConflict) or a new idea contradicting the immutable Story
+ * Foundation (detected via model self-report, same as P2PendingConflict,
+ * since there's no deterministic way to judge contradiction against
+ * prose). Singular, like P1/P2's own pending-conflict fields - only one
+ * conflict is ever open at a time. */
+export type P3PendingConflict =
+  | { kind: "confirmed_entry"; entryId: string; entryName: string; oldValue: unknown; newValue: unknown; ts: string }
+  | { kind: "foundation"; description: string; ts: string };
+
 /** Project 3's World Complexity Level and Pillar list state (issues #39,
  * #40) - not part of the 4-state canon machinery. `proposedWorldComplexityLevel`
  * and `proposedPillars` update from any turn where the model reports a
@@ -134,6 +146,13 @@ export interface Story {
    * won't have it in Firestore.
    */
   p2PendingConflict?: P2PendingConflict | null;
+  /**
+   * Project 3's pending conflict (issue #47), cleared once the author
+   * picks one of the three resolution choices. Optional/nullable since
+   * Stories created before this field existed won't have it in
+   * Firestore.
+   */
+  p3PendingConflict?: P3PendingConflict | null;
   /**
    * Project 3's World Complexity Level state (issue #39). Optional/
    * nullable since Stories created before this field existed won't have
@@ -401,6 +420,16 @@ export async function setP2PendingConflict(
     .update({ p2PendingConflict: conflict, updatedAt: new Date().toISOString() });
 }
 
+/** Records or clears Project 3's pending conflict (issue #47); pass null to clear once resolved. */
+export async function setP3PendingConflict(
+  storyId: string,
+  conflict: P3PendingConflict | null
+): Promise<void> {
+  await storiesCollection()
+    .doc(storyId)
+    .update({ p3PendingConflict: conflict, updatedAt: new Date().toISOString() });
+}
+
 export interface StoredOutstandingQuestion {
   item: string;
   defer_to: "Project 2" | "Project 3" | "Project 4" | "Project 5" | null;
@@ -482,6 +511,32 @@ export async function appendCharacterConflictLog(
   entry: CharacterConflictLogEntry
 ): Promise<void> {
   await characterConflictsLogCollection(storyId).add(entry);
+}
+
+/** Project 3's conflict resolution log (issue #47, PRD §4.5) - one entry per resolved conflict, either kind. */
+export interface P3ConflictLogEntry {
+  kind: "confirmed_entry" | "foundation";
+  description: string;
+  /** Present only for kind "confirmed_entry". */
+  entryId?: string;
+  resolution: "revert" | "revise" | "defer";
+  resolvedBy: string;
+  ts: string;
+  turnId: string;
+}
+
+function p3ConflictLogCollection(storyId: string) {
+  return storiesCollection().doc(storyId).collection("p3ConflictLog");
+}
+
+/** Appends a resolved conflict to Project 3's conflict log (issue #47). */
+export async function appendP3ConflictLog(storyId: string, entry: P3ConflictLogEntry): Promise<void> {
+  await p3ConflictLogCollection(storyId).add(entry);
+}
+
+export async function listP3ConflictLog(storyId: string): Promise<P3ConflictLogEntry[]> {
+  const snap = await p3ConflictLogCollection(storyId).orderBy("ts", "asc").get();
+  return snap.docs.map((d) => d.data() as P3ConflictLogEntry);
 }
 
 /** Project 2's compiled, permanent Character Bible entries (issue #34,
