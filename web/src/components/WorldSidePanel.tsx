@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CANON_STATUS_BADGE_STYLES, type CanonBadgeStatus } from "@/lib/canonEngine/statusBadge";
 import { WORLD_STAGE_NAMES } from "@/lib/worldEngine/worldTurnSchema";
 
@@ -33,20 +33,30 @@ export default function WorldSidePanel({ storyId, currentStage, activePillar, re
   const [entries, setEntries] = useState<ApiWorldEntry[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Tracks the most recently *started* request, so that whichever call
+  // began last always wins regardless of network resolve order or which
+  // caller (the mount/refreshToken effect, or the Refresh button) started
+  // it - refreshToken bumps twice per turn (once for the optimistic user
+  // message, once for the assistant reply), so two requests are routinely
+  // in flight at once; without this, a stale first request resolving
+  // after the second would silently overwrite fresh data.
+  const requestIdRef = useRef(0);
 
   async function loadEntries() {
     if (!storyId) return;
+    const requestId = ++requestIdRef.current;
     setLoading(true);
     setLoadError(null);
     try {
       const res = await fetch(`/api/world-chat/entries?storyId=${encodeURIComponent(storyId)}`);
       const data = await res.json();
+      if (requestId !== requestIdRef.current) return;
       if (!res.ok) throw new Error(data?.error || "Failed to load the Canon Registry.");
       setEntries(Array.isArray(data.entries) ? data.entries : []);
     } catch {
-      setLoadError("Couldn't load the Canon Registry — try refreshing.");
+      if (requestId === requestIdRef.current) setLoadError("Couldn't load the Canon Registry — try refreshing.");
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
   }
 
@@ -58,9 +68,9 @@ export default function WorldSidePanel({ storyId, currentStage, activePillar, re
 
   const entriesById = new Map(entries.map((e) => [e.entryId, e]));
   const outstandingQuestions = entries.flatMap((e) =>
-    e.value.outstandingQuestions.map((q) => ({ entryName: e.value.name, item: q.item, notes: q.notes }))
+    (e.value.outstandingQuestions ?? []).map((q) => ({ entryName: e.value.name, item: q.item, notes: q.notes }))
   );
-  const entriesWithDeps = entries.filter((e) => e.dependsOn.length > 0);
+  const entriesWithDeps = entries.filter((e) => (e.dependsOn ?? []).length > 0);
 
   return (
     <div
@@ -93,14 +103,15 @@ export default function WorldSidePanel({ storyId, currentStage, activePillar, re
 
       <div className="mb-4">
         <p className="mb-2 text-[11px] uppercase tracking-widest text-neutral-500">Canon Registry</p>
-        {entries.length === 0 ? (
-          <p className="text-xs text-neutral-500">No World Entries yet — they&apos;ll appear here as you develop each pillar.</p>
-        ) : (
+        {entries.length > 0 ? (
           <ul className="space-y-1.5">
             {entries.map((e) => (
               <li key={e.entryId} className="flex items-center justify-between gap-2 text-xs text-neutral-300">
                 <span className="truncate">
-                  {e.value.name} <span className="text-neutral-500">({e.value.category})</span>
+                  {e.value.name}{" "}
+                  <span className="text-neutral-500">
+                    ({e.value.category} · {e.value.importance} · Depth {e.value.depth})
+                  </span>
                 </span>
                 <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${CANON_STATUS_BADGE_STYLES[e.status]}`}>
                   {e.status}
@@ -108,6 +119,10 @@ export default function WorldSidePanel({ storyId, currentStage, activePillar, re
               </li>
             ))}
           </ul>
+        ) : loading ? (
+          <p className="text-xs text-neutral-500">Loading…</p>
+        ) : loadError ? null : (
+          <p className="text-xs text-neutral-500">No World Entries yet — they&apos;ll appear here as you develop each pillar.</p>
         )}
       </div>
 
@@ -118,7 +133,7 @@ export default function WorldSidePanel({ storyId, currentStage, activePillar, re
         ) : (
           <ul className="space-y-1.5">
             {outstandingQuestions.map((q, i) => (
-              <li key={i} className="text-xs text-neutral-300">
+              <li key={`${q.entryName}-${i}`} className="text-xs text-neutral-300">
                 <span className="font-semibold text-neutral-200">{q.entryName}:</span> {q.item}
                 {q.notes && <span className="text-neutral-500"> — {q.notes}</span>}
               </li>
@@ -127,21 +142,23 @@ export default function WorldSidePanel({ storyId, currentStage, activePillar, re
         )}
       </div>
 
-      {entriesWithDeps.length > 0 && (
-        <div>
-          <p className="mb-2 text-[11px] uppercase tracking-widest text-neutral-500">
-            Dependency Graph (list view — full graph visualization is a future enhancement)
-          </p>
+      <div>
+        <p className="mb-2 text-[11px] uppercase tracking-widest text-neutral-500">
+          Dependency Graph (list view — full graph visualization is a future enhancement)
+        </p>
+        {entriesWithDeps.length === 0 ? (
+          <p className="text-xs text-neutral-500">No dependencies recorded yet.</p>
+        ) : (
           <ul className="space-y-1.5">
             {entriesWithDeps.map((e) => (
               <li key={e.entryId} className="text-xs text-neutral-300">
                 <span className="font-semibold text-neutral-200">{e.value.name}</span> depends on:{" "}
-                {e.dependsOn.map((depId) => entriesById.get(depId)?.value.name ?? depId).join(", ")}
+                {(e.dependsOn ?? []).map((depId) => entriesById.get(depId)?.value.name ?? depId).join(", ")}
               </li>
             ))}
           </ul>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
