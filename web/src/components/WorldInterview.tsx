@@ -177,7 +177,7 @@ export default function WorldInterview() {
         worldComplexityLevel: prev?.worldComplexityLevel ?? null,
         proposedPillars: incoming.proposedPillars,
         pillars: prev?.pillars ?? null,
-        activePillar: prev?.activePillar ?? null,
+        activePillar: incoming.activePillar,
       }));
     }
   }

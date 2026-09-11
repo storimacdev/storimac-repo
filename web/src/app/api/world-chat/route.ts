@@ -18,6 +18,7 @@ import {
   WORLD_MESSAGES_COLLECTION,
 } from "@/lib/canonEngine/storyStore";
 import { createWorldEntry, updateWorldEntry } from "@/lib/worldEngine/worldEntryStore";
+import { listElements, WORLD_ENTRIES_COLLECTION } from "@/lib/canonEngine/canonStore";
 import type { ImportanceDepthCheck } from "@/lib/worldEngine/worldEntry";
 import { extractTurn, TurnValidationError } from "@/lib/canonEngine/extractTurn";
 import { RateLimitTimeoutError } from "@/lib/rateLimit/anthropicGate";
@@ -145,6 +146,28 @@ export async function POST(req: NextRequest) {
       system += `\n\n[Story Foundation is incomplete: ${foundationResult.reason} Proceed with what's available; note gaps to the author naturally if relevant, don't block the interview on it.]`;
     }
 
+    // World Entries grounding for the Discover/Develop/Validate cycle
+    // (issue #43, final whole-branch review finding I1) - the model's
+    // only way to reference an existing entry by id in
+    // proposed_entry.entry_id; without this, entry_id can only ever be
+    // null or hallucinated, and every Develop/Validate turn creates a
+    // fresh duplicate entry instead of continuing the one already
+    // drafted. Lists every entry regardless of status, not just
+    // Confirmed ones (unlike issue #36's Confirmed Facts block) - a
+    // Working/Exploring entry from an earlier turn must remain
+    // addressable by id too. Kept to compact identifying fields only (no
+    // free-text value content) since the model already sees recent
+    // content via the replayed transcript window.
+    const existingEntries = await listElements(storyId, WORLD_ENTRIES_COLLECTION);
+    if (existingEntries.length > 0) {
+      const entryLines = existingEntries.map((e) => {
+        const v = (e.value ?? {}) as { name?: string; category?: string; importance?: string; depth?: number };
+        const status = e.status === "Parked" ? "Deferred" : e.status;
+        return `- entry_id: ${e.element_id} | name: ${v.name ?? "?"} | category: ${v.category ?? "?"} | status: ${status} | importance: ${v.importance ?? "?"} | depth: ${v.depth ?? "?"}`;
+      });
+      system += `\n\n[World Entries So Far - computed by the app, trust this over re-deriving it. Internal grounding only, never narrate this raw data to the author. When continuing, revising, or validating any entry listed here, set proposed_entry.entry_id to its id exactly as shown - never invent a new id and never leave entry_id null for an entry that already appears here, or you will create an unwanted duplicate.]\n${entryLines.join("\n")}`;
+    }
+
     // Issue #110: closing reminder, always the LAST thing appended to
     // `system` on every turn - targets any bracketed grounding block
     // above, whatever it calls itself, rather than enumerating today's
@@ -247,8 +270,18 @@ export async function POST(req: NextRequest) {
           governingRules: delta.proposed_entry.governing_rules,
         };
         if (delta.proposed_entry.entry_id === null) {
-          const { warning } = await createWorldEntry(storyId, entryInput);
+          const { element, warning } = await createWorldEntry(storyId, entryInput);
           entryWarning = warning;
+          if (delta.validated_status !== null) {
+            const validation = await updateWorldEntry(storyId, element.element_id, {
+              status: delta.validated_status,
+            });
+            if (validation.ok) {
+              entryWarning = validation.warning;
+            } else {
+              console.warn(`[world-chat] validated_status rejected for turn ${turnId}: ${validation.error}`);
+            }
+          }
         } else {
           const result = await updateWorldEntry(storyId, delta.proposed_entry.entry_id, entryInput);
           if (result.ok) {

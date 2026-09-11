@@ -146,6 +146,11 @@ export async function updateWorldEntry(
     patch.status = nextStatus;
   }
 
+  // allowConfirmedOverride stays true here because the Confirmed-value
+  // guard above already blocks any content edit to a Confirmed entry
+  // regardless of caller - both the direct PATCH API and the world-chat
+  // turn handler (issue #43) reach this same guard before this call, so
+  // neither can use this override to bypass it.
   const element = await upsertElement(storyId, entryId, patch, randomUUID(), true, WORLD_ENTRIES_COLLECTION);
 
   return { ok: true, element, warning: checkImportanceDepthMismatch(nextValue.importance, nextValue.depth) };
