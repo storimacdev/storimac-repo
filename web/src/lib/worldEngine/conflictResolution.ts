@@ -85,7 +85,7 @@ export async function resolveP3Conflict(params: ResolveP3ConflictParams): Promis
       const updatedValue: WorldEntryValue = {
         ...currentValue,
         outstandingQuestions: [
-          ...currentValue.outstandingQuestions,
+          ...(currentValue.outstandingQuestions ?? []),
           {
             item: "Conflicting idea deferred",
             notes: `A proposed change to "${conflict.entryName}" was deferred rather than applied - see the conflict log for the original proposal.`,
@@ -98,17 +98,41 @@ export async function resolveP3Conflict(params: ResolveP3ConflictParams): Promis
     await appendOutstandingQuestions(storyId, [
       { item: conflict.description, defer_to: null, notes: "Deferred via the Conflict Resolution Protocol." },
     ]);
+  } else if (resolution === "revise" && conflict.kind === "foundation") {
+    // The Foundation itself can't be rewritten (see this module's header
+    // comment) - "Revise" here means the new idea proceeds as the World
+    // Bible's working position. Without some durable record of that,
+    // the unchanged Story Foundation grounding block would keep
+    // asserting the contradicted premise on every future turn, and the
+    // model (correctly following its own instructions) would eventually
+    // re-flag the same already-accepted idea as a fresh conflict (final
+    // whole-branch review finding I2). This doesn't fully prevent that
+    // (the model isn't shown outstanding questions in its prompt today),
+    // but it gives the author a real, visible record of the decision -
+    // full re-trigger prevention would need the grounding block itself
+    // to carry prior resolutions, tracked as a follow-up.
+    await appendOutstandingQuestions(storyId, [
+      {
+        item: `Accepted despite Foundation tension: ${conflict.description}`,
+        defer_to: null,
+        notes: "Resolved via the Conflict Resolution Protocol (Revise) - the Story Foundation document itself is unchanged, but this idea is the World Bible's working position going forward.",
+      },
+    ]);
   }
-  // "revert" (either kind) and "revise" for a foundation-kind conflict
-  // need no additional write beyond the log below - revert keeps
-  // existing state untouched by definition, and a foundation-kind
-  // "revise" has no specific stored value to change (see this module's
-  // header comment).
+  // "revert" (either kind) needs no additional write beyond the log below
+  // - it keeps existing state untouched by definition.
 
   await appendP3ConflictLog(storyId, {
     kind: conflict.kind,
     description: conflict.kind === "confirmed_entry" ? `Confirmed entry "${conflict.entryName}"` : conflict.description,
-    entryId: conflict.kind === "confirmed_entry" ? conflict.entryId : undefined,
+    // Firestore rejects an explicit `undefined` field value unless
+    // ignoreUndefinedProperties is set (it isn't, repo-wide) - a
+    // conditional spread, not `entryId: ... : undefined`, is required
+    // here (final whole-branch review finding C1: the old code threw on
+    // every foundation-kind resolution, permanently halting the story).
+    ...(conflict.kind === "confirmed_entry"
+      ? { entryId: conflict.entryId, oldValue: conflict.oldValue, newValue: conflict.newValue }
+      : {}),
     resolution,
     resolvedBy,
     ts: new Date().toISOString(),

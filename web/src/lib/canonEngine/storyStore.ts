@@ -519,6 +519,9 @@ export interface P3ConflictLogEntry {
   description: string;
   /** Present only for kind "confirmed_entry". */
   entryId?: string;
+  /** Present only for kind "confirmed_entry" - the entry's value before/after the proposed change, so a deferred decision remains actionable later instead of being lost once p3PendingConflict is cleared. */
+  oldValue?: unknown;
+  newValue?: unknown;
   resolution: "revert" | "revise" | "defer";
   resolvedBy: string;
   ts: string;

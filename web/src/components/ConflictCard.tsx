@@ -8,7 +8,6 @@ export interface ConflictCardConflict {
 
 export interface ConflictCardProps {
   conflict: ConflictCardConflict;
-  cascadeReview: { entryId: string; name: string }[] | null;
   onChoose: (choice: "revert" | "revise" | "defer") => void;
   disabled: boolean;
 }
@@ -19,7 +18,7 @@ const CHOICES: { letter: string; label: string; choice: "revert" | "revise" | "d
   { letter: "C", label: "Defer", choice: "defer" },
 ];
 
-export default function ConflictCard({ conflict, cascadeReview, onChoose, disabled }: ConflictCardProps) {
+export default function ConflictCard({ conflict, onChoose, disabled }: ConflictCardProps) {
   const description =
     conflict.kind === "confirmed_entry"
       ? `This contradicts the Confirmed canon for "${conflict.entryName}".`
@@ -44,16 +43,6 @@ export default function ConflictCard({ conflict, cascadeReview, onChoose, disabl
           </button>
         ))}
       </div>
-      {cascadeReview && cascadeReview.length > 0 && (
-        <div className="mt-3 border-t border-red-900/40 pt-2">
-          <p className="mb-1 text-[11px] uppercase tracking-widest text-neutral-500">Dependency Review</p>
-          <ul className="space-y-1 text-xs text-neutral-300">
-            {cascadeReview.map((e) => (
-              <li key={e.entryId}>{e.name}</li>
-            ))}
-          </ul>
-        </div>
-      )}
     </div>
   );
 }

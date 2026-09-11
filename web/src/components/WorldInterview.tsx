@@ -499,12 +499,21 @@ export default function WorldInterview() {
                 ))}
                 {loading && <Bubble role="assistant" content="…" pending />}
                 {pendingConflict && (
-                  <ConflictCard
-                    conflict={pendingConflict}
-                    cascadeReview={cascadeReview}
-                    onChoose={chooseConflictResolution}
-                    disabled={loading}
-                  />
+                  <ConflictCard conflict={pendingConflict} onChoose={chooseConflictResolution} disabled={loading} />
+                )}
+                {cascadeReview && cascadeReview.length > 0 && (
+                  <div
+                    data-testid="cascade-review"
+                    className="mt-3 rounded-xl border border-red-900/40 bg-neutral-900/60 px-4 py-3 text-sm text-neutral-100"
+                  >
+                    <p className="mb-1 text-[11px] uppercase tracking-widest text-neutral-500">Dependency Review</p>
+                    <p className="mb-2 text-xs text-neutral-400">These entries depend on the canon you just revised:</p>
+                    <ul className="space-y-1 text-xs text-neutral-300">
+                      {cascadeReview.map((e) => (
+                        <li key={e.entryId}>{e.name}</li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
                 {error && (
                   <div className="mt-2 rounded-lg border border-red-900 bg-red-950/60 px-4 py-3 text-sm text-red-200">

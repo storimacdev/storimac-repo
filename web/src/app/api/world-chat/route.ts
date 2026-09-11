@@ -48,10 +48,9 @@ function listOrDash(items?: unknown[]): string {
 /**
  * The live World Bible interview turn - GitHub issue #38, reference:
  * web/src/app/api/character-chat/route.ts (Project 2's own turn handler).
- * Deliberately minimal: no canon-state updates, no stage clamping, no
- * guardrails or conflict detection yet - those are Phase 1/3 issues
- * (#41, #46, #47) still to come. This issue only needs a working Stage 1
- * "Understand" conversation.
+ * Started deliberately minimal (base turn shape, Stage 1 only); canon-state
+ * updates, the scope-boundary guardrail, and the Conflict Resolution
+ * Protocol have since been added incrementally by issues #41/#43/#46/#47.
  */
 export async function POST(req: NextRequest) {
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -348,8 +347,8 @@ export async function POST(req: NextRequest) {
           description: delta.conflict_description ?? "The model flagged a contradiction but gave no description.",
           ts: new Date().toISOString(),
         };
-        pendingConflictForResponse = newConflict;
         await setP3PendingConflict(storyId, newConflict);
+        pendingConflictForResponse = newConflict;
       }
     } catch (conflictErr) {
       console.warn(`[world-chat] conflict resolution failed for turn ${turnId}:`, conflictErr);
@@ -416,8 +415,8 @@ export async function POST(req: NextRequest) {
               newValue: result.conflict.newValue,
               ts: new Date().toISOString(),
             };
-            pendingConflictForResponse = newConflict;
             await setP3PendingConflict(storyId, newConflict);
+            pendingConflictForResponse = newConflict;
           } else {
             console.warn(`[world-chat] proposed_entry update rejected for turn ${turnId}: ${result.error}`);
           }
