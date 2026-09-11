@@ -14,6 +14,14 @@ import type Anthropic from "@anthropic-ai/sdk";
  * #26/#28/#30/#31/#32.
  */
 
+const WorldDeferredItemSchema = z.object({
+  item: z.string().min(1),
+  defer_to_project: z.enum(["Project 2", "Project 4", "Project 5"]),
+  notes: z.string().min(1),
+});
+
+export type WorldDeferredItemInput = z.infer<typeof WorldDeferredItemSchema>;
+
 export const WORLD_STAGE_NAMES: Record<number, string> = {
   1: "Understand",
   2: "Assess & Pillar Mapping",
@@ -43,6 +51,7 @@ export const WorldTurnSchema = z.object({
     })
     .nullable(),
   validated_status: z.enum(["Working", "Confirmed", "Deferred"]).nullable(),
+  deferred_items: z.array(WorldDeferredItemSchema),
 });
 
 export type WorldTurn = z.infer<typeof WorldTurnSchema>;
@@ -126,6 +135,28 @@ export const EMIT_WORLD_TURN_TOOL: Anthropic.Tool = {
         description:
           "Set only on the turn where the author has just given a clear verdict on the entry named in proposed_entry (or its entry_id): Working (provisional), Confirmed (approved as canon), or Deferred (postponed). Null on every other turn, including every Discover/Develop-phase turn.",
       },
+      deferred_items: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            item: {
+              type: "string",
+              description: "A short description of the out-of-scope thing you noticed (e.g. a character's backstory detail, a plot beat, a line of dialogue).",
+            },
+            defer_to_project: {
+              type: "string",
+              enum: ["Project 2", "Project 4", "Project 5"],
+              description:
+                "Which project this belongs to: Project 2 (Character Bible) for character psychology/backstory/dialogue voice, Project 4 (Story Architecture) for plot beats/scenes/timeline sequencing, Project 5 (Draft Writing) for narrative prose/dialogue generation.",
+            },
+            notes: { type: "string", description: "Enough context to pick this back up later." },
+          },
+          required: ["item", "defer_to_project", "notes"],
+        },
+        description:
+          "Any out-of-scope items you noticed this turn but did not act on - log them here instead of developing them, so the author doesn't lose the thread. Empty array if nothing out-of-scope came up this turn.",
+      },
     },
     required: [
       "reply",
@@ -137,6 +168,7 @@ export const EMIT_WORLD_TURN_TOOL: Anthropic.Tool = {
       "cycle_phase",
       "proposed_entry",
       "validated_status",
+      "deferred_items",
     ],
   },
 };
