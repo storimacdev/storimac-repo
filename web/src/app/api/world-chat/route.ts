@@ -333,8 +333,15 @@ export async function POST(req: NextRequest) {
           resolvedBy: user.uid,
         });
         cascadeReview = result.cascadeReview;
-        pendingConflictForResponse = null;
+        // Persist the clear before updating the in-memory value (final
+        // review, Task 5): if setP3PendingConflict throws, the outer
+        // catch's console.warn still fires, but pendingConflictForResponse
+        // stays at its pre-resolution value - the same safe "leave it
+        // pending" fallback already used when resolveP3Conflict itself
+        // throws - rather than telling this turn's Stage 3 block the
+        // conflict is resolved while Firestore still shows it open.
         await setP3PendingConflict(storyId, null);
+        pendingConflictForResponse = null;
       } else if (!pendingConflictBefore && delta.conflict_detected) {
         const newConflict: P3PendingConflict = {
           kind: "foundation",
