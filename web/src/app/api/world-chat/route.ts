@@ -217,7 +217,11 @@ export async function POST(req: NextRequest) {
     // gets a rules-based check) both run BEFORE the reply is persisted
     // or returned, so neither a leaked prose draft nor an unflagged
     // deferral topic ever enters the transcript the next turn's
-    // replayed-message window would re-surface.
+    // replayed-message window would re-surface. logTurnHeuristics below
+    // still scans the model's real, unmodified reply/context (never
+    // finalReply/finalContext) - it exists specifically to catch leaks
+    // in the model's actual output, independent of what the guardrail
+    // decided to show the author (final whole-branch review finding I2).
     const proseDetected = detectProseGeneration(delta.reply);
     const deferredItems = [...delta.deferred_items];
     if (proseDetected && !deferredItems.some((d) => d.defer_to_project === "Project 5")) {
@@ -229,12 +233,18 @@ export async function POST(req: NextRequest) {
     }
 
     let finalReply = delta.reply;
+    let finalContext = delta.context;
     if (proseDetected) {
       // Layer 2 fired: genuine off-scope content was generated. Per the
       // AC ("offer to log it... instead of executing the work"), the
       // drafted prose must never reach the author - full replace, the
-      // one place this feature discards model output.
+      // one place this feature discards model output. context is
+      // scrubbed too (final whole-branch review finding I1) - the
+      // model's internal reasoning could restate or summarize the same
+      // blocked content, and it's both shown to the author as a Notes
+      // card and replayed into the next turn's prompt.
       finalReply = buildScopeRedirectNote(deferredItems);
+      finalContext = "Scope-boundary guardrail: this turn's content was redirected (see above).";
     } else if (deferredItems.length > 0) {
       // Layer 1 only: the model already recognized the topic and, per
       // prompt instruction, is expected to have already steered the
@@ -244,6 +254,12 @@ export async function POST(req: NextRequest) {
       finalReply = `${delta.reply}\n\n${buildScopeRedirectNote(deferredItems)}`;
     }
 
+    if (deferredItems.length > 0) {
+      console.warn(
+        `[world-chat] scope-guardrail fired for turn ${turnId}: proseDetected=${proseDetected}, ${deferredItems.length} deferred item(s) (${deferredItems.map((d) => d.defer_to_project).join(", ")})`
+      );
+    }
+
     await appendMessage(
       storyId,
       {
@@ -251,12 +267,12 @@ export async function POST(req: NextRequest) {
         content: finalReply,
         ts: new Date().toISOString(),
         turnId,
-        context: delta.context,
+        context: finalContext,
         current_stage: delta.current_stage,
       },
       WORLD_MESSAGES_COLLECTION
     );
-    logTurnHeuristics(finalReply, delta.context, turnId);
+    logTurnHeuristics(delta.reply, delta.context, turnId);
 
     if (deferredItems.length > 0) {
       try {
@@ -357,7 +373,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       reply: finalReply,
-      context: delta.context,
+      context: finalContext,
       current_stage: delta.current_stage,
       p3: p3ForResponse,
       entryWarning,
