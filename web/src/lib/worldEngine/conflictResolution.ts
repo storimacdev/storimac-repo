@@ -1,4 +1,4 @@
-import { getElement, listElements, upsertElement, WORLD_ENTRIES_COLLECTION } from "@/lib/canonEngine/canonStore";
+import { getElement, listDependents, upsertElement, WORLD_ENTRIES_COLLECTION } from "@/lib/canonEngine/canonStore";
 import { appendOutstandingQuestions, appendP3ConflictLog, type P3PendingConflict } from "@/lib/canonEngine/storyStore";
 import type { WorldEntryValue } from "./worldEntry";
 
@@ -32,19 +32,20 @@ export function buildConflictContextMessage(conflict: P3PendingConflict): string
 
 /**
  * Every Confirmed World Entry whose depends_on includes entryId - AC-(B)'s
- * Dependency Review. A direct, P3-scoped in-memory filter over
- * listElements(WORLD_ENTRIES_COLLECTION), not the shared
- * canonStore.ts#listDependents (hardcoded to the "elements" collection;
- * generalizing that is issue #48's job, tracked separately - see the
- * design doc's Global Constraints).
+ * Dependency Review. Issue #48 fixed the shared canonStore.ts#listDependents
+ * to accept a collection parameter (it was hardcoded to "elements",
+ * Project 1's own, until then) - this now calls it directly instead of
+ * the P3-local in-memory workaround issue #47 used to avoid that gap.
+ * listDependents itself doesn't filter by status, so the Confirmed
+ * filter stays here, same as before.
  */
 export async function computeCascadeReview(
   storyId: string,
   entryId: string
 ): Promise<{ entryId: string; name: string }[]> {
-  const allEntries = await listElements(storyId, WORLD_ENTRIES_COLLECTION);
-  return allEntries
-    .filter((e) => e.status === "Confirmed" && (e.depends_on ?? []).includes(entryId))
+  const dependents = await listDependents(storyId, entryId, WORLD_ENTRIES_COLLECTION);
+  return dependents
+    .filter((e) => e.status === "Confirmed")
     .map((e) => ({ entryId: e.element_id, name: (e.value as WorldEntryValue | undefined)?.name ?? e.element_id }));
 }
 
