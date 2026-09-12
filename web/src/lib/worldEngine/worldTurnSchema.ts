@@ -48,6 +48,7 @@ export const WorldTurnSchema = z.object({
       depth: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
       functional_description: z.string().min(1),
       governing_rules: z.string().min(1),
+      depends_on: z.array(z.string()),
     })
     .nullable(),
   validated_status: z.enum(["Working", "Confirmed", "Deferred"]).nullable(),
@@ -55,6 +56,12 @@ export const WorldTurnSchema = z.object({
   conflict_detected: z.boolean(),
   conflict_description: z.string().nullable(),
   resolution: z.enum(["revert", "revise", "defer"]).nullable(),
+  pillar_dependencies: z.array(
+    z.object({
+      pillar: z.string().min(1),
+      depends_on: z.array(z.string()),
+    })
+  ),
 });
 
 export type WorldTurn = z.infer<typeof WorldTurnSchema>;
@@ -127,8 +134,14 @@ export const EMIT_WORLD_TURN_TOOL: Anthropic.Tool = {
           },
           functional_description: { type: "string", description: "The entry's Functional Description, bounded by its depth level." },
           governing_rules: { type: "string", description: "The entry's Governing Rules & Constraints." },
+          depends_on: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "The names of other World Entries this one references or systemically depends on (e.g. an economic system that depends on a geographic feature). Empty array if none. Use the entry's exact Name as it appears in the [World Entries So Far...] grounding block - not its entry_id.",
+          },
         },
-        required: ["entry_id", "name", "category", "narrative_role", "importance", "depth", "functional_description", "governing_rules"],
+        required: ["entry_id", "name", "category", "narrative_role", "importance", "depth", "functional_description", "governing_rules", "depends_on"],
         description:
           "A structured draft of the World Entry currently being developed or validated, during the Develop or Validate phase of the active pillar's cycle. Null outside those phases, or when nothing concrete has been drafted yet this turn.",
       },
@@ -176,6 +189,23 @@ export const EMIT_WORLD_TURN_TOOL: Anthropic.Tool = {
         description:
           "Set only on the turn where the author has just given a clear verdict on a pending conflict (Foundation or Confirmed-canon, whichever is currently open - the app will tell you which via a [CONFLICT DETECTED...] note): revert (keep things as they are), revise (accept the new idea, updating canon), or defer (park the decision for now). Null on every other turn.",
       },
+      pillar_dependencies: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            pillar: { type: "string", description: "The name of a pillar, exactly matching one of the adopted pillar names." },
+            depends_on: {
+              type: "array",
+              items: { type: "string" },
+              description: "The names of other pillars this one systemically depends on (e.g. Economy depends on Geography). Empty array if none.",
+            },
+          },
+          required: ["pillar", "depends_on"],
+        },
+        description:
+          "Causal/systemic relationships between World Pillars you've identified (e.g. Economy depends on Geography, Culture depends on Politics) - per sp03's own instruction to treat the world as a causal chain. Report a pillar's dependencies again on any turn they're still true, even if unchanged from a prior turn. Empty array if you haven't identified any pillar-level dependencies yet.",
+      },
     },
     required: [
       "reply",
@@ -191,6 +221,7 @@ export const EMIT_WORLD_TURN_TOOL: Anthropic.Tool = {
       "conflict_detected",
       "conflict_description",
       "resolution",
+      "pillar_dependencies",
     ],
   },
 };
