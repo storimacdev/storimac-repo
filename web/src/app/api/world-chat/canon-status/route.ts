@@ -4,7 +4,7 @@ import { requireUser } from "@/lib/session";
 import { errorResponse } from "@/lib/apiErrors";
 import { getMembership } from "@/lib/workspace/workspaceStore";
 import { getStory } from "@/lib/canonEngine/storyStore";
-import { getElement, upsertElement, WORLD_ELEMENTS_COLLECTION } from "@/lib/canonEngine/canonStore";
+import { getElement, upsertElement, listDependents, WORLD_ELEMENTS_COLLECTION } from "@/lib/canonEngine/canonStore";
 import { isValidTransition } from "@/lib/canonEngine/transitions";
 import type { CanonStatus } from "@/lib/canonEngine/types";
 import { ingestFoundation as characterIngestFoundation } from "@/lib/characterEngine/ingestFoundation";
@@ -32,6 +32,7 @@ export async function PATCH(req: NextRequest) {
     const storyId: unknown = body?.storyId;
     const elementId: unknown = body?.elementId;
     const status: unknown = body?.status;
+    const acknowledged = body?.acknowledged === true;
 
     if (typeof storyId !== "string" || !storyId) {
       return NextResponse.json({ error: "Request must include `storyId`." }, { status: 400 });
@@ -81,6 +82,23 @@ export async function PATCH(req: NextRequest) {
         { error: `Can't change status from ${currentLabel} to ${status}.` },
         { status: 400 }
       );
+    }
+
+    // Dependency Review gate (issue #48, PRD §4.4) - a Confirmed pillar
+    // changing status must not commit silently if something else
+    // Confirmed depends on it. Unlike issue #47's chat-turn Conflict
+    // Resolution protocol, this is a synchronous confirm-then-retry gate,
+    // not a model-turn-based one - every call here is already an explicit
+    // author button-click (see this file's own long-standing comment
+    // above), so there's no model turn to negotiate a choice through.
+    if (currentStatus === "Confirmed" && nextStatus !== currentStatus && !acknowledged) {
+      const dependents = await listDependents(storyId, elementId, WORLD_ELEMENTS_COLLECTION);
+      const dependencyReview = dependents
+        .filter((e) => e.status === "Confirmed")
+        .map((e) => ({ entryId: e.element_id, name: (e.value as { name?: string } | undefined)?.name ?? e.element_id }));
+      if (dependencyReview.length > 0) {
+        return NextResponse.json({ needsAcknowledgment: true, dependencyReview }, { status: 409 });
+      }
     }
 
     const element = await upsertElement(
