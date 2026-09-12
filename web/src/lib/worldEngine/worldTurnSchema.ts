@@ -138,7 +138,7 @@ export const EMIT_WORLD_TURN_TOOL: Anthropic.Tool = {
             type: "array",
             items: { type: "string" },
             description:
-              "The names of other World Entries this one references or systemically depends on (e.g. an economic system that depends on a geographic feature). Empty array if none. Use the entry's exact Name as it appears in the [World Entries So Far...] grounding block - not its entry_id.",
+              "The entry_ids of other World Entries this one references or systemically depends on (e.g. an economic system that depends on a geographic feature). Empty array if none. Use the exact entry_id shown for that entry in the [World Entries So Far...] grounding block - never its Name, and never an id for an entry that doesn't appear there yet.",
           },
         },
         required: ["entry_id", "name", "category", "narrative_role", "importance", "depth", "functional_description", "governing_rules", "depends_on"],
