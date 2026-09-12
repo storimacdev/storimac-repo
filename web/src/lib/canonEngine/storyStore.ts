@@ -72,6 +72,29 @@ export type P3PendingConflict =
   | { kind: "confirmed_entry"; entryId: string; entryName: string; oldValue: unknown; newValue: unknown; ts: string }
   | { kind: "foundation"; description: string; ts: string };
 
+/** Project 3's Stage 4 System Integration Audit (issue #49) - computed
+ * once per story, the first time the model reports reaching Stage 4+;
+ * gates only the 4->5 (Compile) transition. Findings mix two rules-based
+ * checks (dependency-graph completeness, redundancy) with one
+ * model-driven consistency pass - see worldEngine/stage4Audit.ts, which
+ * computes these but doesn't own the persisted shape (same split already
+ * established for P3PendingConflict/conflictResolution.ts). */
+export interface Stage4AuditFinding {
+  id: string;
+  category: "dependency" | "redundancy" | "consistency";
+  status: "pass" | "flag" | "skipped";
+  detail: string;
+}
+
+export interface P3Stage4Audit {
+  findings: Stage4AuditFinding[];
+  generatedAt: string;
+  /** Set only when the author gives a clear, explicit approval (issue
+   * #49's AC requires this - deliberately stronger than Stage 7's own
+   * "any reply counts as acknowledgment" convention). Gates Stage 5. */
+  authorApproved: boolean;
+}
+
 /** Project 3's World Complexity Level and Pillar list state (issues #39,
  * #40) - not part of the 4-state canon machinery. `proposedWorldComplexityLevel`
  * and `proposedPillars` update from any turn where the model reports a
@@ -153,6 +176,13 @@ export interface Story {
    * Firestore.
    */
   p3PendingConflict?: P3PendingConflict | null;
+  /**
+   * Project 3's Stage 4 System Integration Audit (issue #49), computed
+   * once per story and cleared only if the story is ever reset. Optional/
+   * nullable since Stories created before this field existed won't have
+   * it in Firestore.
+   */
+  p3Stage4Audit?: P3Stage4Audit | null;
   /**
    * Project 3's World Complexity Level state (issue #39). Optional/
    * nullable since Stories created before this field existed won't have
@@ -428,6 +458,16 @@ export async function setP3PendingConflict(
   await storiesCollection()
     .doc(storyId)
     .update({ p3PendingConflict: conflict, updatedAt: new Date().toISOString() });
+}
+
+/** Records or clears Project 3's Stage 4 audit (issue #49); pass null only if the story is ever reset. */
+export async function setP3Stage4Audit(
+  storyId: string,
+  audit: P3Stage4Audit | null
+): Promise<void> {
+  await storiesCollection()
+    .doc(storyId)
+    .update({ p3Stage4Audit: audit, updatedAt: new Date().toISOString() });
 }
 
 export interface StoredOutstandingQuestion {
