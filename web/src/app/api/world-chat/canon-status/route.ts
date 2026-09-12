@@ -7,6 +7,7 @@ import { getStory } from "@/lib/canonEngine/storyStore";
 import { getElement, upsertElement, listDependents, WORLD_ELEMENTS_COLLECTION } from "@/lib/canonEngine/canonStore";
 import { isValidTransition } from "@/lib/canonEngine/transitions";
 import type { CanonStatus } from "@/lib/canonEngine/types";
+import { pillarElementId } from "@/lib/worldEngine/pillarElementId";
 import { ingestFoundation as characterIngestFoundation } from "@/lib/characterEngine/ingestFoundation";
 import { checkCharacterBibleComplete } from "@/lib/worldEngine/characterBibleGate";
 
@@ -93,9 +94,21 @@ export async function PATCH(req: NextRequest) {
     // above), so there's no model turn to negotiate a choice through.
     if (currentStatus === "Confirmed" && nextStatus !== currentStatus && !acknowledged) {
       const dependents = await listDependents(storyId, elementId, WORLD_ELEMENTS_COLLECTION);
+      // No pillar CanonElement ever gets a `value` written (this route and
+      // Task 4's dependency writer only ever patch `status`/`depends_on`),
+      // so a dependent's display name has to be reconstructed rather than
+      // read off `e.value`. pillarElementId is a deterministic function of
+      // a pillar's name, so build a reverse (element id -> name) lookup
+      // from story.p3's own name lists - `pillars` (author-adopted) and
+      // `proposedPillars` (model-proposed) - instead. A dependent whose
+      // name isn't in either list (e.g. renamed since, per
+      // pillarElementId.ts's documented "renaming orphans the old
+      // element" limitation) falls back to its raw element id.
+      const knownPillarNames = [...(story.p3?.pillars ?? []), ...(story.p3?.proposedPillars ?? [])];
+      const pillarNameById = new Map(knownPillarNames.map((name) => [pillarElementId(name), name]));
       const dependencyReview = dependents
         .filter((e) => e.status === "Confirmed")
-        .map((e) => ({ entryId: e.element_id, name: (e.value as { name?: string } | undefined)?.name ?? e.element_id }));
+        .map((e) => ({ entryId: e.element_id, name: pillarNameById.get(e.element_id) ?? e.element_id }));
       if (dependencyReview.length > 0) {
         return NextResponse.json({ needsAcknowledgment: true, dependencyReview }, { status: 409 });
       }
