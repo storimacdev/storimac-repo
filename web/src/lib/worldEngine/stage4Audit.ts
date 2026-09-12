@@ -1,6 +1,10 @@
 import type { CanonElement } from "@/lib/canonEngine/types";
 import type { Stage4AuditFinding } from "@/lib/canonEngine/storyStore";
 import type { WorldEntryValue } from "./worldEntry";
+import { z } from "zod";
+import type Anthropic from "@anthropic-ai/sdk";
+import { extractTurn } from "@/lib/canonEngine/extractTurn";
+import type { P3Stage4Audit } from "@/lib/canonEngine/storyStore";
 
 /**
  * Project 3's Stage 4 System Integration Audit (issue #49) - computes
@@ -127,4 +131,117 @@ export function checkRedundancy(confirmedEntries: CanonElement[]): Stage4AuditFi
     });
   }
   return findings;
+}
+
+const Stage4ConsistencyFindingSchema = z.object({
+  category: z.enum(["physical", "economic", "historical", "narrative"]),
+  detail: z.string().min(1),
+});
+
+const Stage4ConsistencySchema = z.object({
+  findings: z.array(Stage4ConsistencyFindingSchema),
+});
+
+const EMIT_STAGE4_CONSISTENCY_TOOL: Anthropic.Tool = {
+  name: "emit_stage4_consistency_findings",
+  description:
+    "Report any physical, economic, historical, or narrative consistency problems you found across the Confirmed World Entries provided. Call this exactly once.",
+  input_schema: {
+    type: "object",
+    properties: {
+      findings: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            category: {
+              type: "string",
+              enum: ["physical", "economic", "historical", "narrative"],
+              description: "Which kind of consistency problem this is.",
+            },
+            detail: {
+              type: "string",
+              description: "A specific, concrete description of the contradiction or inconsistency, naming the entries involved.",
+            },
+          },
+          required: ["category", "detail"],
+        },
+        description: "Every consistency problem you found. Empty array if none.",
+      },
+    },
+    required: ["findings"],
+  },
+};
+
+/**
+ * The one part of this audit with no rules-based precedent to lean on
+ * (see this file's header comment) - a single one-shot extractTurn call,
+ * not a conversational turn, reviewing all Confirmed entries together
+ * for contradictions a word-overlap heuristic can't meaningfully detect.
+ * Runs once per audit computation, not per chat turn.
+ */
+export async function runConsistencyCheck(
+  anthropic: Anthropic,
+  confirmedEntries: CanonElement[]
+): Promise<Stage4AuditFinding[]> {
+  if (confirmedEntries.length === 0) {
+    return [
+      {
+        id: "consistency-empty",
+        category: "consistency",
+        status: "skipped",
+        detail: "No Confirmed entries yet to check.",
+      },
+    ];
+  }
+
+  const entryDescriptions = confirmedEntries
+    .map((e) => {
+      const v = e.value as WorldEntryValue | undefined;
+      return `- ${v?.name ?? e.element_id} (${v?.category ?? "?"}): ${v?.functionalDescription ?? ""} Governing rules: ${v?.governingRules ?? ""}`;
+    })
+    .join("\n");
+
+  const result = await extractTurn({
+    anthropic,
+    model: "claude-sonnet-5",
+    system:
+      "You are auditing a fictional world's Confirmed canon for internal consistency. Review the entries below and report any physical, economic, historical, or narrative contradictions between them - not stylistic opinions, only genuine logical inconsistencies.",
+    messages: [{ role: "user", content: `Confirmed World Entries:\n${entryDescriptions}` }],
+    tool: EMIT_STAGE4_CONSISTENCY_TOOL,
+    schema: Stage4ConsistencySchema,
+  });
+
+  if (result.findings.length === 0) {
+    return [
+      {
+        id: "consistency-clean",
+        category: "consistency",
+        status: "pass",
+        detail: "No physical, economic, historical, or narrative contradictions found across Confirmed entries.",
+      },
+    ];
+  }
+
+  return result.findings.map((f, i) => ({
+    id: `consistency-${i}`,
+    category: "consistency" as const,
+    status: "flag" as const,
+    detail: `[${f.category}] ${f.detail}`,
+  }));
+}
+
+/** Renders the audit as the author-facing summary text (mirrors Stage
+ * 7's formatAuditSummary rendering convention). */
+export function formatStage4AuditSummary(audit: P3Stage4Audit): string {
+  const lines: string[] = ["System Integration Audit complete. Here's what I found:", ""];
+  for (const f of audit.findings) {
+    const mark = f.status === "pass" ? "✅" : f.status === "flag" ? "⚠️" : "⏭️";
+    lines.push(`${mark} ${f.detail}`);
+  }
+  lines.push(
+    "",
+    "Let me know if you'd like to address any flags, or give an explicit approval so we can move on to compiling your World Bible."
+  );
+  return lines.join("\n");
 }
