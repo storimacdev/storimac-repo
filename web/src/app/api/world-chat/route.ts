@@ -22,7 +22,8 @@ import {
 } from "@/lib/canonEngine/storyStore";
 import { createWorldEntry, updateWorldEntry } from "@/lib/worldEngine/worldEntryStore";
 import { buildConflictContextMessage, resolveP3Conflict } from "@/lib/worldEngine/conflictResolution";
-import { listElements, WORLD_ENTRIES_COLLECTION } from "@/lib/canonEngine/canonStore";
+import { listElements, WORLD_ENTRIES_COLLECTION, upsertElement, WORLD_ELEMENTS_COLLECTION } from "@/lib/canonEngine/canonStore";
+import { pillarElementId } from "@/lib/worldEngine/pillarElementId";
 import type { ImportanceDepthCheck } from "@/lib/worldEngine/worldEntry";
 import { extractTurn, TurnValidationError } from "@/lib/canonEngine/extractTurn";
 import { RateLimitTimeoutError } from "@/lib/rateLimit/anthropicGate";
@@ -314,6 +315,39 @@ export async function POST(req: NextRequest) {
       p3ForResponse = { ...p3ForResponse, proposedPillars: delta.proposed_pillars };
     }
 
+    // Pillar-to-pillar dependency graph (issue #48) - lazily creates each
+    // named pillar's CanonElement if it doesn't exist yet (mirroring how
+    // canon-status/route.ts already lazily creates pillars on first
+    // status-set, issue #41), writing only depends_on so an existing
+    // pillar's status/value is never touched by this. Both the pillar
+    // itself and every pillar it depends on are converted from the
+    // model's display-name strings to their derived pillarElementId -
+    // the model has no grounding-block exposure to a pillar's actual
+    // element id (unlike World Entries, which do get one via the
+    // [World Entries So Far...] block), so this conversion has to happen
+    // here, not be asked of the model. Every downstream consumer of a
+    // pillar's depends_on (e.g. issue #48's own Dependency Review gate in
+    // canon-status/route.ts) looks up dependents by elementId, so storing
+    // anything other than the derived id here would silently never match.
+    // Degrades gracefully - logged, never a hard error to the author -
+    // same convention as every other Stage-3-adjacent write in this route.
+    if (delta.pillar_dependencies.length > 0) {
+      try {
+        for (const { pillar, depends_on } of delta.pillar_dependencies) {
+          await upsertElement(
+            storyId,
+            pillarElementId(pillar),
+            { depends_on: depends_on.map((p) => pillarElementId(p)) },
+            turnId,
+            false,
+            WORLD_ELEMENTS_COLLECTION
+          );
+        }
+      } catch (pillarDepsErr) {
+        console.warn(`[world-chat] pillar_dependencies persistence failed for turn ${turnId}:`, pillarDepsErr);
+      }
+    }
+
     // Conflict Resolution Protocol (issue #47) - resolves an already-open
     // conflict if the author just picked a choice, or opens a new
     // Foundation-level one if the model self-reported a contradiction
@@ -388,6 +422,7 @@ export async function POST(req: NextRequest) {
           depth: delta.proposed_entry.depth,
           functionalDescription: delta.proposed_entry.functional_description,
           governingRules: delta.proposed_entry.governing_rules,
+          dependsOn: delta.proposed_entry.depends_on,
         };
         if (delta.proposed_entry.entry_id === null) {
           const { element, warning } = await createWorldEntry(storyId, entryInput);
