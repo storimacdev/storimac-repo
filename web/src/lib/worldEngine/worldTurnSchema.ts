@@ -62,6 +62,7 @@ export const WorldTurnSchema = z.object({
       depends_on: z.array(z.string()),
     })
   ),
+  stage4_audit_approved: z.boolean(),
 });
 
 export type WorldTurn = z.infer<typeof WorldTurnSchema>;
@@ -206,6 +207,11 @@ export const EMIT_WORLD_TURN_TOOL: Anthropic.Tool = {
         description:
           "Causal/systemic relationships between World Pillars you've identified (e.g. Economy depends on Geography, Culture depends on Politics) - per sp03's own instruction to treat the world as a causal chain. Report a pillar's dependencies again on any turn they're still true, even if unchanged from a prior turn. Empty array if you haven't identified any pillar-level dependencies yet.",
       },
+      stage4_audit_approved: {
+        type: "boolean",
+        description:
+          "True only on the turn where the author has just given a clear, explicit approval of the Stage 4 System Integration Audit summary the app showed you (via an internal grounding note) - not merely acknowledging a flag, a genuine 'yes, proceed' verdict. False on every other turn, including every turn no audit is currently pending approval.",
+      },
     },
     required: [
       "reply",
@@ -222,6 +228,7 @@ export const EMIT_WORLD_TURN_TOOL: Anthropic.Tool = {
       "conflict_description",
       "resolution",
       "pillar_dependencies",
+      "stage4_audit_approved",
     ],
   },
 };
