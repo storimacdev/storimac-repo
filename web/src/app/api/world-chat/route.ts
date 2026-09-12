@@ -343,7 +343,7 @@ export async function POST(req: NextRequest) {
         stage4AuditForResponse = newAudit;
       }
 
-      if (delta.stage4_audit_approved && stage4AuditForResponse && !stage4AuditForResponse.authorApproved) {
+      if (delta.stage4_audit_approved && stage4AuditBefore && !stage4AuditBefore.authorApproved && stage4AuditForResponse) {
         const approvedAudit: P3Stage4Audit = { ...stage4AuditForResponse, authorApproved: true };
         await setP3Stage4Audit(storyId, approvedAudit);
         stage4AuditForResponse = approvedAudit;

@@ -10,8 +10,7 @@ import ConflictCard from "@/components/ConflictCard";
 import StageAuditCard from "@/components/StageAuditCard";
 import { useUser } from "@/components/UserProvider";
 import { useScrollToLatest } from "@/lib/useScrollToLatest";
-import type { P3State, P3PendingConflict } from "@/lib/canonEngine/storyStore";
-import type { P3Stage4Audit } from "@/lib/canonEngine/storyStore";
+import type { P3State, P3PendingConflict, P3Stage4Audit } from "@/lib/canonEngine/storyStore";
 import { WCL_LABELS, WCL_LEVELS, type WclLevel } from "@/lib/worldEngine/wcl";
 import { pillarElementId } from "@/lib/worldEngine/pillarElementId";
 import { isValidTransition } from "@/lib/canonEngine/transitions";
@@ -102,6 +101,7 @@ export default function WorldInterview() {
         setWclState((data.story?.p3 as P3State | undefined) ?? null);
         setCharacterBibleGate((data.characterBibleGate as CharacterBibleGateResult | undefined) ?? null);
         setPendingConflictState((data.story?.p3PendingConflict as P3PendingConflict | undefined) ?? null);
+        setStage4Audit((data.story?.p3Stage4Audit as P3Stage4Audit | undefined) ?? null);
         const rawElements = (data.worldElements ?? []) as { element_id: string; status: CanonStatus }[];
         setElementStatuses(
           Object.fromEntries(rawElements.map((e) => [e.element_id, toPillarStatus(e.status)]))
