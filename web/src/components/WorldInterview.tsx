@@ -356,6 +356,13 @@ export default function WorldInterview() {
   }
 
   async function changeElementStatus(elementId: string, nextStatus: PillarStatus, acknowledged = false) {
+    // elementStatusUpdating here is the value captured by this call's own
+    // closure at invocation time - the acknowledged retry below re-enters
+    // this same guard, and it only passes because the outer call's own
+    // setElementStatusUpdating(true) below doesn't mutate this already-
+    // captured binding. Don't replace this with a ref or a fresh state
+    // read without re-verifying the retry path still isn't blocked by
+    // its own in-flight parent call (final whole-branch review finding M6).
     if (!canvasId || elementStatusUpdating) return;
     setElementStatusUpdating(true);
     setError(null);
@@ -376,7 +383,7 @@ export default function WorldInterview() {
         const dependents = (data.dependencyReview as { entryId: string; name: string }[]) ?? [];
         const list = dependents.map((d) => `- ${d.name}`).join("\n");
         const confirmed = window.confirm(
-          `The following Confirmed entries depend on this pillar and may need review:\n${list}\n\nContinue anyway?`
+          `The following Confirmed pillars depend on this one and may need review:\n${list}\n\nContinue anyway?`
         );
         if (confirmed) {
           await changeElementStatus(elementId, nextStatus, true);

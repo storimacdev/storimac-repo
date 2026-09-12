@@ -168,9 +168,22 @@ export async function POST(req: NextRequest) {
       const entryLines = existingEntries.map((e) => {
         const v = (e.value ?? {}) as { name?: string; category?: string; importance?: string; depth?: number };
         const status = e.status === "Parked" ? "Deferred" : e.status;
-        return `- entry_id: ${e.element_id} | name: ${v.name ?? "?"} | category: ${v.category ?? "?"} | status: ${status} | importance: ${v.importance ?? "?"} | depth: ${v.depth ?? "?"}`;
+        const dependsOnList = (e.depends_on ?? []).length > 0 ? e.depends_on.join(", ") : "(none)";
+        return `- entry_id: ${e.element_id} | name: ${v.name ?? "?"} | category: ${v.category ?? "?"} | status: ${status} | importance: ${v.importance ?? "?"} | depth: ${v.depth ?? "?"} | depends_on: ${dependsOnList}`;
       });
       system += `\n\n[World Entries So Far - computed by the app, trust this over re-deriving it. Internal grounding only, never narrate this raw data to the author. When continuing, revising, or validating any entry listed here, set proposed_entry.entry_id to its id exactly as shown - never invent a new id and never leave entry_id null for an entry that already appears here, or you will create an unwanted duplicate.]\n${entryLines.join("\n")}`;
+    }
+
+    // Adopted-pillar grounding for pillar_dependencies (issue #48 final
+    // whole-branch review finding I2) - without this, the model has no
+    // way to know the exact pillar names to reference, despite the tool
+    // schema asking it to "exactly match one of the adopted pillar
+    // names." Falls back to the model's own proposed (not yet adopted)
+    // list if nothing's been adopted yet, so pillar_dependencies can
+    // still be meaningfully validated even before Stage 2 confirmation.
+    const knownPillars = story.p3?.pillars ?? story.p3?.proposedPillars ?? [];
+    if (knownPillars.length > 0) {
+      system += `\n\n[Adopted Pillars So Far - computed by the app, trust this over re-deriving it. Internal grounding only, never narrate this raw data to the author. When reporting pillar_dependencies, use these exact pillar names - never a name that doesn't appear here.]\n${knownPillars.map((p) => `- ${p}`).join("\n")}`;
     }
 
     // Conflict Resolution Protocol grounding (issue #47) - only while a
@@ -333,11 +346,23 @@ export async function POST(req: NextRequest) {
     // same convention as every other Stage-3-adjacent write in this route.
     if (delta.pillar_dependencies.length > 0) {
       try {
+        const knownPillarSet = new Set(knownPillars);
         for (const { pillar, depends_on } of delta.pillar_dependencies) {
+          if (!knownPillarSet.has(pillar)) {
+            console.warn(`[world-chat] pillar_dependencies referenced unknown pillar "${pillar}" for turn ${turnId}, skipping`);
+            continue;
+          }
+          const validDependsOn = depends_on.filter((dep) => {
+            const known = knownPillarSet.has(dep);
+            if (!known) {
+              console.warn(`[world-chat] pillar_dependencies for "${pillar}" referenced unknown pillar "${dep}" for turn ${turnId}, skipping that dependency`);
+            }
+            return known;
+          });
           await upsertElement(
             storyId,
             pillarElementId(pillar),
-            { depends_on: depends_on.map((p) => pillarElementId(p)) },
+            { depends_on: validDependsOn.map((p) => pillarElementId(p)) },
             turnId,
             false,
             WORLD_ELEMENTS_COLLECTION

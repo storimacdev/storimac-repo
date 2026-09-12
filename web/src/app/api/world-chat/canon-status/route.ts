@@ -104,7 +104,7 @@ export async function PATCH(req: NextRequest) {
       // name isn't in either list (e.g. renamed since, per
       // pillarElementId.ts's documented "renaming orphans the old
       // element" limitation) falls back to its raw element id.
-      const knownPillarNames = [...(story.p3?.pillars ?? []), ...(story.p3?.proposedPillars ?? [])];
+      const knownPillarNames = [...(story.p3?.proposedPillars ?? []), ...(story.p3?.pillars ?? [])];
       const pillarNameById = new Map(knownPillarNames.map((name) => [pillarElementId(name), name]));
       const dependencyReview = dependents
         .filter((e) => e.status === "Confirmed")
