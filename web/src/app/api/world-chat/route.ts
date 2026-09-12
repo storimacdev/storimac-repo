@@ -19,6 +19,9 @@ import {
   appendOutstandingQuestions,
   setP3PendingConflict,
   type P3PendingConflict,
+  setP3Stage4Audit,
+  type P3Stage4Audit,
+  type Stage4AuditFinding,
 } from "@/lib/canonEngine/storyStore";
 import { createWorldEntry, updateWorldEntry } from "@/lib/worldEngine/worldEntryStore";
 import { buildConflictContextMessage, resolveP3Conflict } from "@/lib/worldEngine/conflictResolution";
@@ -32,6 +35,7 @@ import { ingestFoundation as characterIngestFoundation } from "@/lib/characterEn
 import { checkCharacterBibleComplete } from "@/lib/worldEngine/characterBibleGate";
 import { WorldTurnSchema, EMIT_WORLD_TURN_TOOL } from "@/lib/worldEngine/worldTurnSchema";
 import { detectProseGeneration, buildScopeRedirectNote } from "@/lib/worldEngine/scopeGuardrail";
+import { checkDependencyCompleteness, checkRedundancy, runConsistencyCheck, formatStage4AuditSummary } from "@/lib/worldEngine/stage4Audit";
 
 export const runtime = "nodejs";
 
@@ -186,6 +190,15 @@ export async function POST(req: NextRequest) {
       system += `\n\n[Adopted Pillars So Far - computed by the app, trust this over re-deriving it. Internal grounding only, never narrate this raw data to the author. When reporting pillar_dependencies, use these exact pillar names - never a name that doesn't appear here.]\n${knownPillars.map((p) => `- ${p}`).join("\n")}`;
     }
 
+    // Stage 4 audit grounding (issue #49) - only while an audit exists
+    // and hasn't been approved yet, so the model knows to present the
+    // summary and get explicit approval rather than silently reporting
+    // Stage 5 (which the app would clamp back to 4 anyway - see Step 4).
+    const stage4AuditBefore = story.p3Stage4Audit ?? null;
+    if (stage4AuditBefore && !stage4AuditBefore.authorApproved) {
+      system += `\n\n[STAGE 4 AUDIT PENDING - internal grounding only, never narrate this raw data to the author. ${formatStage4AuditSummary(stage4AuditBefore)} Present this summary to the author in your own words if you haven't already this session, and set stage4_audit_approved to true only once they give a clear, explicit approval to proceed to Compile - do not report current_stage as 5 until then, it will be ignored.]`;
+    }
+
     // Conflict Resolution Protocol grounding (issue #47) - only while a
     // conflict is genuinely open; cleared once resolved (Step 5 below).
     const pendingConflictBefore = story.p3PendingConflict ?? null;
@@ -283,6 +296,66 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Stage 4 System Integration Audit (issue #49) - computed once per
+    // story, the first time the model reports reaching Stage 4+. Only
+    // the 4->5 (Compile) transition is enforced; Stages 1-3 remain
+    // exactly as unenforced as before this issue. A failed consistency
+    // check surfaces as a visible flag rather than a silent skip or a
+    // hard error - a systems audit that quietly drops one of its three
+    // checks is worse than one that says so. Computed here, ahead of
+    // this turn's appendMessage below, so the persisted transcript
+    // record and the response the author actually sees agree on
+    // current_stage - not placed after the later Stage 3 block because
+    // this audit has no dependency on Stage 3's outcome (it reads
+    // existingEntries, the pre-turn snapshot already fetched above for
+    // the World Entries grounding block, not anything Stage 3 mutates
+    // this turn) and the assistant message must already reflect the
+    // clamped stage by the time it's persisted a few lines down.
+    let stage4AuditForResponse: P3Stage4Audit | null = stage4AuditBefore;
+    let effectiveStage = delta.current_stage;
+    try {
+      if (delta.current_stage >= 4 && !stage4AuditForResponse) {
+        const confirmedEntries = existingEntries.filter((e) => e.status === "Confirmed");
+        let consistencyFindings: Stage4AuditFinding[];
+        try {
+          consistencyFindings = await runConsistencyCheck(anthropic, confirmedEntries);
+        } catch (consistencyErr) {
+          console.warn(`[world-chat] Stage 4 consistency check failed for turn ${turnId}:`, consistencyErr);
+          consistencyFindings = [
+            {
+              id: "consistency-error",
+              category: "consistency",
+              status: "flag",
+              detail: "The consistency pass couldn't complete - please try again before compiling.",
+            },
+          ];
+        }
+        const newAudit: P3Stage4Audit = {
+          findings: [
+            ...checkDependencyCompleteness(confirmedEntries),
+            ...checkRedundancy(confirmedEntries),
+            ...consistencyFindings,
+          ],
+          generatedAt: new Date().toISOString(),
+          authorApproved: false,
+        };
+        await setP3Stage4Audit(storyId, newAudit);
+        stage4AuditForResponse = newAudit;
+      }
+
+      if (delta.stage4_audit_approved && stage4AuditForResponse && !stage4AuditForResponse.authorApproved) {
+        const approvedAudit: P3Stage4Audit = { ...stage4AuditForResponse, authorApproved: true };
+        await setP3Stage4Audit(storyId, approvedAudit);
+        stage4AuditForResponse = approvedAudit;
+      }
+
+      if (effectiveStage === 5 && !(stage4AuditForResponse?.authorApproved ?? false)) {
+        effectiveStage = 4;
+      }
+    } catch (stage4Err) {
+      console.warn(`[world-chat] Stage 4 audit failed for turn ${turnId}:`, stage4Err);
+    }
+
     await appendMessage(
       storyId,
       {
@@ -291,7 +364,7 @@ export async function POST(req: NextRequest) {
         ts: new Date().toISOString(),
         turnId,
         context: finalContext,
-        current_stage: delta.current_stage,
+        current_stage: effectiveStage,
       },
       WORLD_MESSAGES_COLLECTION
     );
@@ -499,11 +572,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       reply: finalReply,
       context: finalContext,
-      current_stage: delta.current_stage,
+      current_stage: effectiveStage,
       p3: p3ForResponse,
       entryWarning,
       pendingConflict: pendingConflictForResponse,
       cascadeReview,
+      stage4Audit: stage4AuditForResponse,
     });
   } catch (err) {
     if (err instanceof Anthropic.APIError) {
