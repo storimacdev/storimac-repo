@@ -7,9 +7,11 @@ import Markdown from "@/components/Markdown";
 import UserMenu from "@/components/UserMenu";
 import WorldSidePanel from "@/components/WorldSidePanel";
 import ConflictCard from "@/components/ConflictCard";
+import StageAuditCard from "@/components/StageAuditCard";
 import { useUser } from "@/components/UserProvider";
 import { useScrollToLatest } from "@/lib/useScrollToLatest";
 import type { P3State, P3PendingConflict } from "@/lib/canonEngine/storyStore";
+import type { P3Stage4Audit } from "@/lib/canonEngine/storyStore";
 import { WCL_LABELS, WCL_LEVELS, type WclLevel } from "@/lib/worldEngine/wcl";
 import { pillarElementId } from "@/lib/worldEngine/pillarElementId";
 import { isValidTransition } from "@/lib/canonEngine/transitions";
@@ -63,6 +65,7 @@ export default function WorldInterview() {
   const [characterBibleGate, setCharacterBibleGate] = useState<CharacterBibleGateResult | null>(null);
   const [pendingConflict, setPendingConflictState] = useState<P3PendingConflict | null>(null);
   const [cascadeReview, setCascadeReview] = useState<{ entryId: string; name: string }[] | null>(null);
+  const [stage4Audit, setStage4Audit] = useState<P3Stage4Audit | null>(null);
   const [wclUpdating, setWclUpdating] = useState(false);
   const [pillarDraft, setPillarDraft] = useState<string[]>([]);
   const [pillarDraftTouched, setPillarDraftTouched] = useState(false);
@@ -172,6 +175,7 @@ export default function WorldInterview() {
     p3?: P3State;
     pendingConflict?: P3PendingConflict | null;
     cascadeReview?: { entryId: string; name: string }[] | null;
+    stage4Audit?: P3Stage4Audit | null;
   }) {
     setMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
     setContext(data.context ?? null);
@@ -188,6 +192,7 @@ export default function WorldInterview() {
     }
     setPendingConflictState(data.pendingConflict ?? null);
     setCascadeReview(data.cascadeReview ?? null);
+    setStage4Audit(data.stage4Audit ?? null);
   }
 
   async function sendMessage(preset?: string) {
@@ -219,6 +224,10 @@ export default function WorldInterview() {
       setLoading(false);
       requestAnimationFrame(() => scrollToLatest("smooth"));
     }
+  }
+
+  function approveStage4Audit() {
+    sendMessage("I approve this System Integration Audit summary - please proceed to Compile.");
   }
 
   function chooseConflictResolution(choice: "revert" | "revise" | "defer") {
@@ -539,6 +548,9 @@ export default function WorldInterview() {
                       ))}
                     </ul>
                   </div>
+                )}
+                {stage4Audit && !stage4Audit.authorApproved && (
+                  <StageAuditCard audit={stage4Audit} onApprove={approveStage4Audit} disabled={loading} />
                 )}
                 {error && (
                   <div className="mt-2 rounded-lg border border-red-900 bg-red-950/60 px-4 py-3 text-sm text-red-200">
