@@ -355,7 +355,7 @@ export default function WorldInterview() {
     applyPillars(pillarDraft);
   }
 
-  async function changeElementStatus(elementId: string, nextStatus: PillarStatus) {
+  async function changeElementStatus(elementId: string, nextStatus: PillarStatus, acknowledged = false) {
     if (!canvasId || elementStatusUpdating) return;
     setElementStatusUpdating(true);
     setError(null);
@@ -363,9 +363,27 @@ export default function WorldInterview() {
       const res = await fetch("/api/world-chat/canon-status", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ storyId: canvasId, elementId, status: nextStatus }),
+        body: JSON.stringify({
+          storyId: canvasId,
+          elementId,
+          status: nextStatus,
+          ...(acknowledged ? { acknowledged: true } : {}),
+        }),
       });
       const data = await res.json();
+
+      if (res.status === 409 && data.needsAcknowledgment) {
+        const dependents = (data.dependencyReview as { entryId: string; name: string }[]) ?? [];
+        const list = dependents.map((d) => `- ${d.name}`).join("\n");
+        const confirmed = window.confirm(
+          `The following Confirmed entries depend on this pillar and may need review:\n${list}\n\nContinue anyway?`
+        );
+        if (confirmed) {
+          await changeElementStatus(elementId, nextStatus, true);
+        }
+        return;
+      }
+
       if (!res.ok) {
         setError(data.error ?? "Couldn't update that pillar's status.");
         return;
