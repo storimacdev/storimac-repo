@@ -121,8 +121,13 @@ export function jumpToStage(targetStage: number): number {
 /**
  * Elements that would be affected if `elementId` changes - what issue #10
  * (Conflict Resolution) shows the author before letting a revision to a
- * Confirmed element through.
+ * Confirmed element through. Collection defaults to "elements" for
+ * backward compatibility (issue #48).
  */
-export async function listDownstreamImpact(storyId: string, elementId: string): Promise<CanonElement[]> {
-  return listDependents(storyId, elementId);
+export async function listDownstreamImpact(
+  storyId: string,
+  elementId: string,
+  collection: string = "elements"
+): Promise<CanonElement[]> {
+  return listDependents(storyId, elementId, collection);
 }

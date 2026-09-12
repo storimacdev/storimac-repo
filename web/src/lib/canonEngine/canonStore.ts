@@ -54,13 +54,18 @@ export async function listElements(storyId: string, collection: string = "elemen
 /**
  * Elements whose depends_on includes elementId — the reverse-dependency
  * lookup Project 3's Dependency Review and Project 4's Relational Impact
- * Check need. array-contains query per ARCHITECTURE.md §6.
+ * Check need. array-contains query per ARCHITECTURE.md §6. Collection
+ * defaults to "elements" (Project 1's own) for backward compatibility -
+ * Project 3 passes WORLD_ENTRIES_COLLECTION or WORLD_ELEMENTS_COLLECTION
+ * explicitly (issue #48; this parameter was long deferred to this issue
+ * across #42/#46/#47's reviews).
  */
 export async function listDependents(
   storyId: string,
-  elementId: string
+  elementId: string,
+  collection: string = "elements"
 ): Promise<CanonElement[]> {
-  const snap = await elementsCollection(storyId)
+  const snap = await elementsCollection(storyId, collection)
     .where("depends_on", "array-contains", elementId)
     .get();
   return snap.docs.map((d) => d.data() as CanonElement);
