@@ -363,7 +363,7 @@ export function renderWorldBibleMarkdown(doc: WorldBibleDocument): string {
     "",
     `## 4. Master World Pillars`,
     doc["4_master_world_pillars"].length
-      ? doc["4_master_world_pillars"].map((p) => `### ${p.pillar}\n${mdValue(p.summary)}`).join("\n\n")
+      ? doc["4_master_world_pillars"].map((p) => `### ${mdValue(p.pillar)}\n${mdValue(p.summary)}`).join("\n\n")
       : "_No pillars adopted yet._",
     "",
     `## 5. Geography & Settings Registry`,
@@ -396,7 +396,7 @@ export function renderWorldBibleMarkdown(doc: WorldBibleDocument): string {
           .map(
             (g) =>
               `**${g.defer_to}:**\n` +
-              g.items.map((q) => `- ${q.item}${q.notes ? ` — ${q.notes}` : ""}`).join("\n")
+              g.items.map((q) => `- ${mdValue(q.item)}${q.notes ? ` — ${mdValue(q.notes)}` : ""}`).join("\n")
           )
           .join("\n\n")
       : "_None — everything resolved._",
@@ -407,13 +407,13 @@ export function renderWorldBibleMarkdown(doc: WorldBibleDocument): string {
     }`,
     `**Project 2 (Character Bible):**`,
     refLog.project_2.length
-      ? refLog.project_2.map((c) => `- ${c.character_name} — ${c.story_role} (${c.canon_status})`).join("\n")
+      ? refLog.project_2.map((c) => `- ${mdValue(c.character_name)} — ${c.story_role} (${c.canon_status})`).join("\n")
       : "_Not yet available._",
     "",
     `## 15. Version History`,
     `| Version | Date | Summary of Changes |`,
     `| --- | --- | --- |`,
-    ...doc["15_version_history"].map((v) => `| ${v.version} | ${v.date} | ${v.summary_of_changes} |`),
+    ...doc["15_version_history"].map((v) => `| ${v.version} | ${v.date} | ${mdValue(v.summary_of_changes)} |`),
     "",
   ];
 
