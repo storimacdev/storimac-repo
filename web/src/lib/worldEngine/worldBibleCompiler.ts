@@ -3,12 +3,22 @@ import type { WorldEntryValue } from "./worldEntry";
 import { z } from "zod";
 import Anthropic from "@anthropic-ai/sdk";
 import { extractTurn } from "@/lib/canonEngine/extractTurn";
-import type {
-  WorldBibleDocument,
-  StoredOutstandingQuestion,
-  CharacterBibleEntry,
-  Story,
+import {
+  getStory,
+  listOutstandingQuestions,
+  listCharacterBibleEntries,
+  getLatestWorldBibleVersion,
+  listWorldBibleVersions,
+  saveWorldBibleVersion,
+  normalizeP3,
+  type StoredWorldBibleVersion,
+  type WorldBibleDocument,
+  type StoredOutstandingQuestion,
+  type CharacterBibleEntry,
+  type Story,
 } from "@/lib/canonEngine/storyStore";
+import { listElements, WORLD_ENTRIES_COLLECTION } from "@/lib/canonEngine/canonStore";
+import { listDocumentVersions, getDocumentVersion } from "@/lib/canonEngine/foundationDoc";
 import type { FoundationDocument } from "@/lib/canonEngine/foundationDoc";
 
 /**
@@ -401,4 +411,92 @@ export function renderWorldBibleMarkdown(doc: WorldBibleDocument): string {
   ];
 
   return lines.join("\n");
+}
+
+type WorldEntriesSnapshot = Record<string, { status: string; value: unknown }>;
+
+function diffSummary(prev: WorldEntriesSnapshot | null, current: WorldEntriesSnapshot): string {
+  if (!prev) return "Initial generation.";
+  const changes: string[] = [];
+  for (const [id, cur] of Object.entries(current)) {
+    const old = prev[id];
+    if (!old) {
+      changes.push(`added ${id}`);
+    } else if (JSON.stringify(old.value) !== JSON.stringify(cur.value)) {
+      changes.push(`changed ${id}`);
+    } else if (old.status !== cur.status) {
+      changes.push(`${id}: ${old.status} → ${cur.status}`);
+    }
+  }
+  for (const id of Object.keys(prev)) {
+    if (!current[id]) changes.push(`removed ${id}`);
+  }
+  return changes.length ? changes.join("; ") : "No canon changes since previous version.";
+}
+
+/**
+ * Generates the next World Bible version for a Story: fetches Confirmed
+ * canon and cross-project data, runs the one prose-synthesis call, compiles
+ * and renders the document, and persists it as a new immutable version
+ * (prior versions are never overwritten - Decision 5). Mirrors
+ * generateFoundationDocument's exact orchestration shape (issue #18/#19).
+ */
+export async function generateWorldBibleDocument(storyId: string): Promise<StoredWorldBibleVersion> {
+  const story = await getStory(storyId);
+  if (!story) throw new Error(`Story "${storyId}" not found.`);
+
+  const [worldEntries, outstanding, p1Versions, p2Characters, prior] = await Promise.all([
+    listElements(storyId, WORLD_ENTRIES_COLLECTION),
+    listOutstandingQuestions(storyId),
+    listDocumentVersions(storyId),
+    listCharacterBibleEntries(storyId),
+    getLatestWorldBibleVersion(storyId),
+  ]);
+
+  const p1Doc = p1Versions.length > 0 ? await getDocumentVersion(storyId, p1Versions[p1Versions.length - 1].version) : null;
+
+  const confirmedEntries = worldEntries.filter((e) => e.status === "Confirmed");
+  const pillars = normalizeP3(story.p3).pillars ?? [];
+
+  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  const synthesis = await runWorldBibleSynthesis(anthropic, confirmedEntries, pillars);
+
+  const version = (prior?.version ?? 0) + 1;
+  const snapshot: WorldEntriesSnapshot = {};
+  for (const e of worldEntries) snapshot[e.element_id] = { status: e.status, value: e.value };
+
+  const date = new Date().toISOString().slice(0, 10);
+  const summary = diffSummary(prior?.elementsSnapshot ?? null, snapshot);
+
+  const priorHistory = prior
+    ? (await listWorldBibleVersions(storyId)).map((v) => ({
+        version: `v${v.version}`,
+        date: v.date,
+        summary_of_changes: v.summary_of_changes,
+      }))
+    : [];
+  const versionHistory = [...priorHistory, { version: `v${version}`, date, summary_of_changes: summary }];
+
+  const json = compileWorldBibleDocument({
+    story,
+    worldEntries,
+    synthesis,
+    outstanding,
+    p1Doc: p1Doc?.json ?? null,
+    p2Characters,
+    version,
+    versionHistory,
+  });
+  const markdown = renderWorldBibleMarkdown(json);
+
+  const stored: StoredWorldBibleVersion = {
+    version,
+    date,
+    summary_of_changes: summary,
+    json,
+    markdown,
+    elementsSnapshot: snapshot,
+  };
+  await saveWorldBibleVersion(storyId, stored);
+  return stored;
 }
