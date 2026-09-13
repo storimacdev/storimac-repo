@@ -72,10 +72,14 @@ export default function WorldInterview() {
     summary_of_changes: string;
     markdown: string;
     json: unknown;
+    confirmed: boolean;
+    confirmedAt: string | null;
   } | null>(null);
   const [worldBibleVersions, setWorldBibleVersions] = useState<{ version: number; date: string; summary_of_changes: string }[]>([]);
   const [compiling, setCompiling] = useState(false);
   const [compileError, setCompileError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [confirmErrors, setConfirmErrors] = useState<string[] | null>(null);
   const [wclUpdating, setWclUpdating] = useState(false);
   const [pillarDraft, setPillarDraft] = useState<string[]>([]);
   const [pillarDraftTouched, setPillarDraftTouched] = useState(false);
@@ -294,6 +298,29 @@ export default function WorldInterview() {
       setCompileError("Couldn't reach the server.");
     } finally {
       setCompiling(false);
+    }
+  }
+
+  async function confirmWorldBible() {
+    if (!canvasId || !worldBibleDoc || confirming) return;
+    setConfirming(true);
+    setConfirmErrors(null);
+    try {
+      const res = await fetch(`/api/world-chat/document/${worldBibleDoc.version}/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storyId: canvasId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setConfirmErrors(Array.isArray(data.errors) ? data.errors : [data.error ?? "Couldn't confirm this version."]);
+        return;
+      }
+      setWorldBibleDoc(data);
+    } catch {
+      setConfirmErrors(["Couldn't reach the server."]);
+    } finally {
+      setConfirming(false);
     }
   }
 
@@ -672,7 +699,21 @@ export default function WorldInterview() {
                           >
                             {compiling ? "Recompiling…" : "Recompile"}
                           </button>
+                          <button
+                            onClick={confirmWorldBible}
+                            disabled={confirming || worldBibleDoc.confirmed}
+                            className="rounded-lg border border-emerald-500/50 bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-900/40 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            {worldBibleDoc.confirmed ? "Confirmed" : confirming ? "Confirming…" : "Mark as Confirmed"}
+                          </button>
                         </div>
+                        {confirmErrors && confirmErrors.length > 0 && (
+                          <ul className="mt-2 space-y-1 text-xs text-red-400">
+                            {confirmErrors.map((e, i) => (
+                              <li key={i}>{e}</li>
+                            ))}
+                          </ul>
+                        )}
                       </>
                     )}
                     {worldBibleVersions.length > 1 && (

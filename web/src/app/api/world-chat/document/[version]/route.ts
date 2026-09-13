@@ -40,6 +40,8 @@ export async function GET(
       summary_of_changes: stored.summary_of_changes,
       markdown: stored.markdown,
       json: stored.json,
+      confirmed: stored.confirmed,
+      confirmedAt: stored.confirmedAt,
     });
   } catch (err) {
     return errorResponse(err);
