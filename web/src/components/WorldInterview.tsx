@@ -10,14 +10,14 @@ import ConflictCard from "@/components/ConflictCard";
 import StageAuditCard from "@/components/StageAuditCard";
 import { useUser } from "@/components/UserProvider";
 import { useScrollToLatest } from "@/lib/useScrollToLatest";
-import type { P3State, P3PendingConflict, P3Stage4Audit } from "@/lib/canonEngine/storyStore";
+import type { P3State, P3PendingConflict, P3Stage4Audit, WorldBibleDocument } from "@/lib/canonEngine/storyStore";
 import { WCL_LABELS, WCL_LEVELS, type WclLevel } from "@/lib/worldEngine/wcl";
 import { pillarElementId } from "@/lib/worldEngine/pillarElementId";
 import { isValidTransition } from "@/lib/canonEngine/transitions";
 import type { CanonStatus } from "@/lib/canonEngine/types";
 import type { CharacterBibleGateResult } from "@/lib/worldEngine/characterBibleGate";
 import { CANON_STATUS_BADGE_STYLES } from "@/lib/canonEngine/statusBadge";
-import { downloadText } from "@/lib/download";
+import { downloadText, downloadBlob } from "@/lib/download";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -80,6 +80,8 @@ export default function WorldInterview() {
   const [compileError, setCompileError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [confirmErrors, setConfirmErrors] = useState<string[] | null>(null);
+  const [docxGenerating, setDocxGenerating] = useState(false);
+  const [pdfGenerating, setPdfGenerating] = useState(false);
   const [wclUpdating, setWclUpdating] = useState(false);
   const [pillarDraft, setPillarDraft] = useState<string[]>([]);
   const [pillarDraftTouched, setPillarDraftTouched] = useState(false);
@@ -322,6 +324,34 @@ export default function WorldInterview() {
       setConfirmErrors(["Couldn't reach the server."]);
     } finally {
       setConfirming(false);
+    }
+  }
+
+  async function downloadWorldBibleDocx() {
+    if (!worldBibleDoc || docxGenerating) return;
+    setDocxGenerating(true);
+    try {
+      const { generateWorldBibleDocxBlob } = await import("@/lib/docx/worldBibleDocx");
+      const blob = await generateWorldBibleDocxBlob(worldBibleDoc.json as WorldBibleDocument);
+      downloadBlob(`world-bible-v${worldBibleDoc.version}.docx`, blob);
+    } catch {
+      setCompileError("Couldn't generate the .docx file.");
+    } finally {
+      setDocxGenerating(false);
+    }
+  }
+
+  async function downloadWorldBiblePdf() {
+    if (!worldBibleDoc || pdfGenerating) return;
+    setPdfGenerating(true);
+    try {
+      const { generateWorldBiblePdfBlob } = await import("@/lib/pdf/WorldBiblePdfDocument");
+      const blob = await generateWorldBiblePdfBlob(worldBibleDoc.json as WorldBibleDocument);
+      downloadBlob(`world-bible-v${worldBibleDoc.version}.pdf`, blob);
+    } catch {
+      setCompileError("Couldn't generate the PDF.");
+    } finally {
+      setPdfGenerating(false);
     }
   }
 
@@ -692,6 +722,20 @@ export default function WorldInterview() {
                             className="rounded-lg border border-emerald-500/50 bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-900/40"
                           >
                             Download .json
+                          </button>
+                          <button
+                            onClick={downloadWorldBibleDocx}
+                            disabled={docxGenerating}
+                            className="rounded-lg border border-emerald-500/50 bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-900/40 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            {docxGenerating ? "Generating…" : "Download .docx"}
+                          </button>
+                          <button
+                            onClick={downloadWorldBiblePdf}
+                            disabled={pdfGenerating}
+                            className="rounded-lg border border-emerald-500/50 bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-900/40 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            {pdfGenerating ? "Generating…" : "Download .pdf"}
                           </button>
                           <button
                             onClick={generateWorldBible}
