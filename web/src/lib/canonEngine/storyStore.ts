@@ -669,6 +669,87 @@ export async function listCharacterBibleEntries(storyId: string): Promise<Charac
   return snap.docs.map((d) => d.data() as CharacterBibleEntry);
 }
 
+/**
+ * Project 3's Stage 5 Compile output (issue #50) - the 15-section World
+ * Bible schema (sp03-wdc-systemprompt.md §8). Sections 2/3/4/5-11/12 are
+ * LLM-synthesized prose grounded in Confirmed World Entries (see
+ * worldEngine/worldBibleCompiler.ts's runWorldBibleSynthesis); sections
+ * 1/13/14/15 are pure template-fill, same posture as FoundationDocument's
+ * (foundationDoc.ts, issue #18) "no fabrication" guarantee for those parts.
+ * Numbered keys mirror FoundationDocument's own convention.
+ */
+export interface WorldBibleDocument {
+  schema_version: string;
+  "1_document_metadata": {
+    story_id: string;
+    world_bible_version: string; // "v{n}", matches FoundationDocument's own version string format
+    working_title: string;
+    date: string;
+    status: "Compiled";
+    related_project_1_version: string;
+    related_project_2_status: string;
+  };
+  "2_world_overview_complexity_summary": string;
+  "3_world_assumptions_canon_rules": string;
+  "4_master_world_pillars": { pillar: string; summary: string }[];
+  "5_geography_settings_registry": string;
+  "6_societal_infrastructure_manual": string;
+  "7_cultural_lived_experience_profiles": string;
+  "8_narrative_lore_history": string;
+  "9_system_mechanics": string;
+  "10_significant_institutions_artifacts": string;
+  "11_linguistic_communication_profile": string;
+  "12_interconnection_map_systems_synthesis": string;
+  "13_outstanding_world_questions": { defer_to: string; items: { item: string; notes: string }[] }[];
+  "14_cross_project_reference_log": {
+    project_1: { working_title: string; version: string } | null;
+    project_2: { character_name: string; story_role: string; canon_status: string }[];
+  };
+  "15_version_history": { version: string; date: string; summary_of_changes: string }[];
+}
+
+export interface StoredWorldBibleVersion {
+  version: number;
+  date: string;
+  summary_of_changes: string;
+  json: WorldBibleDocument;
+  markdown: string;
+  /** Confirmed World Entries snapshot at generation time (element_id -> status/value), used to diff the next version - same shape/purpose as FoundationDocument's own elementsSnapshot. */
+  elementsSnapshot: Record<string, { status: string; value: unknown }>;
+}
+
+function worldBibleVersionsCollection(storyId: string) {
+  return storiesCollection().doc(storyId).collection("worldBibleVersions");
+}
+
+export async function listWorldBibleVersions(
+  storyId: string
+): Promise<Pick<StoredWorldBibleVersion, "version" | "date" | "summary_of_changes">[]> {
+  const snap = await worldBibleVersionsCollection(storyId).orderBy("version", "asc").get();
+  return snap.docs.map((d) => {
+    const v = d.data() as StoredWorldBibleVersion;
+    return { version: v.version, date: v.date, summary_of_changes: v.summary_of_changes };
+  });
+}
+
+export async function getWorldBibleVersion(
+  storyId: string,
+  version: number
+): Promise<StoredWorldBibleVersion | null> {
+  const snap = await worldBibleVersionsCollection(storyId).doc(String(version)).get();
+  return snap.exists ? (snap.data() as StoredWorldBibleVersion) : null;
+}
+
+export async function getLatestWorldBibleVersion(storyId: string): Promise<StoredWorldBibleVersion | null> {
+  const snap = await worldBibleVersionsCollection(storyId).orderBy("version", "desc").limit(1).get();
+  return snap.empty ? null : (snap.docs[0].data() as StoredWorldBibleVersion);
+}
+
+/** Persists a new World Bible version. Never overwrites a prior version - `stored.version` must already be `(latest?.version ?? 0) + 1`, computed by the caller (worldEngine/worldBibleCompiler.ts's generateWorldBibleDocument), same division of responsibility as FoundationDocument's own generateFoundationDocument/versionsCollection split. */
+export async function saveWorldBibleVersion(storyId: string, stored: StoredWorldBibleVersion): Promise<void> {
+  await worldBibleVersionsCollection(storyId).doc(String(stored.version)).set(stored);
+}
+
 /** Appends an author-type re-assessment (issue #8 calls this) without clobbering prior history. */
 export async function appendAuthorTypeAssessment(
   storyId: string,
