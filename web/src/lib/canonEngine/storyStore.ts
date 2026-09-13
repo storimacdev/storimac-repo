@@ -716,6 +716,13 @@ export interface StoredWorldBibleVersion {
   markdown: string;
   /** Confirmed World Entries snapshot at generation time (element_id -> status/value), used to diff the next version - same shape/purpose as FoundationDocument's own elementsSnapshot. */
   elementsSnapshot: Record<string, { status: string; value: unknown }>;
+  /** Issue #51 - true only once the structure-lint has passed and the
+   * author has explicitly confirmed this specific version. Never set
+   * automatically, never reversible in this issue's scope - a later,
+   * better World Bible gets a new compiled version instead (versions are
+   * otherwise immutable once written, issue #50 Decision 5). */
+  confirmed: boolean;
+  confirmedAt: string | null;
 }
 
 function worldBibleVersionsCollection(storyId: string) {
@@ -748,6 +755,31 @@ export async function getLatestWorldBibleVersion(storyId: string): Promise<Store
 /** Persists a new World Bible version. Never overwrites a prior version - `stored.version` must already be `(latest?.version ?? 0) + 1`, computed by the caller (worldEngine/worldBibleCompiler.ts's generateWorldBibleDocument), same division of responsibility as FoundationDocument's own generateFoundationDocument/versionsCollection split. */
 export async function saveWorldBibleVersion(storyId: string, stored: StoredWorldBibleVersion): Promise<void> {
   await worldBibleVersionsCollection(storyId).doc(String(stored.version)).set(stored);
+}
+
+/** Marks a specific World Bible version Confirmed (issue #51) - the
+ * caller (the new confirm route) is responsible for running the
+ * structure-lint first and only calling this on a pass. Idempotent: a
+ * second confirm on an already-confirmed version simply re-sets
+ * confirmedAt rather than being rejected - simplest option, no new state
+ * to guard against, per the design doc's Testing section. */
+export async function confirmWorldBibleVersion(
+  storyId: string,
+  version: number
+): Promise<StoredWorldBibleVersion> {
+  const ref = worldBibleVersionsCollection(storyId).doc(String(version));
+  const snap = await ref.get();
+  if (!snap.exists) {
+    throw new Error(`World Bible version ${version} not found for story "${storyId}".`);
+  }
+  const stored = snap.data() as StoredWorldBibleVersion;
+  const updated: StoredWorldBibleVersion = {
+    ...stored,
+    confirmed: true,
+    confirmedAt: new Date().toISOString(),
+  };
+  await ref.set(updated);
+  return updated;
 }
 
 /** Appends an author-type re-assessment (issue #8 calls this) without clobbering prior history. */

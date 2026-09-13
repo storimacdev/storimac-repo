@@ -64,6 +64,8 @@ export async function POST(req: NextRequest) {
         summary_of_changes: version.summary_of_changes,
         markdown: version.markdown,
         json: version.json,
+        confirmed: version.confirmed,
+        confirmedAt: version.confirmedAt,
       },
       { status: 201 }
     );

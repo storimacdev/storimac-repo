@@ -496,6 +496,8 @@ export async function generateWorldBibleDocument(storyId: string): Promise<Store
     json,
     markdown,
     elementsSnapshot: snapshot,
+    confirmed: false,
+    confirmedAt: null,
   };
   await saveWorldBibleVersion(storyId, stored);
   return stored;
