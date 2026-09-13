@@ -24,3 +24,23 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* @xyflow/react's Controls buttons render on a hardcoded near-white
+   background regardless of the app's own theme, but their icon fill
+   otherwise inherits --foreground - which flips to near-white under
+   prefers-color-scheme: dark, making the icons invisible against their
+   own button background. Pin the icon fill to a fixed dark color so the
+   pan/zoom controls stay visible in both color schemes (issue #53).
+   !important is required: @xyflow/react/dist/style.css's own
+   `.react-flow__controls-button svg { fill: currentColor; }` rule has the
+   exact same selector specificity as this one, and that stylesheet is
+   imported from DependencyGraphView.tsx - a component-level import that
+   Next bundles after this global stylesheet - so on equal specificity it
+   would otherwise win the cascade purely by loading later (confirmed via
+   a computed-style dump: without !important, svg fill stayed
+   rgb(237,237,237), the app's dark-mode --foreground, not the pinned
+   color). This is the same load-order cascade issue already documented
+   in DependencyGraphView.tsx for node coloring. */
+.react-flow__controls-button svg {
+  fill: #171717 !important;
+}

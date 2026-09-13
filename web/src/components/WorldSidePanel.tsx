@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { CANON_STATUS_BADGE_STYLES, type CanonBadgeStatus } from "@/lib/canonEngine/statusBadge";
 import { WORLD_STAGE_NAMES } from "@/lib/worldEngine/worldTurnSchema";
+import DependencyGraphView from "./DependencyGraphView";
+import type { DependencyGraphNode, DependencyGraphEdge } from "@/lib/worldEngine/dependencyGraphLayout";
 
 interface ApiWorldEntryValue {
   name: string;
@@ -33,6 +35,9 @@ export default function WorldSidePanel({ storyId, currentStage, activePillar, re
   const [entries, setEntries] = useState<ApiWorldEntry[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [graphView, setGraphView] = useState(false);
+  const [highlightedEntryId, setHighlightedEntryId] = useState<string | null>(null);
+  const entryRefs = useRef<Map<string, HTMLLIElement>>(new Map());
   // Tracks the most recently *started* request, so that whichever call
   // began last always wins regardless of network resolve order or which
   // caller (the mount/refreshToken effect, or the Refresh button) started
@@ -66,11 +71,32 @@ export default function WorldSidePanel({ storyId, currentStage, activePillar, re
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storyId, refreshToken]);
 
+  function handleNodeClick(entryId: string) {
+    entryRefs.current.get(entryId)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setHighlightedEntryId(entryId);
+    setTimeout(() => {
+      setHighlightedEntryId((cur) => (cur === entryId ? null : cur));
+    }, 1500);
+  }
+
   const entriesById = new Map(entries.map((e) => [e.entryId, e]));
   const outstandingQuestions = entries.flatMap((e) =>
     (e.value.outstandingQuestions ?? []).map((q) => ({ entryName: e.value.name, item: q.item, notes: q.notes }))
   );
   const entriesWithDeps = entries.filter((e) => (e.dependsOn ?? []).length > 0);
+
+  const graphNodeIds = new Set<string>();
+  for (const e of entriesWithDeps) {
+    graphNodeIds.add(e.entryId);
+    for (const depId of e.dependsOn ?? []) graphNodeIds.add(depId);
+  }
+  const graphNodes: DependencyGraphNode[] = Array.from(graphNodeIds)
+    .map((id) => entriesById.get(id))
+    .filter((e): e is ApiWorldEntry => e !== undefined)
+    .map((e) => ({ id: e.entryId, name: e.value.name, status: e.status }));
+  const graphEdges: DependencyGraphEdge[] = entriesWithDeps.flatMap((e) =>
+    (e.dependsOn ?? []).map((depId) => ({ from: e.entryId, to: depId }))
+  );
 
   return (
     <div
@@ -106,7 +132,16 @@ export default function WorldSidePanel({ storyId, currentStage, activePillar, re
         {entries.length > 0 ? (
           <ul className="space-y-1.5">
             {entries.map((e) => (
-              <li key={e.entryId} className="flex items-center justify-between gap-2 text-xs text-neutral-300">
+              <li
+                key={e.entryId}
+                ref={(el) => {
+                  if (el) entryRefs.current.set(e.entryId, el);
+                  else entryRefs.current.delete(e.entryId);
+                }}
+                className={`flex items-center justify-between gap-2 rounded px-1 text-xs text-neutral-300 transition-colors duration-500 ${
+                  highlightedEntryId === e.entryId ? "bg-red-500/20" : ""
+                }`}
+              >
                 <span className="truncate">
                   {e.value.name}{" "}
                   <span className="text-neutral-500">
@@ -143,11 +178,33 @@ export default function WorldSidePanel({ storyId, currentStage, activePillar, re
       </div>
 
       <div>
-        <p className="mb-2 text-[11px] uppercase tracking-widest text-neutral-500">
-          Dependency Graph (list view — full graph visualization is a future enhancement)
-        </p>
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-[11px] uppercase tracking-widest text-neutral-500">Dependency Graph</p>
+          {entriesWithDeps.length > 0 && (
+            <div className="flex gap-1">
+              <button
+                onClick={() => setGraphView(false)}
+                className={`rounded px-2 py-0.5 text-[10px] font-semibold ${
+                  !graphView ? "bg-red-500/20 text-red-200" : "text-neutral-500 hover:text-neutral-300"
+                }`}
+              >
+                List
+              </button>
+              <button
+                onClick={() => setGraphView(true)}
+                className={`rounded px-2 py-0.5 text-[10px] font-semibold ${
+                  graphView ? "bg-red-500/20 text-red-200" : "text-neutral-500 hover:text-neutral-300"
+                }`}
+              >
+                Graph
+              </button>
+            </div>
+          )}
+        </div>
         {entriesWithDeps.length === 0 ? (
           <p className="text-xs text-neutral-500">No dependencies recorded yet.</p>
+        ) : graphView ? (
+          <DependencyGraphView nodes={graphNodes} edges={graphEdges} onNodeClick={handleNodeClick} />
         ) : (
           <ul className="space-y-1.5">
             {entriesWithDeps.map((e) => (
