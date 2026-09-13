@@ -118,23 +118,29 @@ export function lintWorldBibleDocument(doc: unknown): { valid: boolean; errors: 
     return { valid: false, errors };
   }
 
-  const actualOrder = Object.keys(doc as Record<string, unknown>).filter((k) => k !== "schema_version");
-  const orderMatches =
-    actualOrder.length === WORLD_BIBLE_SECTION_ORDER.length &&
-    actualOrder.every((k, i) => k === WORLD_BIBLE_SECTION_ORDER[i]);
-  if (!orderMatches) {
-    return {
-      valid: false,
-      errors: [
-        `Sections are not in the required order. Expected: ${WORLD_BIBLE_SECTION_ORDER.join(", ")}. Found: ${actualOrder.join(", ")}.`,
-      ],
-    };
+  // Firestore maps have no guaranteed key order - the backend's own
+  // comparator treats it as insignificant, and a document loaded back
+  // via snap.data() cannot be trusted to preserve JS insertion order,
+  // even though an in-memory object literal (what every unit trace in
+  // this codebase constructs) always does. So this checks SECTION
+  // MEMBERSHIP, not key order. The AC's "in the correct order"
+  // requirement is enforced instead by lintWorldBibleMarkdown, against
+  // the rendered Markdown's real header sequence - a plain string,
+  // immune to this problem.
+  const actualKeys = Object.keys(doc as Record<string, unknown>).filter((k) => k !== "schema_version");
+  const expectedKeySet = new Set<string>(WORLD_BIBLE_SECTION_ORDER);
+  const unexpected = actualKeys.filter((k) => !expectedKeySet.has(k));
+  if (unexpected.length > 0) {
+    return { valid: false, errors: [`Unexpected section key(s) found: ${unexpected.join(", ")}.`] };
   }
 
   return { valid: true, errors: [] };
 }
 
-export function lintWorldBibleMarkdown(markdown: string): { valid: boolean; errors: string[] } {
+export function lintWorldBibleMarkdown(markdown: unknown): { valid: boolean; errors: string[] } {
+  if (typeof markdown !== "string") {
+    return { valid: false, errors: ["The rendered Markdown is missing or invalid."] };
+  }
   const headerLines = markdown
     .split("\n")
     .map((line) => line.match(/^## (\d+)\. (.+)$/))

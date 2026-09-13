@@ -277,6 +277,7 @@ export default function WorldInterview() {
     if (!canvasId || compiling) return;
     setCompiling(true);
     setCompileError(null);
+    setConfirmErrors(null);
     try {
       const res = await fetch(`/api/world-chat/document`, {
         method: "POST",

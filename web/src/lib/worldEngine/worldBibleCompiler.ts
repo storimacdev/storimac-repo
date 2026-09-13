@@ -326,7 +326,14 @@ export function compileWorldBibleDocument(params: {
 }
 
 function mdValue(v: string): string {
-  return v && v.trim() ? v : "_—_";
+  if (!v || !v.trim()) return "_—_";
+  // Escape any line that would otherwise render as its own Markdown ATX
+  // heading (e.g. synthesized prose that happens to contain text like
+  // "## 7. Foo" verbatim) - issue #51's structure-lint scans exactly
+  // this pattern to verify the document's real section headers, so an
+  // accidental heading-looking line inside prose content must never be
+  // indistinguishable from a genuine one.
+  return v.replace(/^(#{1,6})(\s)/gm, "\\$1$2");
 }
 
 /** Pure Markdown renderer for a compiled WorldBibleDocument - same mdValue/table/list conventions foundationDoc.ts's renderMarkdown already established (reimplemented locally, not imported - foundationDoc.ts's mdValue/mdList are module-private). */
