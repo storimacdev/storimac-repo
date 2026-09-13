@@ -1,0 +1,199 @@
+import type { CanonElement } from "@/lib/canonEngine/types";
+import type { WorldEntryValue } from "./worldEntry";
+import { z } from "zod";
+import Anthropic from "@anthropic-ai/sdk";
+import { extractTurn } from "@/lib/canonEngine/extractTurn";
+
+/**
+ * Project 3's Stage 5 Compile (issue #50) - the shared Canon Engine's
+ * DocumentCompiler slot (ARCHITECTURE.md §2) for the 15-section World
+ * Bible schema (sp03-wdc-systemprompt.md §8). Unlike foundationDoc.ts
+ * (issue #18) and characterBibleCompiler.ts (issue #34), several of these
+ * 15 sections are specified as connected narrative prose, not raw field
+ * dumps, and there is no fixed taxonomy anywhere in the data model
+ * mapping free-text World Entry categories onto the schema's seven fixed
+ * content-lens sections (Geography, Societal Infrastructure, Cultural,
+ * Narrative Lore, System Mechanics, Institutions & Artifacts, Linguistic).
+ * Design decision (see docs/superpowers/specs/2026-09-13-p3-stage5-compile-design.md,
+ * Decision 2): one consolidated grounded LLM call synthesizes all 11
+ * prose-bearing fields from the full Confirmed-entry corpus, rather than
+ * deterministically re-bucketing each entry's category - the model's
+ * synthesis IS the classification-by-theme step here, guarded by an
+ * explicit no-fabrication instruction (a prompting control, not a
+ * structural one, an accepted and disclosed limitation for this feature).
+ */
+
+export function buildSynthesisEntryDescriptions(confirmedEntries: CanonElement[]): string {
+  if (confirmedEntries.length === 0) return "(None yet.)";
+  return confirmedEntries
+    .map((e) => {
+      const v = e.value as WorldEntryValue | undefined;
+      return `- ${v?.name ?? e.element_id} (${v?.category ?? "?"}): ${v?.functionalDescription ?? ""} Governing rules: ${v?.governingRules ?? ""}`;
+    })
+    .join("\n");
+}
+
+/** Real recorded depends_on edges between Confirmed entries, rendered as
+ * plain sentences - grounds section 12's systems-thinking synthesis in
+ * actual dependency data rather than invented relationships. */
+export function buildDependencyEdgeDescriptions(confirmedEntries: CanonElement[]): string {
+  const byId = new Map(confirmedEntries.map((e) => [e.element_id, e]));
+  const edges: string[] = [];
+  for (const e of confirmedEntries) {
+    const v = e.value as WorldEntryValue | undefined;
+    for (const depId of e.depends_on ?? []) {
+      const dep = byId.get(depId);
+      const depValue = dep?.value as WorldEntryValue | undefined;
+      edges.push(`"${v?.name ?? e.element_id}" depends on "${depValue?.name ?? depId}".`);
+    }
+  }
+  return edges.length ? edges.join("\n") : "No recorded dependencies between Confirmed entries.";
+}
+
+const WorldBiblePillarSummarySchema = z.object({
+  pillar: z.string().min(1),
+  summary: z.string().min(1),
+});
+
+export const WorldBibleSynthesisSchema = z.object({
+  world_overview_complexity_summary: z.string().min(1),
+  world_assumptions_canon_rules: z.string().min(1),
+  master_world_pillars: z.array(WorldBiblePillarSummarySchema),
+  geography_settings_registry: z.string().min(1),
+  societal_infrastructure_manual: z.string().min(1),
+  cultural_lived_experience_profiles: z.string().min(1),
+  narrative_lore_history: z.string().min(1),
+  system_mechanics: z.string().min(1),
+  significant_institutions_artifacts: z.string().min(1),
+  linguistic_communication_profile: z.string().min(1),
+  interconnection_map_systems_synthesis: z.string().min(1),
+});
+
+export type WorldBibleSynthesisResult = z.infer<typeof WorldBibleSynthesisSchema>;
+
+const EMIT_WORLD_BIBLE_SYNTHESIS_TOOL: Anthropic.Tool = {
+  name: "emit_world_bible_synthesis",
+  description:
+    "Emit the prose-synthesized sections of a World Bible compile, strictly grounded in the Confirmed World Entries and recorded dependencies provided. Call this exactly once.",
+  input_schema: {
+    type: "object",
+    properties: {
+      world_overview_complexity_summary: {
+        type: "string",
+        description:
+          "Max 2 paragraphs summarizing the world's scope, setting type, atmosphere, complexity level, and core pillars - grounded only in the provided entries and pillar list.",
+      },
+      world_assumptions_canon_rules: {
+        type: "string",
+        description:
+          "Immutable baseline principles - core technological constraints, immutable laws of magic/physics, foundational social assumptions - synthesized and deduplicated from the provided entries' governing rules. Say plainly if no Confirmed entries establish any such rules yet.",
+      },
+      master_world_pillars: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            pillar: { type: "string", description: "Echoes one of the Adopted Pillars listed above, verbatim." },
+            summary: {
+              type: "string",
+              description:
+                "A summarized definition of this pillar's core framework, grounded only in the Confirmed entries under it. If this pillar has no Confirmed entries yet, write an honest one-sentence placeholder rather than inventing content.",
+            },
+          },
+          required: ["pillar", "summary"],
+        },
+        description: "Exactly one entry per pillar listed in the Adopted Pillars section above, in the same order.",
+      },
+      geography_settings_registry: {
+        type: "string",
+        description:
+          "Principal kingdoms/cities/bases and significant locations - atmosphere, story function, connected characters - grounded only in the provided entries. Say plainly if none apply.",
+      },
+      societal_infrastructure_manual: {
+        type: "string",
+        description:
+          "Systems map covering government/laws, political/social hierarchies, economic/trade engines, and military frameworks - grounded only in the provided entries. Say plainly if none apply.",
+      },
+      cultural_lived_experience_profiles: {
+        type: "string",
+        description:
+          "Traditions, customs, taboos, and daily-life mechanics that dictate character choices - grounded only in the provided entries. Say plainly if none apply.",
+      },
+      narrative_lore_history: {
+        type: "string",
+        description:
+          "Only historical events carrying active cultural memory, inherited trauma, or ongoing political conflict affecting the present plot - grounded only in the provided entries. Say plainly if none apply.",
+      },
+      system_mechanics: {
+        type: "string",
+        description:
+          "Comprehensive rules, capabilities, costs, hard constraints, and social impact of any technology and/or magic systems - grounded only in the provided entries. Say plainly if none apply.",
+      },
+      significant_institutions_artifacts: {
+        type: "string",
+        description:
+          "Active organizations (leadership, conflicts, goals) and critical objects/relics (history, ownership, plot function) - grounded only in the provided entries. Say plainly if none apply.",
+      },
+      linguistic_communication_profile: {
+        type: "string",
+        description:
+          "Naming conventions, communication barriers, or dialects - grounded only in the provided entries. Say plainly if none apply.",
+      },
+      interconnection_map_systems_synthesis: {
+        type: "string",
+        description:
+          "A systems-thinking breakdown (e.g. 'Economy drives Politics which enforces Culture') grounded strictly in the Recorded Dependencies provided above - never invent a relationship not present in that list. Say plainly if no dependencies are recorded yet.",
+      },
+    },
+    required: [
+      "world_overview_complexity_summary",
+      "world_assumptions_canon_rules",
+      "master_world_pillars",
+      "geography_settings_registry",
+      "societal_infrastructure_manual",
+      "cultural_lived_experience_profiles",
+      "narrative_lore_history",
+      "system_mechanics",
+      "significant_institutions_artifacts",
+      "linguistic_communication_profile",
+      "interconnection_map_systems_synthesis",
+    ],
+  },
+};
+
+/**
+ * The one consolidated LLM call behind Stage 5 Compile - one call
+ * regardless of section count (Decision 2), same cost/latency reasoning
+ * #49's runConsistencyCheck already established for its own one-call-not-
+ * one-per-check design. Throws on failure (TurnValidationError or a
+ * network/rate-limit error from extractTurn) - unlike #49's audit, this
+ * runs as an explicit author-triggered action with no "next turn retries
+ * it" mechanism, so the caller (worldEngine/worldBibleCompiler.ts's
+ * generateWorldBibleDocument, Task 4) lets it propagate as a visible
+ * compile failure rather than degrading to a placeholder finding.
+ */
+export async function runWorldBibleSynthesis(
+  anthropic: Anthropic,
+  confirmedEntries: CanonElement[],
+  pillars: string[]
+): Promise<WorldBibleSynthesisResult> {
+  const entryDescriptions = buildSynthesisEntryDescriptions(confirmedEntries);
+  const dependencyEdges = buildDependencyEdgeDescriptions(confirmedEntries);
+  const pillarList = pillars.length > 0 ? pillars.map((p) => `- ${p}`).join("\n") : "(No pillars adopted yet.)";
+
+  return extractTurn({
+    anthropic,
+    model: "claude-sonnet-5",
+    system:
+      "You are compiling a fictional world's Confirmed canon into a structured World Bible. Every claim you write MUST trace directly to the Confirmed World Entries and Recorded Dependencies provided below - never invent a world fact, name, or relationship that isn't present in them. Where nothing provided addresses a section's theme, say so plainly (e.g. \"No Confirmed entries currently address this section.\") rather than inventing content to fill it.",
+    messages: [
+      {
+        role: "user",
+        content: `Adopted Pillars:\n${pillarList}\n\nConfirmed World Entries:\n${entryDescriptions}\n\nRecorded Dependencies:\n${dependencyEdges}`,
+      },
+    ],
+    tool: EMIT_WORLD_BIBLE_SYNTHESIS_TOOL,
+    schema: WorldBibleSynthesisSchema,
+    maxTokens: 8192,
+  });
+}
