@@ -17,3 +17,17 @@ export const CANON_STATUS_BADGE_STYLES: Record<CanonBadgeStatus, string> = {
   Parked: "bg-sky-500/20 text-sky-300 border border-sky-500/40",
   Deferred: "bg-sky-500/20 text-sky-300 border border-sky-500/40",
 };
+
+/** React Flow inline-style equivalent of CANON_STATUS_BADGE_STYLES above,
+ * for the World Bible dependency graph (issue #53) - inline styles are
+ * required there because @xyflow/react's own stylesheet otherwise wins
+ * the cascade over Tailwind utility classes (see DependencyGraphView.tsx).
+ * Kept as a sibling of CANON_STATUS_BADGE_STYLES, not a separate file, so
+ * a color change to one is seen alongside the other. */
+export const CANON_STATUS_NODE_STYLES: Record<CanonBadgeStatus, { background: string; color: string; border: string }> = {
+  Exploring: { background: "#404040", color: "#d4d4d4", border: "1px solid #525252" },
+  Working: { background: "rgba(245, 158, 11, 0.2)", color: "#fcd34d", border: "1px solid rgba(245, 158, 11, 0.4)" },
+  Confirmed: { background: "rgba(16, 185, 129, 0.2)", color: "#6ee7b7", border: "1px solid rgba(16, 185, 129, 0.4)" },
+  Parked: { background: "rgba(14, 165, 233, 0.2)", color: "#7dd3fc", border: "1px solid rgba(14, 165, 233, 0.4)" },
+  Deferred: { background: "rgba(14, 165, 233, 0.2)", color: "#7dd3fc", border: "1px solid rgba(14, 165, 233, 0.4)" },
+};

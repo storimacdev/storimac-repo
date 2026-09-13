@@ -72,7 +72,7 @@ export default function WorldSidePanel({ storyId, currentStage, activePillar, re
   }, [storyId, refreshToken]);
 
   function handleNodeClick(entryId: string) {
-    entryRefs.current.get(entryId)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    entryRefs.current.get(entryId)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     setHighlightedEntryId(entryId);
     setTimeout(() => {
       setHighlightedEntryId((cur) => (cur === entryId ? null : cur));
