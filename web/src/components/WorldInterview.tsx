@@ -118,6 +118,25 @@ export default function WorldInterview() {
           const versionsData = await versionsRes.json();
           if (versionsRes.ok && Array.isArray(versionsData.versions)) {
             setWorldBibleVersions(versionsData.versions);
+            // Hydrate the latest compiled document too (issue #50 final
+            // whole-branch review finding I2) - without this, worldBibleDoc
+            // stays null after every reload even though versions exist, so
+            // the panel wrongly reverts to the "Generate World Bible" button
+            // instead of the download buttons. Versions are ordered
+            // ascending by version number (storyStore.ts's
+            // listWorldBibleVersions), so the latest is the last element.
+            if (versionsData.versions.length > 0) {
+              const latest = versionsData.versions[versionsData.versions.length - 1];
+              try {
+                const latestRes = await fetch(`/api/world-chat/document/${latest.version}?storyId=${canvasId}`);
+                const latestData = await latestRes.json();
+                if (latestRes.ok) {
+                  setWorldBibleDoc(latestData);
+                }
+              } catch {
+                // Non-fatal - the panel simply shows "Generate World Bible" again.
+              }
+            }
           }
         } catch {
           // Non-fatal - the compile panel simply shows no prior versions.

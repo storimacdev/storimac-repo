@@ -4,6 +4,8 @@ import { errorResponse } from "@/lib/apiErrors";
 import { getMembership } from "@/lib/workspace/workspaceStore";
 import { getStory, listWorldBibleVersions } from "@/lib/canonEngine/storyStore";
 import { generateWorldBibleDocument } from "@/lib/worldEngine/worldBibleCompiler";
+import { TurnValidationError } from "@/lib/canonEngine/extractTurn";
+import { RateLimitTimeoutError } from "@/lib/rateLimit/anthropicGate";
 
 export const runtime = "nodejs";
 
@@ -66,6 +68,20 @@ export async function POST(req: NextRequest) {
       { status: 201 }
     );
   } catch (err) {
+    if (err instanceof RateLimitTimeoutError) {
+      console.warn("Anthropic rate-limit gate timed out:", err);
+      return NextResponse.json(
+        { error: "StoriMac is handling a lot of requests right now — please try again in a moment." },
+        { status: 503 }
+      );
+    }
+    if (err instanceof TurnValidationError) {
+      console.error("World Bible compile extraction failed:", err);
+      return NextResponse.json(
+        { error: "The World Bible compile couldn't produce a valid result. Please try again." },
+        { status: 502 }
+      );
+    }
     return errorResponse(err);
   }
 }
