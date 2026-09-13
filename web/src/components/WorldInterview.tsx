@@ -17,6 +17,7 @@ import { isValidTransition } from "@/lib/canonEngine/transitions";
 import type { CanonStatus } from "@/lib/canonEngine/types";
 import type { CharacterBibleGateResult } from "@/lib/worldEngine/characterBibleGate";
 import { CANON_STATUS_BADGE_STYLES } from "@/lib/canonEngine/statusBadge";
+import { downloadText } from "@/lib/download";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -65,6 +66,16 @@ export default function WorldInterview() {
   const [pendingConflict, setPendingConflictState] = useState<P3PendingConflict | null>(null);
   const [cascadeReview, setCascadeReview] = useState<{ entryId: string; name: string }[] | null>(null);
   const [stage4Audit, setStage4Audit] = useState<P3Stage4Audit | null>(null);
+  const [worldBibleDoc, setWorldBibleDoc] = useState<{
+    version: number;
+    date: string;
+    summary_of_changes: string;
+    markdown: string;
+    json: unknown;
+  } | null>(null);
+  const [worldBibleVersions, setWorldBibleVersions] = useState<{ version: number; date: string; summary_of_changes: string }[]>([]);
+  const [compiling, setCompiling] = useState(false);
+  const [compileError, setCompileError] = useState<string | null>(null);
   const [wclUpdating, setWclUpdating] = useState(false);
   const [pillarDraft, setPillarDraft] = useState<string[]>([]);
   const [pillarDraftTouched, setPillarDraftTouched] = useState(false);
@@ -102,6 +113,15 @@ export default function WorldInterview() {
         setCharacterBibleGate((data.characterBibleGate as CharacterBibleGateResult | undefined) ?? null);
         setPendingConflictState((data.story?.p3PendingConflict as P3PendingConflict | undefined) ?? null);
         setStage4Audit((data.story?.p3Stage4Audit as P3Stage4Audit | undefined) ?? null);
+        try {
+          const versionsRes = await fetch(`/api/world-chat/document?storyId=${canvasId}`);
+          const versionsData = await versionsRes.json();
+          if (versionsRes.ok && Array.isArray(versionsData.versions)) {
+            setWorldBibleVersions(versionsData.versions);
+          }
+        } catch {
+          // Non-fatal - the compile panel simply shows no prior versions.
+        }
         const rawElements = (data.worldElements ?? []) as { element_id: string; status: CanonStatus }[];
         setElementStatuses(
           Object.fromEntries(rawElements.map((e) => [e.element_id, toPillarStatus(e.status)]))
@@ -228,6 +248,34 @@ export default function WorldInterview() {
 
   function approveStage4Audit() {
     sendMessage("I approve this System Integration Audit summary - please proceed to Compile.");
+  }
+
+  async function generateWorldBible() {
+    if (!canvasId || compiling) return;
+    setCompiling(true);
+    setCompileError(null);
+    try {
+      const res = await fetch(`/api/world-chat/document`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storyId: canvasId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setCompileError(data.error ?? "Compile failed.");
+        return;
+      }
+      setWorldBibleDoc(data);
+      const versionsRes = await fetch(`/api/world-chat/document?storyId=${canvasId}`);
+      const versionsData = await versionsRes.json();
+      if (versionsRes.ok && Array.isArray(versionsData.versions)) {
+        setWorldBibleVersions(versionsData.versions);
+      }
+    } catch {
+      setCompileError("Couldn't reach the server.");
+    } finally {
+      setCompiling(false);
+    }
   }
 
   function chooseConflictResolution(choice: "revert" | "revise" | "defer") {
@@ -551,6 +599,70 @@ export default function WorldInterview() {
                 )}
                 {stage4Audit && !stage4Audit.authorApproved && (
                   <StageAuditCard audit={stage4Audit} onApprove={approveStage4Audit} disabled={loading} />
+                )}
+                {stage4Audit?.authorApproved && (
+                  <div
+                    data-testid="world-bible-compile-card"
+                    className="mt-3 rounded-xl border border-emerald-500/30 bg-gradient-to-br from-emerald-950/40 to-neutral-900/40 px-4 py-3 text-sm text-neutral-100"
+                  >
+                    <p className="mb-2 font-semibold text-emerald-200">Stage 5 — World Bible Compile</p>
+                    {!worldBibleDoc && (
+                      <>
+                        <p className="mb-3 text-xs text-neutral-300">
+                          Your Confirmed World Entries are ready to compile into the 15-section World Bible.
+                        </p>
+                        <button
+                          onClick={generateWorldBible}
+                          disabled={compiling}
+                          className="rounded-lg border border-emerald-500/50 bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-900/40 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {compiling ? "Compiling…" : "Generate World Bible"}
+                        </button>
+                      </>
+                    )}
+                    {worldBibleDoc && (
+                      <>
+                        <p className="mb-3 text-xs text-neutral-300">
+                          v{worldBibleDoc.version} · {worldBibleDoc.date} — {worldBibleDoc.summary_of_changes}
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() =>
+                              downloadText(`world-bible-v${worldBibleDoc.version}.md`, worldBibleDoc.markdown, "text/markdown")
+                            }
+                            className="rounded-lg border border-emerald-500/50 bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-900/40"
+                          >
+                            Download .md
+                          </button>
+                          <button
+                            onClick={() =>
+                              downloadText(
+                                `world-bible-v${worldBibleDoc.version}.json`,
+                                JSON.stringify(worldBibleDoc.json, null, 2),
+                                "application/json"
+                              )
+                            }
+                            className="rounded-lg border border-emerald-500/50 bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-900/40"
+                          >
+                            Download .json
+                          </button>
+                          <button
+                            onClick={generateWorldBible}
+                            disabled={compiling}
+                            className="rounded-lg border border-emerald-500/50 bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-900/40 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            {compiling ? "Recompiling…" : "Recompile"}
+                          </button>
+                        </div>
+                      </>
+                    )}
+                    {worldBibleVersions.length > 1 && (
+                      <p className="mt-2 text-[11px] text-neutral-500">
+                        {worldBibleVersions.length} versions compiled so far.
+                      </p>
+                    )}
+                    {compileError && <p className="mt-2 text-xs text-red-400">{compileError}</p>}
+                  </div>
                 )}
                 {error && (
                   <div className="mt-2 rounded-lg border border-red-900 bg-red-950/60 px-4 py-3 text-sm text-red-200">
