@@ -118,7 +118,7 @@ export function lintWorldBibleDocument(doc: unknown): { valid: boolean; errors: 
     return { valid: false, errors };
   }
 
-  const actualOrder = Object.keys(parsed.data).filter((k) => k !== "schema_version");
+  const actualOrder = Object.keys(doc as Record<string, unknown>).filter((k) => k !== "schema_version");
   const orderMatches =
     actualOrder.length === WORLD_BIBLE_SECTION_ORDER.length &&
     actualOrder.every((k, i) => k === WORLD_BIBLE_SECTION_ORDER[i]);
