@@ -3,6 +3,13 @@ import type { WorldEntryValue } from "./worldEntry";
 import { z } from "zod";
 import Anthropic from "@anthropic-ai/sdk";
 import { extractTurn } from "@/lib/canonEngine/extractTurn";
+import type {
+  WorldBibleDocument,
+  StoredOutstandingQuestion,
+  CharacterBibleEntry,
+  Story,
+} from "@/lib/canonEngine/storyStore";
+import type { FoundationDocument } from "@/lib/canonEngine/foundationDoc";
 
 /**
  * Project 3's Stage 5 Compile (issue #50) - the shared Canon Engine's
@@ -196,4 +203,202 @@ export async function runWorldBibleSynthesis(
     schema: WorldBibleSynthesisSchema,
     maxTokens: 8192,
   });
+}
+
+/**
+ * Section 13 (Outstanding World Questions) - merges persisted outstanding
+ * questions with every currently-Parked World Entry, deduped by item text.
+ * Same "Parked never appears anywhere else, but never silently dropped
+ * either" posture foundationDoc.ts's own section 12 already established.
+ */
+function compileOutstandingWorldQuestions(
+  worldEntries: CanonElement[],
+  outstanding: StoredOutstandingQuestion[]
+): WorldBibleDocument["13_outstanding_world_questions"] {
+  const parkedNow = worldEntries
+    .filter((e) => e.status === "Parked")
+    .map((e) => {
+      const v = e.value as WorldEntryValue | undefined;
+      return {
+        item: `${v?.name ?? e.element_id}: ${v?.functionalDescription || "(no description recorded)"}`,
+        notes: "Parked during the World Bible interview; unresolved at compile time.",
+        defer_to: "Unassigned" as string,
+      };
+    });
+  const persisted = outstanding.map((q) => ({
+    item: q.item,
+    notes: q.notes,
+    defer_to: q.defer_to ?? "Unassigned",
+  }));
+
+  const seen = new Set<string>();
+  const merged = [...persisted, ...parkedNow].filter((q) => {
+    if (seen.has(q.item)) return false;
+    seen.add(q.item);
+    return true;
+  });
+
+  const groups = new Map<string, { item: string; notes: string }[]>();
+  for (const q of merged) {
+    const list = groups.get(q.defer_to) ?? [];
+    list.push({ item: q.item, notes: q.notes });
+    groups.set(q.defer_to, list);
+  }
+  return Array.from(groups.entries()).map(([defer_to, items]) => ({ defer_to, items }));
+}
+
+/** Section 14 (Cross-Project Reference Log) - pure template-fill from P1's compiled document and P2's signed-off characters, no fabrication. */
+function compileCrossProjectReferenceLog(
+  p1Doc: FoundationDocument | null,
+  p2Characters: CharacterBibleEntry[]
+): WorldBibleDocument["14_cross_project_reference_log"] {
+  return {
+    project_1: p1Doc
+      ? { working_title: p1Doc["1_story_metadata"].working_title, version: p1Doc["1_story_metadata"].version }
+      : null,
+    project_2: p2Characters.map((c) => ({
+      character_name: c.metadata.character_name,
+      story_role: c.metadata.story_role,
+      canon_status: c.metadata.canon_status,
+    })),
+  };
+}
+
+/**
+ * Combines the LLM-synthesized prose sections (Task 2's runWorldBibleSynthesis
+ * output) with the deterministic template-fill sections into one complete
+ * WorldBibleDocument. Pure - no I/O, matching compileFoundationDocument's and
+ * compileCharacterBibleEntry's established shape.
+ */
+export function compileWorldBibleDocument(params: {
+  story: Story;
+  worldEntries: CanonElement[];
+  synthesis: WorldBibleSynthesisResult;
+  outstanding: StoredOutstandingQuestion[];
+  p1Doc: FoundationDocument | null;
+  p2Characters: CharacterBibleEntry[];
+  version: number;
+  versionHistory: { version: string; date: string; summary_of_changes: string }[];
+}): WorldBibleDocument {
+  const {
+    story, worldEntries, synthesis, outstanding, p1Doc, p2Characters, version, versionHistory,
+  } = params;
+
+  return {
+    schema_version: "1.0",
+    "1_document_metadata": {
+      story_id: story.id,
+      world_bible_version: `v${version}`,
+      working_title: story.title,
+      date: new Date().toISOString().slice(0, 10),
+      status: "Compiled",
+      related_project_1_version: p1Doc ? p1Doc["1_story_metadata"].version : "Not yet generated",
+      related_project_2_status:
+        p2Characters.length > 0
+          ? `${p2Characters.length} character${p2Characters.length === 1 ? "" : "s"} signed off`
+          : "Not yet available",
+    },
+    "2_world_overview_complexity_summary": synthesis.world_overview_complexity_summary,
+    "3_world_assumptions_canon_rules": synthesis.world_assumptions_canon_rules,
+    "4_master_world_pillars": synthesis.master_world_pillars,
+    "5_geography_settings_registry": synthesis.geography_settings_registry,
+    "6_societal_infrastructure_manual": synthesis.societal_infrastructure_manual,
+    "7_cultural_lived_experience_profiles": synthesis.cultural_lived_experience_profiles,
+    "8_narrative_lore_history": synthesis.narrative_lore_history,
+    "9_system_mechanics": synthesis.system_mechanics,
+    "10_significant_institutions_artifacts": synthesis.significant_institutions_artifacts,
+    "11_linguistic_communication_profile": synthesis.linguistic_communication_profile,
+    "12_interconnection_map_systems_synthesis": synthesis.interconnection_map_systems_synthesis,
+    "13_outstanding_world_questions": compileOutstandingWorldQuestions(worldEntries, outstanding),
+    "14_cross_project_reference_log": compileCrossProjectReferenceLog(p1Doc, p2Characters),
+    "15_version_history": versionHistory,
+  };
+}
+
+function mdValue(v: string): string {
+  return v && v.trim() ? v : "_—_";
+}
+
+/** Pure Markdown renderer for a compiled WorldBibleDocument - same mdValue/table/list conventions foundationDoc.ts's renderMarkdown already established (reimplemented locally, not imported - foundationDoc.ts's mdValue/mdList are module-private). */
+export function renderWorldBibleMarkdown(doc: WorldBibleDocument): string {
+  const m = doc["1_document_metadata"];
+  const refLog = doc["14_cross_project_reference_log"];
+
+  const lines: string[] = [
+    `# World Bible — ${m.working_title}`,
+    "",
+    `## 1. Document Metadata`,
+    `| Field | Value |`,
+    `| --- | --- |`,
+    `| Story ID | ${m.story_id} |`,
+    `| World Bible Version | ${m.world_bible_version} |`,
+    `| Working Title | ${mdValue(m.working_title)} |`,
+    `| Date | ${m.date} |`,
+    `| Status | ${m.status} |`,
+    `| Related Project 1 Version | ${mdValue(m.related_project_1_version)} |`,
+    `| Related Project 2 Status | ${mdValue(m.related_project_2_status)} |`,
+    "",
+    `## 2. World Overview & Complexity Summary`,
+    mdValue(doc["2_world_overview_complexity_summary"]),
+    "",
+    `## 3. High-Level World Assumptions & Canon Rules`,
+    mdValue(doc["3_world_assumptions_canon_rules"]),
+    "",
+    `## 4. Master World Pillars`,
+    doc["4_master_world_pillars"].length
+      ? doc["4_master_world_pillars"].map((p) => `### ${p.pillar}\n${mdValue(p.summary)}`).join("\n\n")
+      : "_No pillars adopted yet._",
+    "",
+    `## 5. Geography & Settings Registry`,
+    mdValue(doc["5_geography_settings_registry"]),
+    "",
+    `## 6. Societal Infrastructure Manual`,
+    mdValue(doc["6_societal_infrastructure_manual"]),
+    "",
+    `## 7. Cultural & Lived Experience Profiles`,
+    mdValue(doc["7_cultural_lived_experience_profiles"]),
+    "",
+    `## 8. Narrative Lore & History`,
+    mdValue(doc["8_narrative_lore_history"]),
+    "",
+    `## 9. System Mechanics`,
+    mdValue(doc["9_system_mechanics"]),
+    "",
+    `## 10. Significant Institutions & Artifacts`,
+    mdValue(doc["10_significant_institutions_artifacts"]),
+    "",
+    `## 11. Linguistic & Communication Profile`,
+    mdValue(doc["11_linguistic_communication_profile"]),
+    "",
+    `## 12. Interconnection Map & Systems Synthesis`,
+    mdValue(doc["12_interconnection_map_systems_synthesis"]),
+    "",
+    `## 13. Outstanding World Questions`,
+    doc["13_outstanding_world_questions"].length
+      ? doc["13_outstanding_world_questions"]
+          .map(
+            (g) =>
+              `**${g.defer_to}:**\n` +
+              g.items.map((q) => `- ${q.item}${q.notes ? ` — ${q.notes}` : ""}`).join("\n")
+          )
+          .join("\n\n")
+      : "_None — everything resolved._",
+    "",
+    `## 14. Cross-Project Reference Log`,
+    `**Project 1 (Story Foundation):** ${
+      refLog.project_1 ? `${refLog.project_1.working_title} (${refLog.project_1.version})` : "_Not yet available._"
+    }`,
+    `**Project 2 (Character Bible):**`,
+    refLog.project_2.length
+      ? refLog.project_2.map((c) => `- ${c.character_name} — ${c.story_role} (${c.canon_status})`).join("\n")
+      : "_Not yet available._",
+    "",
+    `## 15. Version History`,
+    `| Version | Date | Summary of Changes |`,
+    `| --- | --- | --- |`,
+    ...doc["15_version_history"].map((v) => `| ${v.version} | ${v.date} | ${v.summary_of_changes} |`),
+    "",
+  ];
+
+  return lines.join("\n");
 }
