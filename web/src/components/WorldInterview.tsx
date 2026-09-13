@@ -330,6 +330,7 @@ export default function WorldInterview() {
   async function downloadWorldBibleDocx() {
     if (!worldBibleDoc || docxGenerating) return;
     setDocxGenerating(true);
+    setCompileError(null);
     try {
       const { generateWorldBibleDocxBlob } = await import("@/lib/docx/worldBibleDocx");
       const blob = await generateWorldBibleDocxBlob(worldBibleDoc.json as WorldBibleDocument);
@@ -344,6 +345,7 @@ export default function WorldInterview() {
   async function downloadWorldBiblePdf() {
     if (!worldBibleDoc || pdfGenerating) return;
     setPdfGenerating(true);
+    setCompileError(null);
     try {
       const { generateWorldBiblePdfBlob } = await import("@/lib/pdf/WorldBiblePdfDocument");
       const blob = await generateWorldBiblePdfBlob(worldBibleDoc.json as WorldBibleDocument);
