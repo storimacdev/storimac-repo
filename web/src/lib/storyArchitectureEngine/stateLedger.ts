@@ -6,9 +6,11 @@ import type { CanonStatus } from "@/lib/canonEngine/types";
  * Pure, immutable-update functions - no Firestore, no LLM call directly
  * in this file. Issue #111 persists the resulting `StructuralUnit[]` to
  * `Story.p4Units` via storyStore.ts's `setP4Units`; #69 covers anything
- * beyond that whole-array persistence. `causalTag` exists per §9's shape
- * but is never computed or validated here - that's issue #63 (Causality
- * Validation).
+ * beyond that whole-array persistence. `causalTag` is computed and
+ * validated by issue #63 (Causality Validation) - see
+ * developmentLoop.ts's `evaluateCausalGate` for the gating logic;
+ * `setCausalTag` below only performs the update once a turn's report
+ * has already passed that gate.
  */
 
 export type StructuralUnitType = "Scene" | "Sequence" | "SetPiece" | "PlotPoint";
@@ -48,6 +50,10 @@ export function setUnitStatus(unit: StructuralUnit, status: CanonStatus, now?: s
 
 export function setUnitContent(unit: StructuralUnit, content: unknown, now?: string): StructuralUnit {
   return { ...unit, content, lastUpdated: nowOrDefault(now) };
+}
+
+export function setCausalTag(unit: StructuralUnit, causalTag: CausalTag, now?: string): StructuralUnit {
+  return { ...unit, causalTag, lastUpdated: nowOrDefault(now) };
 }
 
 /** Appends and de-duplicates - `canonRefs` is a set of justifications,

@@ -115,6 +115,46 @@ export function attemptStatusTransition(
   return { unit: setUnitStatus(unit, targetStatus, now), accepted: true };
 }
 
+export interface CausalGateResult {
+  ok: boolean;
+  reason?: string;
+}
+
+/**
+ * FR-6.3: gates Confirmed only - unlike attemptStatusTransition's
+ * Core-Purpose gate (which blocks both Working and Confirmed), issue
+ * #63's own acceptance criteria only says a unit "cannot reach
+ * Confirmed status" while its causal tag is unvalidated/episodic.
+ * Step 1 (The Frame) is the screenplay's one unit with no causal
+ * predecessor - verified here against activeStepNumber rather than
+ * trusted from the model's own report, the same reasoning issue #111's
+ * onboarding clamp already established: a wrongly-accepted "no
+ * predecessor" claim for any other step would let an episodic
+ * transition reach Confirmed with zero causal justification.
+ */
+export function evaluateCausalGate(
+  targetStatus: CanonStatus,
+  reportedTag: "Therefore" | "But" | "And Then" | null,
+  activeStepNumber: number | null,
+  reason?: string
+): CausalGateResult {
+  if (targetStatus !== "Confirmed") {
+    return { ok: true };
+  }
+  if (reportedTag === "Therefore" || reportedTag === "But") {
+    return { ok: true };
+  }
+  if (reportedTag === null && activeStepNumber === 1) {
+    return { ok: true };
+  }
+  return {
+    ok: false,
+    reason:
+      reason ??
+      "This transition reads as coincidence-driven (\"And Then\") rather than causal - propose a Therefore/But alternative before confirming.",
+  };
+}
+
 export type RoutingChoice = "A" | "B" | "C";
 
 /**

@@ -28,12 +28,14 @@ import {
   upsertUnit,
   setUnitContent,
   addCanonRefs,
+  setCausalTag,
   type StructuralUnit,
 } from "@/lib/storyArchitectureEngine/stateLedger";
 import {
   attemptStatusTransition,
   checkPlacementDeviation,
   switchRoute,
+  evaluateCausalGate,
   type StatusTransitionAttempt,
 } from "@/lib/storyArchitectureEngine/developmentLoop";
 
@@ -177,15 +179,37 @@ export async function POST(req: NextRequest) {
         const base = existing ?? createUnit(proposed.unit_id, proposed.type);
         const withContent = addCanonRefs(setUnitContent(base, proposed.content), proposed.canon_refs);
 
+        const causalGate = evaluateCausalGate(
+          proposed.requested_status,
+          proposed.causal_tag,
+          delta.active_step_number,
+          proposed.causal_tag_reason
+        );
+        const coreValid = delta.validation_result === "passed";
+        const combinedValid = coreValid && causalGate.ok;
+        const combinedReason = !coreValid ? delta.validation_reason : causalGate.reason;
+
         const attempt = attemptStatusTransition(withContent, proposed.requested_status, {
-          valid: delta.validation_result === "passed",
-          reason: delta.validation_reason,
+          valid: combinedValid,
+          reason: combinedReason,
         });
         statusAttempt = attempt;
 
-        units = upsertUnit(units, attempt.unit);
+        // Causal tag persists independent of the combined gate's outcome -
+        // same "update regardless of status outcome" convention
+        // setUnitContent/addCanonRefs above already follow, so a unit
+        // sitting at Working still records its current best causal read.
+        // "And Then" (or an invalid null) is never persisted - the unit's
+        // stored tag is left exactly as it was, same as attemptStatusTransition's
+        // own "reject returns the original unit unchanged" convention.
+        let finalUnit = attempt.unit;
+        if (proposed.causal_tag === "Therefore" || proposed.causal_tag === "But") {
+          finalUnit = setCausalTag(finalUnit, proposed.causal_tag);
+        }
+
+        units = upsertUnit(units, finalUnit);
         await setP4Units(storyId, units);
-        effectiveUnit = attempt.unit;
+        effectiveUnit = finalUnit;
 
         if (proposed.proposed_position_percent !== null) {
           const step = STRUCTURAL_STEPS.find((s) => s.stepNumber === delta.active_step_number);
@@ -234,7 +258,11 @@ export async function POST(req: NextRequest) {
       placementFlag,
       deferredItems: delta.deferred_items,
       validationResult: delta.validation_result,
-      validationReason: delta.validation_reason,
+      // The combined gate's own reason (whichever check actually rejected
+      // this turn's Confirmed attempt) - not always delta.validation_reason,
+      // which only ever explains Core-Purpose specifically and would be
+      // silently wrong when causality was the actual blocker instead.
+      validationReason: statusAttempt?.reason ?? delta.validation_reason,
       statusAccepted: statusAttempt?.accepted ?? null,
     });
   } catch (err) {

@@ -22,6 +22,8 @@ export const ArchitectureTurnSchema = z.object({
       requested_status: z.enum(["Exploring", "Working", "Confirmed", "Parked"]),
       canon_refs: z.array(z.string()),
       proposed_position_percent: z.number().min(0).max(100).nullable(),
+      causal_tag: z.enum(["Therefore", "But", "And Then"]).nullable(),
+      causal_tag_reason: z.string(),
     })
     .nullable(),
   validation_result: z.enum(["passed", "failed", "not_applicable"]),
@@ -89,8 +91,18 @@ export const EMIT_ARCHITECTURE_TURN_TOOL: Anthropic.Tool = {
             type: ["number", "null"],
             description: "Your best estimate of where in the screenplay (0-100) this unit falls, or null if not applicable.",
           },
+          causal_tag: {
+            type: ["string", "null"],
+            enum: ["Therefore", "But", "And Then", null],
+            description:
+              "How this unit's content transitions from whatever precedes it: \"Therefore\" (a direct consequence) or \"But\" (a complication) for a genuinely causal link; \"And Then\" for a coincidence-driven, episodic transition you are flagging rather than proposing for Confirmed status. Null only for the screenplay's absolute opening unit (Step 1, The Frame), which has no causal predecessor - every other unit must report one of the three string values, never null.",
+          },
+          causal_tag_reason: {
+            type: "string",
+            description: "A specific, concrete explanation for causal_tag, either way.",
+          },
         },
-        required: ["unit_id", "type", "content", "requested_status", "canon_refs", "proposed_position_percent"],
+        required: ["unit_id", "type", "content", "requested_status", "canon_refs", "proposed_position_percent", "causal_tag", "causal_tag_reason"],
         description: "The structural unit you are actively evaluating this turn, or null if none.",
       },
       validation_result: {
