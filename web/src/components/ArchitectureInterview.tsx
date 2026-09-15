@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
+import { useUser } from "@/components/UserProvider";
 import { downloadText } from "@/lib/download";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
@@ -20,13 +21,12 @@ export default function ArchitectureInterview() {
   const searchParams = useSearchParams();
   const workspaceId = searchParams.get("workspaceId");
   const canvasId = searchParams.get("canvasId");
+  const { setLastProject } = useUser();
 
-  // Note: unlike WorldInterview/CharacterInterview, this does not call
-  // useUser().setLastProject() on mount - lib/lastProject.ts's LastProject
-  // union ("interview" | "character-bible" | "world-bible") does not yet
-  // include "story-architecture", and extending it is out of this task's
-  // scope (its file isn't in this task's commit). Tracking P4 as the user's
-  // last-visited project is deferred to whichever task adds it there.
+  useEffect(() => {
+    if (!workspaceId || !canvasId) return;
+    setLastProject("story-architecture");
+  }, [workspaceId, canvasId, setLastProject]);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
