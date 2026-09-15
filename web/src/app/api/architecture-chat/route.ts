@@ -120,8 +120,8 @@ export async function POST(req: NextRequest) {
       // Onboarding gate: flips once, on the first non-null routing_choice
       // report (Decision 2). Never set back to false.
       if (!effectiveOnboardingComplete && delta.routing_choice) {
-        effectiveOnboardingComplete = true;
         await setP4OnboardingComplete(storyId, true);
+        effectiveOnboardingComplete = true;
       }
 
       // Routing state: only meaningful once onboarding is genuinely done.
@@ -140,9 +140,12 @@ export async function POST(req: NextRequest) {
       }
 
       // Structural unit + status transition: clamped to null entirely
-      // until onboarding is genuinely complete (Decision 2's backstop),
-      // regardless of what the model proposed this turn.
-      if (effectiveOnboardingComplete && delta.proposed_unit) {
+      // until onboarding was ALREADY complete before this turn (Decision
+      // 2's backstop). Deliberately checks the pre-turn p4.onboardingComplete,
+      // not effectiveOnboardingComplete - an ordinary first reply that sets
+      // routing_choice and proposes a unit in the same turn must still see
+      // the unit clamped, or the author could skip onboarding entirely.
+      if (p4.onboardingComplete && delta.proposed_unit) {
         const proposed = delta.proposed_unit;
         const existing = findUnit(units, proposed.unit_id);
         const base = existing ?? createUnit(proposed.unit_id, proposed.type);
