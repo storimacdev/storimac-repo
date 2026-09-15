@@ -115,6 +115,58 @@ export function attemptStatusTransition(
   return { unit: setUnitStatus(unit, targetStatus, now), accepted: true };
 }
 
+export interface CausalGateResult {
+  ok: boolean;
+  reason?: string;
+}
+
+/**
+ * FR-6.3: gates Confirmed only - unlike attemptStatusTransition's
+ * Core-Purpose gate (which blocks both Working and Confirmed), issue
+ * #63's own acceptance criteria only says a unit "cannot reach
+ * Confirmed status" while its causal tag is unvalidated/episodic.
+ * Step 1 (The Frame) is the screenplay's one unit with no causal
+ * predecessor - the null-tag exemption below cross-checks that claim
+ * against activeStepNumber, another field the model self-reports, not
+ * a value the app independently derives (no per-unit story position is
+ * tracked yet - that's #70/#71's territory). This narrows the exemption
+ * to a two-field bypass rather than verifying it outright; final
+ * whole-branch review for #63 judged that acceptable because the
+ * consequence (Confirmed status) is still owned entirely by this
+ * deterministic gate, and a misfired exemption still surfaces as
+ * `causalTag: "UNVALIDATED"` in the compiled document rather than as a
+ * false "Therefore"/"But" certification.
+ */
+export function evaluateCausalGate(
+  targetStatus: CanonStatus,
+  reportedTag: "Therefore" | "But" | "And Then" | null,
+  activeStepNumber: number | null,
+  reason?: string
+): CausalGateResult {
+  if (targetStatus !== "Confirmed") {
+    return { ok: true };
+  }
+  if (reportedTag === "Therefore" || reportedTag === "But") {
+    return { ok: true };
+  }
+  if (reportedTag === null && activeStepNumber === 1) {
+    return { ok: true };
+  }
+  // The model's own `reason` only ever explains an "And Then" report -
+  // for the null-outside-Step-1 case it explains the (wrong) null claim
+  // instead, which reads as a non-sequitur next to this rejection. Only
+  // surface it for the case it actually applies to; every other
+  // rejection gets the actionable default (also the floor for an
+  // empty/whitespace-only reason, final whole-branch review findings
+  // M1/M2).
+  const defaultReason =
+    "This transition reads as coincidence-driven (\"And Then\") rather than causal - propose a Therefore/But alternative before confirming.";
+  return {
+    ok: false,
+    reason: reportedTag === "And Then" && reason && reason.trim() ? reason : defaultReason,
+  };
+}
+
 export type RoutingChoice = "A" | "B" | "C";
 
 /**
