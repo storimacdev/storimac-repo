@@ -9,8 +9,10 @@ import {
   deleteStory,
   listGuardrailFlags,
   normalizeP3,
+  normalizeP4,
   CHARACTER_MESSAGES_COLLECTION,
   WORLD_MESSAGES_COLLECTION,
+  ARCHITECTURE_MESSAGES_COLLECTION,
 } from "@/lib/canonEngine/storyStore";
 import { listElements, WORLD_ELEMENTS_COLLECTION } from "@/lib/canonEngine/canonStore";
 import { setLastVisited } from "@/lib/userStore";
@@ -61,6 +63,10 @@ export async function GET(
     const includeWorldMessages = req.nextUrl.searchParams.get("worldMessages") === "1";
     // Same reasoning, for the World Bible client's per-pillar canon status (issue #41).
     const includeWorldElements = req.nextUrl.searchParams.get("worldElements") === "1";
+    // Same reasoning, for the Story Architecture client (issue #111, final
+    // whole-branch review finding I4/R1) - without this flag, a page
+    // reload never fetches the architecture transcript at all.
+    const includeArchitectureMessages = req.nextUrl.searchParams.get("architectureMessages") === "1";
 
     const membership = await getMembership(workspaceId, user.uid);
     if (!membership) {
@@ -72,18 +78,27 @@ export async function GET(
       return NextResponse.json({ error: "Story Canvas not found." }, { status: 404 });
     }
 
-    const [elements, messages, characterMessages, worldMessages, worldElements, guardrailFlags, characterBibleGate] =
-      await Promise.all([
-        listElements(canvasId),
-        listMessages(canvasId),
-        includeCharacterMessages ? listMessages(canvasId, undefined, CHARACTER_MESSAGES_COLLECTION) : Promise.resolve([]),
-        includeWorldMessages ? listMessages(canvasId, undefined, WORLD_MESSAGES_COLLECTION) : Promise.resolve([]),
-        includeWorldElements ? listElements(canvasId, WORLD_ELEMENTS_COLLECTION) : Promise.resolve([]),
-        listGuardrailFlags(canvasId),
-        includeWorldMessages || includeWorldElements
-          ? computeCharacterBibleGate(canvasId, story.p2)
-          : Promise.resolve(null),
-      ]);
+    const [
+      elements,
+      messages,
+      characterMessages,
+      worldMessages,
+      worldElements,
+      architectureMessages,
+      guardrailFlags,
+      characterBibleGate,
+    ] = await Promise.all([
+      listElements(canvasId),
+      listMessages(canvasId),
+      includeCharacterMessages ? listMessages(canvasId, undefined, CHARACTER_MESSAGES_COLLECTION) : Promise.resolve([]),
+      includeWorldMessages ? listMessages(canvasId, undefined, WORLD_MESSAGES_COLLECTION) : Promise.resolve([]),
+      includeWorldElements ? listElements(canvasId, WORLD_ELEMENTS_COLLECTION) : Promise.resolve([]),
+      includeArchitectureMessages ? listMessages(canvasId, undefined, ARCHITECTURE_MESSAGES_COLLECTION) : Promise.resolve([]),
+      listGuardrailFlags(canvasId),
+      includeWorldMessages || includeWorldElements
+        ? computeCharacterBibleGate(canvasId, story.p2)
+        : Promise.resolve(null),
+    ]);
 
     // Track last-visited so a bare resume route lands back on whichever
     // project screen was actually active, not always Project 1 (issue #90,
@@ -96,16 +111,19 @@ export async function GET(
         ? characterBibleGate && !characterBibleGate.complete
           ? "character-bible"
           : "world-bible"
-        : "interview";
+        : includeArchitectureMessages
+          ? "story-architecture"
+          : "interview";
     await setLastVisited(user.uid, workspaceId, canvasId, lastProject);
 
     return NextResponse.json({
-      story: { ...story, p3: normalizeP3(story.p3) },
+      story: { ...story, p3: normalizeP3(story.p3), p4: normalizeP4(story.p4) },
       elements,
       messages,
       characterMessages,
       worldMessages,
       worldElements,
+      architectureMessages,
       guardrailFlags,
       characterBibleGate,
     });

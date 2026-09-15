@@ -3,6 +3,8 @@ import { listElements } from "./canonStore";
 import type { CanonElement } from "./types";
 import { getWorkspace, TierLimitError } from "@/lib/workspace/workspaceStore";
 import { TIER_LIMITS } from "@/lib/workspace/types";
+import type { RoutingState } from "@/lib/storyArchitectureEngine/developmentLoop";
+import type { StructuralUnit } from "@/lib/storyArchitectureEngine/stateLedger";
 
 /**
  * Story persistence — GitHub issue #12, reference implementation of the
@@ -131,6 +133,32 @@ export function normalizeP3(p3: P3State | null | undefined): P3State {
   };
 }
 
+/** Project 4's onboarding/routing state (issue #111) - deliberately
+ * minimal, mirroring P2State/P3State's own scalar/small-object shape.
+ * The structural-unit ledger itself lives in the separate `p4Units`
+ * field on Story (below), not nested here, matching how P3 keeps
+ * `p3PendingConflict`/`p3Stage4Audit` as siblings of `p3` rather than
+ * nested inside it. */
+export interface P4State {
+  /** False until the model reports a non-null routing_choice for the
+   * first time (issue #111 Decision 2) - the app-side backstop for
+   * onboardingGate.ts's own "no prose before the gate completes" rule,
+   * mirroring how p3Stage4Audit.authorApproved gates issue #49's Stage
+   * 4->5 transition. Never set back to false once true. */
+  onboardingComplete: boolean;
+  routing: RoutingState | null;
+}
+
+/** Fills in defaults for a Story doc written before P4 state existed -
+ * same reasoning as normalizeP3. */
+export function normalizeP4(p4: P4State | null | undefined): P4State {
+  return {
+    onboardingComplete: false,
+    routing: null,
+    ...p4,
+  };
+}
+
 export interface Story {
   id: string;
   ownerUid: string;
@@ -190,6 +218,22 @@ export interface Story {
    */
   p3?: P3State | null;
   /**
+   * Project 4's onboarding/routing state (issue #111). Optional/nullable
+   * since Stories created before this field existed won't have it in
+   * Firestore.
+   */
+  p4?: P4State | null;
+  /**
+   * Project 4's structural-unit session ledger (issue #111) - the
+   * author's editor is the sole owner of this array each turn (the live
+   * agent reports the full current unit it's working on; the route
+   * upserts into the existing array and writes the whole thing back),
+   * matching setP3Pillars's own "no concurrent-multi-writer case"
+   * reasoning. Optional/nullable since Stories created before this
+   * field existed won't have it in Firestore.
+   */
+  p4Units?: StructuralUnit[] | null;
+  /**
    * Project 1 completion lock. Set true by every successful Story
    * Foundation Document generation (POST .../document); cleared only by
    * the explicit unlock action (POST .../unlock). Optional/nullable since
@@ -231,6 +275,10 @@ export const CHARACTER_MESSAGES_COLLECTION = "characterMessages";
  * `current_character` simply stays unset for every Project 3 message,
  * since Project 3 has no per-character concept. */
 export const WORLD_MESSAGES_COLLECTION = "worldMessages";
+
+/** Project 4's message subcollection name (issue #111) - same reasoning
+ * as WORLD_MESSAGES_COLLECTION/CHARACTER_MESSAGES_COLLECTION. */
+export const ARCHITECTURE_MESSAGES_COLLECTION = "architectureMessages";
 
 export class StoryAccessError extends Error {
   constructor(message: string) {
@@ -438,6 +486,28 @@ export async function setP3ActivePillar(storyId: string, pillar: string | null):
   await storiesCollection()
     .doc(storyId)
     .update({ "p3.activePillar": pillar, updatedAt: new Date().toISOString() });
+}
+
+export async function setP4OnboardingComplete(storyId: string, complete: boolean): Promise<void> {
+  await storiesCollection()
+    .doc(storyId)
+    .update({ "p4.onboardingComplete": complete, updatedAt: new Date().toISOString() });
+}
+
+export async function setP4Routing(storyId: string, routing: RoutingState | null): Promise<void> {
+  await storiesCollection()
+    .doc(storyId)
+    .update({ "p4.routing": routing, updatedAt: new Date().toISOString() });
+}
+
+/** Whole-array-replace, matching setP3Pillars's exact precedent - the
+ * live agent reports the full current state of the unit it touched
+ * this turn; the route (Task 4) merges it into the existing array via
+ * stateLedger.ts's own upsertUnit before calling this. */
+export async function setP4Units(storyId: string, units: StructuralUnit[]): Promise<void> {
+  await storiesCollection()
+    .doc(storyId)
+    .update({ p4Units: units, updatedAt: new Date().toISOString() });
 }
 
 /** Records or clears Project 2's pending Story Foundation conflict (issue #30); pass null to clear once resolved. */

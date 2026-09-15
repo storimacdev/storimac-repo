@@ -3,10 +3,12 @@ import type { CanonStatus } from "@/lib/canonEngine/types";
 /**
  * The state ledger for Project 4's structural units — GitHub issue #62,
  * PRD §7.6 FR-6.1/FR-6.2, §9's `session_state.json` `units[]` shape.
- * Pure, in-memory, immutable-update functions - no Firestore, no LLM
- * call (P4 session state is in-memory only for this phase; persistence
- * is issue #69). `causalTag` exists per §9's shape but is never computed
- * or validated here - that's issue #63 (Causality Validation).
+ * Pure, immutable-update functions - no Firestore, no LLM call directly
+ * in this file. Issue #111 persists the resulting `StructuralUnit[]` to
+ * `Story.p4Units` via storyStore.ts's `setP4Units`; #69 covers anything
+ * beyond that whole-array persistence. `causalTag` exists per §9's shape
+ * but is never computed or validated here - that's issue #63 (Causality
+ * Validation).
  */
 
 export type StructuralUnitType = "Scene" | "Sequence" | "SetPiece" | "PlotPoint";
