@@ -1,10 +1,10 @@
 import { getDb } from "@/lib/firebaseAdmin";
 import { listElements } from "./canonStore";
-import type { CanonElement } from "./types";
+import type { CanonElement, CanonStatus } from "./types";
 import { getWorkspace, TierLimitError } from "@/lib/workspace/workspaceStore";
 import { TIER_LIMITS } from "@/lib/workspace/types";
 import type { RoutingState } from "@/lib/storyArchitectureEngine/developmentLoop";
-import type { StructuralUnit } from "@/lib/storyArchitectureEngine/stateLedger";
+import type { StructuralUnit, StructuralUnitType } from "@/lib/storyArchitectureEngine/stateLedger";
 
 /**
  * Story persistence — GitHub issue #12, reference implementation of the
@@ -159,6 +159,43 @@ export function normalizeP4(p4: P4State | null | undefined): P4State {
   };
 }
 
+/** Project 4's pending Canon Revision conflict (issue #64) - either a
+ * deterministic lifecycle regression (an already-Confirmed unit asked
+ * to move back to Exploring/Working, detected via
+ * canonEngine/transitions.ts's isValidTransition) or a cross-project
+ * contradiction against already-locked P1-3 canon (detected via model
+ * self-report, since there's no deterministic way to judge
+ * contradiction against another project's canon from P4's side).
+ * Singular, like P1/P2/P3's own pending-conflict fields - only one
+ * conflict is ever open at a time. Both variants carry the triggering
+ * turn's full requested content/status/canon_refs/type so
+ * canonRevision.ts's resolveP4Conflict can apply the original request
+ * later without asking the model to re-propose it from scratch - same
+ * reasoning as P3PendingConflict's "confirmed_entry" variant storing
+ * newValue at detection time. */
+export type P4PendingConflict =
+  | {
+      kind: "unit_regression";
+      unitId: string;
+      type: StructuralUnitType;
+      requestedStatus: CanonStatus;
+      requestedContent: string;
+      requestedCanonRefs: string[];
+      ts: string;
+    }
+  | {
+      kind: "canon_contradiction";
+      unitId: string;
+      type: StructuralUnitType;
+      sourceProject: "Project 1" | "Project 2" | "Project 3";
+      contradictedRef: string;
+      explanation: string;
+      requestedStatus: CanonStatus;
+      requestedContent: string;
+      requestedCanonRefs: string[];
+      ts: string;
+    };
+
 export interface Story {
   id: string;
   ownerUid: string;
@@ -233,6 +270,13 @@ export interface Story {
    * field existed won't have it in Firestore.
    */
   p4Units?: StructuralUnit[] | null;
+  /**
+   * Project 4's pending Canon Revision conflict (issue #64), cleared
+   * once the author picks one of the three resolution choices.
+   * Optional/nullable since Stories created before this field existed
+   * won't have it in Firestore.
+   */
+  p4PendingConflict?: P4PendingConflict | null;
   /**
    * Project 1 completion lock. Set true by every successful Story
    * Foundation Document generation (POST .../document); cleared only by
@@ -510,6 +554,16 @@ export async function setP4Units(storyId: string, units: StructuralUnit[]): Prom
     .update({ p4Units: units, updatedAt: new Date().toISOString() });
 }
 
+/** Records or clears Project 4's pending Canon Revision conflict (issue #64); pass null to clear once resolved. */
+export async function setP4PendingConflict(
+  storyId: string,
+  conflict: P4PendingConflict | null
+): Promise<void> {
+  await storiesCollection()
+    .doc(storyId)
+    .update({ p4PendingConflict: conflict, updatedAt: new Date().toISOString() });
+}
+
 /** Records or clears Project 2's pending Story Foundation conflict (issue #30); pass null to clear once resolved. */
 export async function setP2PendingConflict(
   storyId: string,
@@ -650,6 +704,29 @@ export async function appendP3ConflictLog(storyId: string, entry: P3ConflictLogE
 export async function listP3ConflictLog(storyId: string): Promise<P3ConflictLogEntry[]> {
   const snap = await p3ConflictLogCollection(storyId).orderBy("ts", "asc").get();
   return snap.docs.map((d) => d.data() as P3ConflictLogEntry);
+}
+
+/** Project 4's Canon Revision log (issue #64) - one entry per resolved conflict, either kind. */
+export interface P4CanonRevisionLogEntry {
+  kind: "unit_regression" | "canon_contradiction";
+  unitId: string;
+  description: string;
+  /** Present only for kind "canon_contradiction". */
+  sourceProject?: "Project 1" | "Project 2" | "Project 3";
+  contradictedRef?: string;
+  resolution: "revert" | "accept_and_update" | "park";
+  resolvedBy: string;
+  ts: string;
+  turnId: string;
+}
+
+function p4CanonRevisionLogCollection(storyId: string) {
+  return storiesCollection().doc(storyId).collection("p4CanonRevisionLog");
+}
+
+/** Appends a resolved conflict to Project 4's Canon Revision log (issue #64). */
+export async function appendP4CanonRevisionLog(storyId: string, entry: P4CanonRevisionLogEntry): Promise<void> {
+  await p4CanonRevisionLogCollection(storyId).add(entry);
 }
 
 /** Project 2's compiled, permanent Character Bible entries (issue #34,
