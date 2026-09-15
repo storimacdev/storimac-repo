@@ -10,12 +10,16 @@ import {
   setP4OnboardingComplete,
   setP4Routing,
   setP4Units,
+  setP4PendingConflict,
   appendMessage,
   listMessages,
   appendOutstandingQuestions,
   ARCHITECTURE_MESSAGES_COLLECTION,
+  type P4PendingConflict,
 } from "@/lib/canonEngine/storyStore";
 import { extractTurn, TurnValidationError } from "@/lib/canonEngine/extractTurn";
+import { isValidTransition } from "@/lib/canonEngine/transitions";
+import { buildP4ConflictContextMessage, resolveP4Conflict } from "@/lib/storyArchitectureEngine/canonRevision";
 import { RateLimitTimeoutError } from "@/lib/rateLimit/anthropicGate";
 import { getSystemPrompt } from "@/lib/systemPrompt";
 import { ArchitectureTurnSchema, EMIT_ARCHITECTURE_TURN_TOOL } from "@/lib/storyArchitectureEngine/architectureTurnSchema";
@@ -89,6 +93,7 @@ export async function POST(req: NextRequest) {
     const p4 = normalizeP4(story.p4);
     const canon = await ingestCanon(storyId);
     let units = story.p4Units ?? [];
+    const pendingConflictBefore = story.p4PendingConflict ?? null;
 
     let system = getSystemPrompt("sp04-sae-systemprompt.md");
 
@@ -106,6 +111,16 @@ export async function POST(req: NextRequest) {
         (u) => `- unit_id: ${u.unitId} | type: ${u.type} | status: ${u.status}`
       );
       system += `\n\n[Structural Units So Far - computed by the app, trust this over re-deriving it. Internal grounding only, never narrate this raw data to the author. When continuing, revising, or validating any unit listed here, set proposed_unit.unit_id to its id exactly as shown - never invent a new id and never leave unit_id null for a unit that already appears here, or you will create an unwanted duplicate.]\n${unitLines.join("\n")}`;
+    }
+
+    // Canon Revision Path grounding (issue #64) - only while a conflict
+    // is genuinely open; cleared once resolved (Step 4 below). Shown
+    // even while onboarding is incomplete would be impossible anyway -
+    // a conflict can only ever be opened after onboarding completes,
+    // since both triggers require delta.proposed_unit, which is
+    // clamped until then.
+    if (pendingConflictBefore) {
+      system += buildP4ConflictContextMessage(pendingConflictBefore);
     }
 
     if (!p4.onboardingComplete) {
@@ -143,6 +158,8 @@ export async function POST(req: NextRequest) {
     // to distinguish "no status transition was attempted this turn" from
     // "one was attempted and accepted."
     let statusAttempt: StatusTransitionAttempt | null = null;
+    let pendingConflictForResponse: P4PendingConflict | null = pendingConflictBefore;
+    let cascadeReview: { id: string; description: string }[] | null = null;
 
     try {
       // Onboarding gate: flips once, on the first non-null routing_choice
@@ -173,55 +190,97 @@ export async function POST(req: NextRequest) {
       // not effectiveOnboardingComplete - an ordinary first reply that sets
       // routing_choice and proposes a unit in the same turn must still see
       // the unit clamped, or the author could skip onboarding entirely.
-      if (p4.onboardingComplete && delta.proposed_unit) {
-        const proposed = delta.proposed_unit;
-        const existing = findUnit(units, proposed.unit_id);
-        const base = existing ?? createUnit(proposed.unit_id, proposed.type);
-        const withContent = addCanonRefs(setUnitContent(base, proposed.content), proposed.canon_refs);
+      if (p4.onboardingComplete) {
+        if (pendingConflictBefore && delta.resolution !== null) {
+          const result = await resolveP4Conflict({
+            storyId,
+            conflict: pendingConflictBefore,
+            resolution: delta.resolution,
+            turnId,
+            resolvedBy: user.uid,
+            units,
+          });
+          units = result.units;
+          cascadeReview = result.cascadeReview;
+          await setP4Units(storyId, units);
+          // Persist the clear before updating the in-memory value, same
+          // ordering worldEngine/conflictResolution.ts's own resolution
+          // flow uses: if setP4PendingConflict throws, the outer catch's
+          // console.warn still fires, but pendingConflictForResponse
+          // stays at its pre-resolution value rather than telling this
+          // turn's response the conflict is resolved while Firestore
+          // still shows it open.
+          await setP4PendingConflict(storyId, null);
+          pendingConflictForResponse = null;
+          effectiveUnit = findUnit(units, pendingConflictBefore.unitId);
+        } else if (!pendingConflictBefore && delta.proposed_unit) {
+          const proposed = delta.proposed_unit;
+          const existing = findUnit(units, proposed.unit_id);
 
-        const causalGate = evaluateCausalGate(
-          proposed.requested_status,
-          proposed.causal_tag,
-          delta.active_step_number,
-          proposed.causal_tag_reason
-        );
-        const coreValid = delta.validation_result === "passed";
-        const combinedValid = coreValid && causalGate.ok;
-        const combinedReason = !coreValid ? delta.validation_reason : causalGate.reason;
+          if (existing && !isValidTransition(existing.status, proposed.requested_status)) {
+            const newConflict: P4PendingConflict = {
+              kind: "unit_regression",
+              unitId: existing.unitId,
+              type: existing.type,
+              requestedStatus: proposed.requested_status,
+              requestedContent: proposed.content,
+              requestedCanonRefs: proposed.canon_refs,
+              ts: new Date().toISOString(),
+            };
+            await setP4PendingConflict(storyId, newConflict);
+            pendingConflictForResponse = newConflict;
+          } else if (proposed.canon_contradiction) {
+            const newConflict: P4PendingConflict = {
+              kind: "canon_contradiction",
+              unitId: proposed.unit_id,
+              type: proposed.type,
+              sourceProject: proposed.canon_contradiction.source_project,
+              contradictedRef: proposed.canon_contradiction.contradicted_ref,
+              explanation: proposed.canon_contradiction.explanation,
+              requestedStatus: proposed.requested_status,
+              requestedContent: proposed.content,
+              requestedCanonRefs: proposed.canon_refs,
+              ts: new Date().toISOString(),
+            };
+            await setP4PendingConflict(storyId, newConflict);
+            pendingConflictForResponse = newConflict;
+          } else {
+            const base = existing ?? createUnit(proposed.unit_id, proposed.type);
+            const withContent = addCanonRefs(setUnitContent(base, proposed.content), proposed.canon_refs);
 
-        const attempt = attemptStatusTransition(withContent, proposed.requested_status, {
-          valid: combinedValid,
-          reason: combinedReason,
-        });
-        statusAttempt = attempt;
+            const causalGate = evaluateCausalGate(
+              proposed.requested_status,
+              proposed.causal_tag,
+              delta.active_step_number,
+              proposed.causal_tag_reason
+            );
+            const coreValid = delta.validation_result === "passed";
+            const combinedValid = coreValid && causalGate.ok;
+            const combinedReason = !coreValid ? delta.validation_reason : causalGate.reason;
 
-        // Causal tag persists independent of the combined gate's outcome -
-        // same "update regardless of status outcome" convention
-        // setUnitContent/addCanonRefs above already follow, so a unit
-        // sitting at Working still records its current best causal read.
-        // "And Then" is never persisted as a tag value. When the causal
-        // gate itself rejects, the tag resets to "UNVALIDATED" rather
-        // than being left untouched - final whole-branch review finding
-        // I1: content is always overwritten above regardless of outcome
-        // (pre-existing #111 behavior), so leaving a stale "Therefore"
-        // from a PRIOR turn's accepted content in place would let this
-        // turn's freshly-rejected, coincidence-driven content sit behind
-        // an already-Confirmed unit's old causal certification.
-        let finalUnit = attempt.unit;
-        if (proposed.causal_tag === "Therefore" || proposed.causal_tag === "But") {
-          finalUnit = setCausalTag(finalUnit, proposed.causal_tag);
-        } else if (!causalGate.ok) {
-          finalUnit = setCausalTag(finalUnit, "UNVALIDATED");
-        }
+            const attempt = attemptStatusTransition(withContent, proposed.requested_status, {
+              valid: combinedValid,
+              reason: combinedReason,
+            });
+            statusAttempt = attempt;
 
-        units = upsertUnit(units, finalUnit);
-        await setP4Units(storyId, units);
-        effectiveUnit = finalUnit;
+            let finalUnit = attempt.unit;
+            if (proposed.causal_tag === "Therefore" || proposed.causal_tag === "But") {
+              finalUnit = setCausalTag(finalUnit, proposed.causal_tag);
+            } else if (!causalGate.ok) {
+              finalUnit = setCausalTag(finalUnit, "UNVALIDATED");
+            }
 
-        if (proposed.proposed_position_percent !== null) {
-          const step = STRUCTURAL_STEPS.find((s) => s.stepNumber === delta.active_step_number);
-          if (step) {
-            placementFlag = checkPlacementDeviation(step, proposed.proposed_position_percent);
+            units = upsertUnit(units, finalUnit);
+            await setP4Units(storyId, units);
+            effectiveUnit = finalUnit;
+
+            if (proposed.proposed_position_percent !== null) {
+              const step = STRUCTURAL_STEPS.find((s) => s.stepNumber === delta.active_step_number);
+              if (step) {
+                placementFlag = checkPlacementDeviation(step, proposed.proposed_position_percent);
+              }
+            }
           }
         }
       }
@@ -271,6 +330,8 @@ export async function POST(req: NextRequest) {
       // silently wrong when causality was the actual blocker instead.
       validationReason: statusAttempt?.reason ?? delta.validation_reason,
       statusAccepted: statusAttempt?.accepted ?? null,
+      pendingConflict: pendingConflictForResponse,
+      cascadeReview,
     });
   } catch (err) {
     if (err instanceof RateLimitTimeoutError) {
