@@ -12,6 +12,7 @@ import {
   setP4Units,
   appendMessage,
   listMessages,
+  appendOutstandingQuestions,
   ARCHITECTURE_MESSAGES_COLLECTION,
 } from "@/lib/canonEngine/storyStore";
 import { extractTurn, TurnValidationError } from "@/lib/canonEngine/extractTurn";
@@ -29,7 +30,12 @@ import {
   addCanonRefs,
   type StructuralUnit,
 } from "@/lib/storyArchitectureEngine/stateLedger";
-import { attemptStatusTransition, checkPlacementDeviation, switchRoute } from "@/lib/storyArchitectureEngine/developmentLoop";
+import {
+  attemptStatusTransition,
+  checkPlacementDeviation,
+  switchRoute,
+  type StatusTransitionAttempt,
+} from "@/lib/storyArchitectureEngine/developmentLoop";
 
 export const runtime = "nodejs";
 
@@ -80,10 +86,25 @@ export async function POST(req: NextRequest) {
 
     const p4 = normalizeP4(story.p4);
     const canon = await ingestCanon(storyId);
+    let units = story.p4Units ?? [];
 
     let system = getSystemPrompt("sp04-sae-systemprompt.md");
 
     system += `\n\n[Canon Ingestion Summary - computed by the app, trust this over re-deriving it. Internal grounding only, never narrate this raw data to the author.]\n${canon.structuralOverview}`;
+
+    // Structural Units grounding (final whole-branch review finding I1,
+    // round 2) - mirrors world-chat/route.ts's own "World Entries So
+    // Far" block exactly: the model's only way to reference an existing
+    // unit by id in proposed_unit.unit_id, without which unit_id can
+    // only ever be null or hallucinated and every continuing/validating
+    // turn would create a fresh duplicate unit instead of advancing the
+    // one already drafted.
+    if (units.length > 0) {
+      const unitLines = units.map(
+        (u) => `- unit_id: ${u.unitId} | type: ${u.type} | status: ${u.status}`
+      );
+      system += `\n\n[Structural Units So Far - computed by the app, trust this over re-deriving it. Internal grounding only, never narrate this raw data to the author. When continuing, revising, or validating any unit listed here, set proposed_unit.unit_id to its id exactly as shown - never invent a new id and never leave unit_id null for a unit that already appears here, or you will create an unwanted duplicate.]\n${unitLines.join("\n")}`;
+    }
 
     if (!p4.onboardingComplete) {
       const onboarding = buildOnboardingOutput(canon);
@@ -114,7 +135,12 @@ export async function POST(req: NextRequest) {
     let effectiveRouting = p4.routing;
     let effectiveUnit: StructuralUnit | null = null;
     let placementFlag: { flagged: boolean; message: string | null } = { flagged: false, message: null };
-    let units = story.p4Units ?? [];
+    // Never computed (stays null) when proposed_unit was null this turn or
+    // was clamped by the pre-existing onboarding backstop below - final
+    // whole-branch review finding I2, round 2: the response must be able
+    // to distinguish "no status transition was attempted this turn" from
+    // "one was attempted and accepted."
+    let statusAttempt: StatusTransitionAttempt | null = null;
 
     try {
       // Onboarding gate: flips once, on the first non-null routing_choice
@@ -155,6 +181,7 @@ export async function POST(req: NextRequest) {
           valid: delta.validation_result === "passed",
           reason: delta.validation_reason,
         });
+        statusAttempt = attempt;
 
         units = upsertUnit(units, attempt.unit);
         await setP4Units(storyId, units);
@@ -177,6 +204,27 @@ export async function POST(req: NextRequest) {
       ARCHITECTURE_MESSAGES_COLLECTION
     );
 
+    // Deferred-item persistence (final whole-branch review finding I5,
+    // round 2) - mirrors world-chat/route.ts's exact call site and
+    // error-handling shape: fires right after the assistant message is
+    // persisted, wrapped in its own try/catch that only console.warns on
+    // failure, never blocks the response. No charId - P4 has no
+    // per-character deferral concept, unlike P2's retrofit.
+    if (delta.deferred_items.length > 0) {
+      try {
+        await appendOutstandingQuestions(
+          storyId,
+          delta.deferred_items.map((d) => ({
+            item: d.item,
+            defer_to: d.defer_to_project,
+            notes: d.notes,
+          }))
+        );
+      } catch (deferredErr) {
+        console.warn(`[architecture-chat] deferred-item logging failed for turn ${turnId}:`, deferredErr);
+      }
+    }
+
     return NextResponse.json({
       reply: delta.reply,
       context: delta.context,
@@ -185,6 +233,9 @@ export async function POST(req: NextRequest) {
       unit: effectiveUnit,
       placementFlag,
       deferredItems: delta.deferred_items,
+      validationResult: delta.validation_result,
+      validationReason: delta.validation_reason,
+      statusAccepted: statusAttempt?.accepted ?? null,
     });
   } catch (err) {
     if (err instanceof RateLimitTimeoutError) {
@@ -198,6 +249,13 @@ export async function POST(req: NextRequest) {
       console.error("Architecture turn extraction failed:", err);
       return NextResponse.json(
         { error: "The conversation couldn't produce a valid response. Please try again." },
+        { status: 502 }
+      );
+    }
+    if (err instanceof Anthropic.APIError) {
+      console.error("Anthropic API error:", err);
+      return NextResponse.json(
+        { error: "The Structural Architect couldn't reach the model. Please try again." },
         { status: 502 }
       );
     }

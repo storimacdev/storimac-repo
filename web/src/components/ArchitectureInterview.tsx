@@ -7,14 +7,19 @@ import { downloadText } from "@/lib/download";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 
+type UnitSummary = { unitId: string; type: string; status: string };
+
 interface TurnResponse {
   reply: string;
   context: string;
   routing_choice: "A" | "B" | "C" | null;
   active_step_number: number | null;
-  unit: { unitId: string; type: string; status: string } | null;
+  unit: UnitSummary | null;
   placementFlag: { flagged: boolean; message: string | null };
   deferredItems: { item: string; defer_to_project: string | null; notes: string }[];
+  validationResult: "passed" | "failed" | "not_applicable";
+  validationReason: string;
+  statusAccepted: boolean | null;
 }
 
 export default function ArchitectureInterview() {
@@ -31,13 +36,56 @@ export default function ArchitectureInterview() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [resuming, setResuming] = useState(() => Boolean(workspaceId && canvasId));
   const [error, setError] = useState<string | null>(null);
   const [routingChoice, setRoutingChoice] = useState<"A" | "B" | "C" | null>(null);
   const [activeStep, setActiveStep] = useState<number | null>(null);
+  const [units, setUnits] = useState<UnitSummary[]>([]);
   const [placementFlag, setPlacementFlag] = useState<{ flagged: boolean; message: string | null } | null>(null);
+  const [validationResult, setValidationResult] = useState<"passed" | "failed" | "not_applicable" | null>(null);
+  const [validationReason, setValidationReason] = useState<string | null>(null);
+  const [statusAccepted, setStatusAccepted] = useState<boolean | null>(null);
   const [compiling, setCompiling] = useState(false);
   const [compiled, setCompiled] = useState<{ markdown: string; outstandingCount: number } | null>(null);
   const [compileError, setCompileError] = useState<string | null>(null);
+
+  // Resume/hydration on mount (issue #111, final whole-branch review
+  // finding I4/R1) - mirrors WorldInterview.tsx's own resume effect
+  // exactly in shape: without this, a page reload always started with
+  // empty messages/routingChoice/units even though the server had been
+  // remembering everything all along, and setLastProject's server-side
+  // half (written by /api/workspaces/.../canvases/[canvasId]'s own
+  // setLastVisited call) could never actually be reached, since nothing
+  // ever called that route with architectureMessages=1.
+  useEffect(() => {
+    if (!workspaceId || !canvasId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/workspaces/${workspaceId}/canvases/${canvasId}?architectureMessages=1`);
+        const data = await res.json();
+        if (cancelled) return;
+        if (!res.ok) {
+          setError(data.error ?? "Couldn't load this Story Canvas.");
+          return;
+        }
+        const rawMessages = (data.architectureMessages ?? []) as {
+          role: "user" | "assistant";
+          content: string;
+        }[];
+        setMessages(rawMessages.map((m) => ({ role: m.role, content: m.content })));
+        setRoutingChoice((data.story?.p4?.routing?.routingChoice as "A" | "B" | "C" | undefined) ?? null);
+        setUnits((data.story?.p4Units as UnitSummary[] | undefined) ?? []);
+      } catch {
+        if (!cancelled) setError("Couldn't reach the server. Is the dev server running?");
+      } finally {
+        if (!cancelled) setResuming(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, canvasId]);
 
   async function sendMessage() {
     if (!canvasId || !input.trim() || loading) return;
@@ -61,6 +109,17 @@ export default function ArchitectureInterview() {
       setRoutingChoice(data.routing_choice);
       setActiveStep(data.active_step_number);
       setPlacementFlag(data.placementFlag.flagged ? data.placementFlag : null);
+      setValidationResult(data.validationResult);
+      setValidationReason(data.validationReason);
+      setStatusAccepted(data.statusAccepted);
+      const turnUnit = data.unit;
+      if (turnUnit) {
+        setUnits((prev) => {
+          const index = prev.findIndex((u) => u.unitId === turnUnit.unitId);
+          if (index === -1) return [...prev, turnUnit];
+          return prev.map((u, i) => (i === index ? turnUnit : u));
+        });
+      }
     } catch {
       setError("Couldn't reach the server.");
     } finally {
@@ -108,6 +167,8 @@ export default function ArchitectureInterview() {
         <div className="flex items-center gap-3 text-xs text-neutral-400">
           <span>Routing: {routingChoice ?? "not chosen yet"}</span>
           <span>Active Step: {activeStep ?? "—"}</span>
+          <span>Units: {units.length}</span>
+          {validationResult && <span>Validation: {validationResult}</span>}
           <button
             onClick={compileDocument}
             disabled={compiling}
@@ -121,6 +182,12 @@ export default function ArchitectureInterview() {
       {placementFlag?.message && (
         <div className="border-b border-amber-500/30 bg-amber-950/30 px-6 py-2 text-xs text-amber-200">
           {placementFlag.message}
+        </div>
+      )}
+
+      {validationResult === "failed" && validationReason && (
+        <div className="border-b border-red-500/30 bg-red-950/30 px-6 py-2 text-xs text-red-200">
+          Validation failed{statusAccepted === false ? " — status change rejected" : ""}: {validationReason}
         </div>
       )}
 
@@ -140,13 +207,21 @@ export default function ArchitectureInterview() {
       {compileError && <p className="border-b border-red-500/30 px-6 py-2 text-xs text-red-400">{compileError}</p>}
 
       <div className="flex-1 overflow-y-auto px-6 py-6">
-        {messages.map((m, i) => (
-          <div key={i} className={`mb-4 ${m.role === "user" ? "text-right" : "text-left"}`}>
-            <p className="inline-block max-w-2xl rounded-xl bg-neutral-900 px-4 py-2 text-sm text-neutral-200">
-              {m.content}
+        {resuming && (
+          <div className="mb-4 text-left">
+            <p className="inline-block max-w-2xl rounded-xl bg-neutral-900 px-4 py-2 text-sm text-neutral-400">
+              Loading your canvas…
             </p>
           </div>
-        ))}
+        )}
+        {!resuming &&
+          messages.map((m, i) => (
+            <div key={i} className={`mb-4 ${m.role === "user" ? "text-right" : "text-left"}`}>
+              <p className="inline-block max-w-2xl rounded-xl bg-neutral-900 px-4 py-2 text-sm text-neutral-200">
+                {m.content}
+              </p>
+            </div>
+          ))}
         {error && <p className="text-xs text-red-400">{error}</p>}
       </div>
 
@@ -161,13 +236,13 @@ export default function ArchitectureInterview() {
                 sendMessage();
               }
             }}
-            disabled={loading}
+            disabled={loading || resuming}
             placeholder="Message the Screenplay Structural Architect…"
             className="flex-1 rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm text-neutral-100"
           />
           <button
             onClick={sendMessage}
-            disabled={loading}
+            disabled={loading || resuming}
             className="rounded-lg border border-purple-500/50 bg-neutral-900 px-4 py-2 text-sm font-semibold text-purple-200 hover:bg-purple-900/40 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {loading ? "…" : "Send"}
