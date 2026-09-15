@@ -74,9 +74,15 @@ export async function resolveP4Conflict(params: ResolveP4ConflictParams): Promis
   let cascadeReview: P4CascadeReviewEntry[] | null = null;
 
   if (resolution === "park") {
-    if (existing) {
-      updatedUnits = upsertUnit(units, setUnitStatus(existing, "Parked"));
-    }
+    // Same existing-or-create fallback as accept_and_update below - a
+    // canon_contradiction can fire on a unit that never existed in the
+    // ledger before (Task 1 review's own finding: the brief's first
+    // draft only handled `existing`, silently no-opping "park" for a
+    // brand-new idea and leaving no Parked unit for the author to see,
+    // even though the issue's own AC literally requires one - "(C) Park
+    // the idea (Parked status, logged to Outstanding Decisions)").
+    const base = existing ?? createUnit(conflict.unitId, conflict.type);
+    updatedUnits = upsertUnit(units, setUnitStatus(base, "Parked"));
   } else if (resolution === "accept_and_update") {
     const base = existing ?? createUnit(conflict.unitId, conflict.type);
     const withContent = addCanonRefs(setUnitContent(base, conflict.requestedContent), conflict.requestedCanonRefs);
