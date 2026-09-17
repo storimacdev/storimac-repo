@@ -264,6 +264,18 @@ export async function POST(req: NextRequest) {
             });
             statusAttempt = attempt;
 
+            // Causal tag persists independent of the combined gate's outcome -
+            // same "update regardless of status outcome" convention
+            // setUnitContent/addCanonRefs above already follow, so a unit
+            // sitting at Working still records its current best causal read.
+            // "And Then" is never persisted as a tag value. When the causal
+            // gate itself rejects, the tag resets to "UNVALIDATED" rather
+            // than being left untouched - final whole-branch review finding
+            // I1: content is always overwritten above regardless of outcome
+            // (pre-existing #111 behavior), so leaving a stale "Therefore"
+            // from a PRIOR turn's accepted content in place would let this
+            // turn's freshly-rejected, coincidence-driven content sit behind
+            // an already-Confirmed unit's old causal certification.
             let finalUnit = attempt.unit;
             if (proposed.causal_tag === "Therefore" || proposed.causal_tag === "But") {
               finalUnit = setCausalTag(finalUnit, proposed.causal_tag);
