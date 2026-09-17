@@ -51,6 +51,38 @@ export const ArchitectureTurnSchema = z.object({
     })
   ),
   resolution: z.enum(["revert", "accept_and_update", "park"]).nullable(),
+  structural_vector_options: z
+    .object({
+      unit_id: z.string().min(1),
+      options: z
+        .array(
+          z.object({
+            content: z.string().min(1),
+            pacing_impact: z.string().min(1),
+            downstream_requirements: z.string().min(1),
+            thematic_impact: z.string().min(1),
+          })
+        )
+        .min(2)
+        .max(5),
+    })
+    // Final whole-branch review finding I1: this field carries zero
+    // gating consequence and is never persisted - its content is
+    // already duplicated in `reply`'s own prose per sp04 Section 10.
+    // Unlike every gating field in this schema (proposed_unit,
+    // validation_result), fail-closed is the wrong default here: a
+    // malformed options payload (wrong count, an empty required
+    // string, a truncation-dropped field) would otherwise 502 the
+    // WHOLE turn - discarding the model's actual reply and leaving a
+    // dangling persisted user message - at the exact moment the
+    // author is stuck and asked for help. `.nullish()` additionally
+    // tolerates a field dropped entirely by truncation; `.catch(null)`
+    // degrades any other malformed shape to null rather than failing
+    // the parse, so the turn still succeeds and the options are simply
+    // absent from the structured response (the author still sees them
+    // in `reply`'s prose).
+    .nullish()
+    .catch(null),
 });
 
 export type ArchitectureTurn = z.infer<typeof ArchitectureTurnSchema>;
@@ -178,6 +210,33 @@ export const EMIT_ARCHITECTURE_TURN_TOOL: Anthropic.Tool = {
         description:
           "Set only on the turn immediately after the author picks one of the three choices presented for an open Canon Revision Path conflict (see your grounding). Null on every other turn.",
       },
+      structural_vector_options: {
+        type: ["object", "null"],
+        properties: {
+          unit_id: {
+            type: "string",
+            description: "The structural unit these options are for - reuse its exact id if it already appears in Structural Units So Far, mint a fresh id only for a genuinely new unit.",
+          },
+          options: {
+            type: "array",
+            minItems: 2,
+            maxItems: 5,
+            items: {
+              type: "object",
+              properties: {
+                content: { type: "string", description: "A rough structural description of this approach - not full Scene Specification Format, since the author hasn't chosen it yet." },
+                pacing_impact: { type: "string", description: "This option's pacing/hierarchy impact." },
+                downstream_requirements: { type: "string", description: "The downstream setup/payoff requirements this option would create." },
+                thematic_impact: { type: "string", description: "This option's impact on character transformation timing and thematic resolution." },
+              },
+              required: ["content", "pacing_impact", "downstream_requirements", "thematic_impact"],
+            },
+            description: "2-5 distinct structural approaches, each stating all three required impacts.",
+          },
+        },
+        required: ["unit_id", "options"],
+        description: "Set only when the author seems stuck on a structural unit or explicitly asks for options. Null on every other turn - never set in the same turn as proposed_unit.",
+      },
     },
     required: [
       "reply",
@@ -189,6 +248,7 @@ export const EMIT_ARCHITECTURE_TURN_TOOL: Anthropic.Tool = {
       "validation_reason",
       "deferred_items",
       "resolution",
+      "structural_vector_options",
     ],
   },
 };
