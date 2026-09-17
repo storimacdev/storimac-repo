@@ -48,7 +48,7 @@ export function checkThematicAnchorCoverage(units: StructuralUnit[]): ThematicAn
       findings.push({
         id: `coverage-step-${stepNumber}`,
         status: "flag",
-        detail: `Step ${stepNumber} (${step?.title ?? "?"}) has no Confirmed content yet - the internal-transformation arc can't be complete without it.`,
+        detail: `Step ${stepNumber} (${step?.title ?? "?"}) has no Confirmed content currently tagged to it - the internal-transformation arc can't be complete without it.`,
       });
     }
   }

@@ -44,23 +44,45 @@ export async function POST(req: NextRequest) {
     }
 
     const units = story.p4Units ?? [];
-    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     let thematicAnchorAudit: ThematicAnchorAuditResult;
-    try {
-      thematicAnchorAudit = await runThematicAnchorAudit(anthropic, units);
-    } catch (auditErr) {
-      console.warn(`[architecture-chat/document] Thematic Anchor Audit failed for story ${storyId}:`, auditErr);
+    if (acknowledged) {
+      // Final whole-branch review finding I2: re-running the audit here
+      // (including its model consistency call) would spend a second,
+      // independent, nondeterministic model call and could contradict
+      // the very finding the author just acknowledged - e.g. returning
+      // a clean pass immediately after "Compile anyway," or a different
+      // complaint than the one they actually saw. The author has
+      // already made their choice; nothing further needs checking on
+      // this request.
       thematicAnchorAudit = {
         findings: [
           {
-            id: "consistency-unavailable",
+            id: "acknowledged-by-author",
             status: "flag",
-            detail: "The Thematic Anchor Audit's consistency check couldn't complete - please try again before compiling.",
+            detail: "Compiled despite an earlier Thematic Anchor Audit gap - the author chose to proceed anyway.",
           },
         ],
         gapFound: true,
         generatedAt: new Date().toISOString(),
       };
+    } else {
+      const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      try {
+        thematicAnchorAudit = await runThematicAnchorAudit(anthropic, units);
+      } catch (auditErr) {
+        console.warn(`[architecture-chat/document] Thematic Anchor Audit failed for story ${storyId}:`, auditErr);
+        thematicAnchorAudit = {
+          findings: [
+            {
+              id: "consistency-unavailable",
+              status: "flag",
+              detail: "The Thematic Anchor Audit's consistency check couldn't complete - please try again before compiling.",
+            },
+          ],
+          gapFound: true,
+          generatedAt: new Date().toISOString(),
+        };
+      }
     }
 
     if (thematicAnchorAudit.gapFound && !acknowledged) {

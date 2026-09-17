@@ -203,6 +203,9 @@ export default function ArchitectureInterview() {
       }
       if (!res.ok) {
         setCompileError(data.error ?? "Compile failed.");
+        setCompiled(null);
+        setThematicAnchorAudit(null);
+        setCompileNeedsAcknowledgment(false);
         return;
       }
       setThematicAnchorAudit(data.thematicAnchorAudit);
