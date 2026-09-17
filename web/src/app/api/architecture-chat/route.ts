@@ -178,6 +178,7 @@ export async function POST(req: NextRequest) {
       messages,
       tool: EMIT_ARCHITECTURE_TURN_TOOL,
       schema: ArchitectureTurnSchema,
+      maxTokens: 8192,
     });
 
     let effectiveOnboardingComplete = p4.onboardingComplete;

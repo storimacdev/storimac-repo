@@ -66,7 +66,23 @@ export const ArchitectureTurnSchema = z.object({
         .min(2)
         .max(5),
     })
-    .nullable(),
+    // Final whole-branch review finding I1: this field carries zero
+    // gating consequence and is never persisted - its content is
+    // already duplicated in `reply`'s own prose per sp04 Section 10.
+    // Unlike every gating field in this schema (proposed_unit,
+    // validation_result), fail-closed is the wrong default here: a
+    // malformed options payload (wrong count, an empty required
+    // string, a truncation-dropped field) would otherwise 502 the
+    // WHOLE turn - discarding the model's actual reply and leaving a
+    // dangling persisted user message - at the exact moment the
+    // author is stuck and asked for help. `.nullish()` additionally
+    // tolerates a field dropped entirely by truncation; `.catch(null)`
+    // degrades any other malformed shape to null rather than failing
+    // the parse, so the turn still succeeds and the options are simply
+    // absent from the structured response (the author still sees them
+    // in `reply`'s prose).
+    .nullish()
+    .catch(null),
 });
 
 export type ArchitectureTurn = z.infer<typeof ArchitectureTurnSchema>;

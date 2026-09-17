@@ -297,6 +297,7 @@ export default function ArchitectureInterview() {
           <div className="grid gap-3 sm:grid-cols-2">
             {structuralVectorOptions.options.map((option, i) => (
               <div key={i} className="rounded-lg border border-teal-500/30 bg-neutral-900 p-3">
+                <p className="mb-1 font-semibold text-teal-100">Option {i + 1}</p>
                 <p className="mb-2 text-teal-100">{option.content}</p>
                 <p className="mb-1">
                   <span className="font-semibold">Pacing:</span> {option.pacing_impact}
