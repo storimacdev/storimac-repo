@@ -11,6 +11,9 @@ type UnitSummary = { unitId: string; type: string; status: string };
 
 type SceneDensity = { count: number; projectedTotal: number | null; alert: "under" | "over" | null };
 
+type ThematicAnchorFinding = { id: string; status: "pass" | "flag"; detail: string };
+type ThematicAnchorAudit = { findings: ThematicAnchorFinding[]; gapFound: boolean };
+
 interface TurnResponse {
   reply: string;
   context: string;
@@ -56,6 +59,8 @@ export default function ArchitectureInterview() {
   const [compiling, setCompiling] = useState(false);
   const [compiled, setCompiled] = useState<{ markdown: string; outstandingCount: number } | null>(null);
   const [compileError, setCompileError] = useState<string | null>(null);
+  const [thematicAnchorAudit, setThematicAnchorAudit] = useState<ThematicAnchorAudit | null>(null);
+  const [compileNeedsAcknowledgment, setCompileNeedsAcknowledgment] = useState(false);
 
   // Resume/hydration on mount (issue #111, final whole-branch review
   // finding I4/R1) - mirrors WorldInterview.tsx's own resume effect
@@ -179,7 +184,7 @@ export default function ArchitectureInterview() {
     }
   }
 
-  async function compileDocument() {
+  async function compileDocument(acknowledged: boolean) {
     if (!canvasId || compiling) return;
     setCompiling(true);
     setCompileError(null);
@@ -187,13 +192,20 @@ export default function ArchitectureInterview() {
       const res = await fetch("/api/architecture-chat/document", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ storyId: canvasId }),
+        body: JSON.stringify({ storyId: canvasId, acknowledged }),
       });
       const data = await res.json();
+      if (res.status === 409 && data.needsAcknowledgment) {
+        setThematicAnchorAudit(data.thematicAnchorAudit);
+        setCompileNeedsAcknowledgment(true);
+        return;
+      }
       if (!res.ok) {
         setCompileError(data.error ?? "Compile failed.");
         return;
       }
+      setThematicAnchorAudit(data.thematicAnchorAudit);
+      setCompileNeedsAcknowledgment(false);
       setCompiled(data);
     } catch {
       setCompileError("Couldn't reach the server.");
@@ -222,7 +234,7 @@ export default function ArchitectureInterview() {
           <span>Units: {units.length}</span>
           {validationResult && <span>Validation: {validationResult}</span>}
           <button
-            onClick={compileDocument}
+            onClick={() => compileDocument(false)}
             disabled={compiling}
             className="rounded-lg border border-purple-500/50 bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-purple-200 hover:bg-purple-900/40 disabled:cursor-not-allowed disabled:opacity-40"
           >
@@ -282,10 +294,34 @@ export default function ArchitectureInterview() {
         </div>
       )}
 
+      {compileNeedsAcknowledgment && thematicAnchorAudit && (
+        <div className="border-b border-rose-500/30 bg-rose-950/30 px-6 py-3 text-xs text-rose-200">
+          <p className="mb-2 font-semibold">Thematic Anchor Audit found a gap before compiling:</p>
+          <ul className="mb-2 list-disc pl-4">
+            {thematicAnchorAudit.findings
+              .filter((f) => f.status === "flag")
+              .map((f) => (
+                <li key={f.id}>{f.detail}</li>
+              ))}
+          </ul>
+          <button
+            onClick={() => compileDocument(true)}
+            disabled={compiling}
+            className="rounded-lg border border-rose-500/50 bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-rose-200 hover:bg-rose-900/40 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Compile anyway
+          </button>
+        </div>
+      )}
+
       {compiled && (
         <div className="border-b border-purple-500/30 bg-purple-950/20 px-6 py-3 text-xs text-purple-200">
           <p className="mb-2">
             Compiled — {compiled.outstandingCount} outstanding item{compiled.outstandingCount === 1 ? "" : "s"}.
+            {thematicAnchorAudit &&
+              (thematicAnchorAudit.gapFound
+                ? " Thematic Anchor Audit: overridden with gap(s) acknowledged."
+                : " Thematic Anchor Audit: passed.")}
           </p>
           <button
             onClick={() => downloadText("screenplay-architecture.md", compiled.markdown, "text/markdown")}
