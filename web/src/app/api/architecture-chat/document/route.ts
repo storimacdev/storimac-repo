@@ -7,6 +7,7 @@ import { getStory } from "@/lib/canonEngine/storyStore";
 import { ingestCanon } from "@/lib/storyArchitectureEngine/ingestCanon";
 import { compileScreenplayArchitectureDocument } from "@/lib/storyArchitectureEngine/compileArchitectureDocument";
 import { runThematicAnchorAudit, type ThematicAnchorAuditResult } from "@/lib/storyArchitectureEngine/thematicAnchorAudit";
+import { runPreCompilationAudit } from "@/lib/storyArchitectureEngine/preCompilationAudit";
 
 export const runtime = "nodejs";
 
@@ -44,6 +45,12 @@ export async function POST(req: NextRequest) {
     }
 
     const units = story.p4Units ?? [];
+    // Issue #91: fully deterministic, computed unconditionally on
+    // every call (including the acknowledged retry) - unlike
+    // thematicAnchorAudit's model call, there's no cost concern and
+    // no risk of a nondeterministic contradiction, so recomputing it
+    // fresh always reflects the story's real current state.
+    const preCompilationAudit = runPreCompilationAudit(units);
     let thematicAnchorAudit: ThematicAnchorAuditResult;
     if (acknowledged) {
       // Final whole-branch review finding I2: re-running the audit here
@@ -85,13 +92,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (thematicAnchorAudit.gapFound && !acknowledged) {
-      return NextResponse.json({ needsAcknowledgment: true, thematicAnchorAudit }, { status: 409 });
+    const gapFound = thematicAnchorAudit.gapFound || preCompilationAudit.failed;
+    if (gapFound && !acknowledged) {
+      return NextResponse.json({ needsAcknowledgment: true, thematicAnchorAudit, preCompilationAudit }, { status: 409 });
     }
 
     const canon = await ingestCanon(storyId);
     const compiled = compileScreenplayArchitectureDocument(storyId, canon, units);
-    return NextResponse.json({ ...compiled, thematicAnchorAudit });
+    return NextResponse.json({ ...compiled, thematicAnchorAudit, preCompilationAudit });
   } catch (err) {
     return errorResponse(err);
   }
