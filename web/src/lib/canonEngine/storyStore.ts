@@ -300,6 +300,16 @@ export interface Story {
    * is read.
    */
   p1Locked?: boolean | null;
+  /**
+   * Project 4's dismissed-alert state for the Scene Density & Pacing
+   * Monitor (issue #56) - per-direction, since dismissing an
+   * under-density alert should never suppress a later, unrelated
+   * over-density one. Optional/nullable since Stories created before
+   * this field existed won't have it in Firestore; absent/null is
+   * treated identically to `{ under: false, over: false }` by
+   * sceneDensity.ts's own DEFAULT_SCENE_DENSITY_DISMISSAL.
+   */
+  p4SceneDensityDismissal?: { under: boolean; over: boolean } | null;
 }
 
 export interface StoryMessage {
@@ -576,6 +586,18 @@ export async function setP4PendingConflict(
   await storiesCollection()
     .doc(storyId)
     .update({ p4PendingConflict: conflict, updatedAt: new Date().toISOString() });
+}
+
+/** Records Project 4's Scene Density & Pacing Monitor dismissal state
+ * (issue #56) - whole-object replace, same convention as setP2State/
+ * setStage7Audit. */
+export async function setP4SceneDensityDismissal(
+  storyId: string,
+  dismissal: { under: boolean; over: boolean }
+): Promise<void> {
+  await storiesCollection()
+    .doc(storyId)
+    .update({ p4SceneDensityDismissal: dismissal, updatedAt: new Date().toISOString() });
 }
 
 /** Records or clears Project 2's pending Story Foundation conflict (issue #30); pass null to clear once resolved. */

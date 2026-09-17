@@ -23,6 +23,15 @@ export interface StructuralUnit {
   content: unknown;
   causalTag: CausalTag;
   canonRefs: string[];
+  /** Which of the 10 structural steps (1-10) this unit was last written
+   * under - GitHub issue #56, captured from the turn's active_step_number
+   * whenever content is upserted. Powers the Scene Density & Pacing
+   * Monitor's routing-order-agnostic "how many of the 10 steps have
+   * content" coverage measure (see sceneDensity.ts) - never inferred any
+   * other way, and never cleared back to null once set (a turn with no
+   * active step just leaves a unit's existing tag alone, same "never
+   * silently downgrade known state" rule setCausalTag already follows). */
+  stepNumber: number | null;
   lastUpdated: string;
 }
 
@@ -40,6 +49,7 @@ export function createUnit(unitId: string, type: StructuralUnitType, now?: strin
     content: null,
     causalTag: "UNVALIDATED",
     canonRefs: [],
+    stepNumber: null,
     lastUpdated: nowOrDefault(now),
   };
 }
@@ -54,6 +64,10 @@ export function setUnitContent(unit: StructuralUnit, content: unknown, now?: str
 
 export function setCausalTag(unit: StructuralUnit, causalTag: CausalTag, now?: string): StructuralUnit {
   return { ...unit, causalTag, lastUpdated: nowOrDefault(now) };
+}
+
+export function setUnitStepNumber(unit: StructuralUnit, stepNumber: number, now?: string): StructuralUnit {
+  return { ...unit, stepNumber, lastUpdated: nowOrDefault(now) };
 }
 
 /** Appends and de-duplicates - `canonRefs` is a set of justifications,
