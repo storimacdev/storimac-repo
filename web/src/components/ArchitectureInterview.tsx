@@ -198,6 +198,7 @@ export default function ArchitectureInterview() {
       if (res.status === 409 && data.needsAcknowledgment) {
         setThematicAnchorAudit(data.thematicAnchorAudit);
         setCompileNeedsAcknowledgment(true);
+        setCompiled(null);
         return;
       }
       if (!res.ok) {
