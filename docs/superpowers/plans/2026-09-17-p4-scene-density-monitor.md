@@ -299,7 +299,7 @@ route exposes the same reading read-only so a page reload shows it immediately.
     `alert: null`. Same reading with `{ under: false, over: false }` -> `alert: "under"`.
   - `nextSceneDensityDismissal({ rawAlert: "under", ... }, { under: true, over: false })` ->
     `{ under: true, over: false }` (stays dismissed while still under). Same dismissal but
-    `rawAlert: "over"` -> `{ under: false, over: true }` (under's stale dismissal resets since
+    `rawAlert: "over"` -> `{ under: false, over: false }` (under's stale dismissal resets since
     the condition is no longer "under"; over's own dismissal flag was already false so it stays
     false — dismissal is never auto-SET, only auto-CLEARED).
     `nextSceneDensityDismissal({ rawAlert: null, ... }, { under: true, over: true })` ->
