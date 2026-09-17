@@ -190,7 +190,14 @@ const CRITICAL_BEAT_TAG_PATTERN = /\[CRITICAL BEAT:\s*([^\]]+)\]/i;
 function countSentences(text: string): number {
   const trimmed = text.trim();
   if (!trimmed) return 0;
-  const matches = trimmed.match(/[^.!?]+[.!?]+(?:\s|$)/g);
+  // Final whole-branch review finding I1: a closing quote/paren right
+  // after the terminal punctuation (dialogue, a parenthetical) used to
+  // break the match and swallow that sentence into its neighbor - a
+  // real false-rejection risk since this gates Working, the most
+  // common status on every routine turn, and quoted dialogue is
+  // ordinary for a scene built around a Thematic Core or Midpoint
+  // declaration.
+  const matches = trimmed.match(/[^.!?]+[.!?]+["'”’)\]]*(?:\s|$)/g);
   return matches ? matches.length : 1;
 }
 

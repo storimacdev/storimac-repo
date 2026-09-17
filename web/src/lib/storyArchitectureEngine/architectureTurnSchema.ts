@@ -18,7 +18,15 @@ export const ArchitectureTurnSchema = z.object({
     .object({
       unit_id: z.string().min(1),
       type: z.enum(["Scene", "Sequence", "SetPiece", "PlotPoint"]),
-      content: z.string().min(1),
+      // Upper bound added for issue #66's final whole-branch review
+      // finding I3: checkSceneRegisterFormat's sentence-splitting and
+      // beat-tag regexes are quadratic in content's length (bounded
+      // input, not exponential backtracking, but still real - measured
+      // multi-second event-loop blocking on a crafted ~80KB string). A
+      // genuine scene entry (slugline + one dense 3-4 sentence
+      // paragraph) is a few hundred characters at most; 8000 is
+      // generous headroom, not a realistic ceiling for honest content.
+      content: z.string().min(1).max(8000),
       requested_status: z.enum(["Exploring", "Working", "Confirmed", "Parked"]),
       canon_refs: z.array(z.string()),
       proposed_position_percent: z.number().min(0).max(100).nullable(),

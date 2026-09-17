@@ -30,13 +30,17 @@ export function buildP4ConflictContextMessage(conflict: P4PendingConflict): stri
     conflict.kind === "unit_regression"
       ? `Unit "${conflict.unitId}" is already Confirmed, but the latest proposal would move it back to ${conflict.requestedStatus} - that is not a plain revision, it needs this Canon Revision Path.`
       : `The proposed content for unit "${conflict.unitId}" contradicts already-locked ${conflict.sourceProject} canon ("${conflict.contradictedRef}"): ${conflict.explanation}`;
-  // Final whole-branch review finding I2: disclose the waiver up front
-  // rather than letting the author accept something they'd reasonably
-  // assume is now Confirmed. Only ever true for canon_contradiction -
-  // unit_regression's requestedStatus can never be Confirmed.
+  // Final whole-branch review finding I2 (issue #64), kept in sync with
+  // gatesPassed's own three-way check when issue #66 extended it
+  // (that review's own I2 - this string had fallen out of sync with
+  // the boolean it describes, naming only 2 of the 3 checks) - disclose
+  // the waiver up front rather than letting the author accept something
+  // they'd reasonably assume is now Confirmed. Only ever true for
+  // canon_contradiction - unit_regression's requestedStatus can never
+  // be Confirmed.
   const waiverNote =
     conflict.kind === "canon_contradiction" && !conflict.gatesPassed
-      ? " Note: this unit's proposed content did not pass Core-Purpose validation or the causality check when this was raised - accepting it will not mark it Confirmed, it will land at Working until it separately satisfies those checks on a later turn."
+      ? " Note: this unit's proposed content did not pass Core-Purpose validation, the causality check, or the Scene Register format check when this was raised - accepting it will not mark it Confirmed, it will land at Working until it separately satisfies those checks on a later turn."
       : "";
   return `\n\n[CANON REVISION PATH - internal grounding only, never narrate this raw data to the author. ${description}${waiverNote} Present the author with exactly three choices in your reply, in your own words: (A) Revert the proposal and keep things as they are, (B) Accept the new idea as the correct one going forward - note clearly that the author will need to make the matching edit on the referenced project's own screen separately, this app will not do it for them, (C) Park the idea for later, logged as an outstanding decision. Once the author clearly picks one, set resolution to "revert", "accept_and_update", or "park" on your next structured output - do not develop any other structural content until this is resolved.]`;
 }
