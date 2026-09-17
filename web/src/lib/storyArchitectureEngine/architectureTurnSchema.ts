@@ -91,7 +91,7 @@ export const EMIT_ARCHITECTURE_TURN_TOOL: Anthropic.Tool = {
           },
           content: {
             type: "string",
-            description: "The unit's actual slugline + one dense 3-4 sentence structural paragraph, per the Scene Specification Format.",
+            description: "The unit's actual slugline + one dense 3-4 sentence structural paragraph, per the Scene Specification Format (max 8000 characters).",
           },
           requested_status: {
             type: "string",
