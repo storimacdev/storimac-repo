@@ -14,6 +14,14 @@ type SceneDensity = { count: number; projectedTotal: number | null; alert: "unde
 type ThematicAnchorFinding = { id: string; status: "pass" | "flag"; detail: string };
 type ThematicAnchorAudit = { findings: ThematicAnchorFinding[]; gapFound: boolean };
 
+type StructuralVectorOption = {
+  content: string;
+  pacing_impact: string;
+  downstream_requirements: string;
+  thematic_impact: string;
+};
+type StructuralVectorOptions = { unit_id: string; options: StructuralVectorOption[] };
+
 interface TurnResponse {
   reply: string;
   context: string;
@@ -28,6 +36,7 @@ interface TurnResponse {
   pendingConflict: { kind: "unit_regression" | "canon_contradiction"; unitId: string } | null;
   cascadeReview: { id: string; description: string }[] | null;
   sceneDensity: SceneDensity;
+  structuralVectorOptions: StructuralVectorOptions | null;
 }
 
 export default function ArchitectureInterview() {
@@ -56,6 +65,7 @@ export default function ArchitectureInterview() {
   const [pendingConflict, setPendingConflict] = useState<{ kind: string; unitId: string } | null>(null);
   const [cascadeReview, setCascadeReview] = useState<{ id: string; description: string }[] | null>(null);
   const [sceneDensity, setSceneDensity] = useState<SceneDensity | null>(null);
+  const [structuralVectorOptions, setStructuralVectorOptions] = useState<StructuralVectorOptions | null>(null);
   const [compiling, setCompiling] = useState(false);
   const [compiled, setCompiled] = useState<{ markdown: string; outstandingCount: number } | null>(null);
   const [compileError, setCompileError] = useState<string | null>(null);
@@ -144,6 +154,7 @@ export default function ArchitectureInterview() {
       setPendingConflict(data.pendingConflict);
       setCascadeReview(data.cascadeReview);
       setSceneDensity(data.sceneDensity);
+      setStructuralVectorOptions(data.structuralVectorOptions);
       const turnUnit = data.unit;
       if (turnUnit) {
         setUnits((prev) => {
@@ -276,6 +287,29 @@ export default function ArchitectureInterview() {
               </li>
             ))}
           </ul>
+        </div>
+      )}
+      {structuralVectorOptions && structuralVectorOptions.options.length > 0 && (
+        <div className="border-b border-teal-500/30 bg-teal-950/20 px-6 py-3 text-xs text-teal-200">
+          <p className="mb-2 font-semibold">
+            Structural options for unit &quot;{structuralVectorOptions.unit_id}&quot;:
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {structuralVectorOptions.options.map((option, i) => (
+              <div key={i} className="rounded-lg border border-teal-500/30 bg-neutral-900 p-3">
+                <p className="mb-2 text-teal-100">{option.content}</p>
+                <p className="mb-1">
+                  <span className="font-semibold">Pacing:</span> {option.pacing_impact}
+                </p>
+                <p className="mb-1">
+                  <span className="font-semibold">Downstream:</span> {option.downstream_requirements}
+                </p>
+                <p>
+                  <span className="font-semibold">Thematic:</span> {option.thematic_impact}
+                </p>
+              </div>
+            ))}
+          </div>
         </div>
       )}
       {sceneDensity?.alert && (
