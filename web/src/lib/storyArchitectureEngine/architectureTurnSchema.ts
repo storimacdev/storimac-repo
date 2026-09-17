@@ -24,6 +24,13 @@ export const ArchitectureTurnSchema = z.object({
       proposed_position_percent: z.number().min(0).max(100).nullable(),
       causal_tag: z.enum(["Therefore", "But", "And Then"]).nullable(),
       causal_tag_reason: z.string(),
+      canon_contradiction: z
+        .object({
+          contradicted_ref: z.string().min(1),
+          source_project: z.enum(["Project 1", "Project 2", "Project 3"]),
+          explanation: z.string().min(1),
+        })
+        .nullable(),
     })
     .nullable(),
   validation_result: z.enum(["passed", "failed", "not_applicable"]),
@@ -35,6 +42,7 @@ export const ArchitectureTurnSchema = z.object({
       notes: z.string(),
     })
   ),
+  resolution: z.enum(["revert", "accept_and_update", "park"]).nullable(),
 });
 
 export type ArchitectureTurn = z.infer<typeof ArchitectureTurnSchema>;
@@ -101,8 +109,32 @@ export const EMIT_ARCHITECTURE_TURN_TOOL: Anthropic.Tool = {
             type: "string",
             description: "A specific, concrete explanation for causal_tag, either way.",
           },
+          canon_contradiction: {
+            type: ["object", "null"],
+            properties: {
+              contradicted_ref: { type: "string", description: "The id of the already-locked Project 1-3 canon reference this unit's content contradicts." },
+              source_project: {
+                type: "string",
+                enum: ["Project 1", "Project 2", "Project 3"],
+                description: "Which project owns the contradicted canon.",
+              },
+              explanation: { type: "string", description: "A specific, concrete explanation of the contradiction." },
+            },
+            required: ["contradicted_ref", "source_project", "explanation"],
+            description: "Set only when this unit's proposed content contradicts an already-locked Project 1-3 fact it cites via canon_refs. Null in every ordinary turn.",
+          },
         },
-        required: ["unit_id", "type", "content", "requested_status", "canon_refs", "proposed_position_percent", "causal_tag", "causal_tag_reason"],
+        required: [
+          "unit_id",
+          "type",
+          "content",
+          "requested_status",
+          "canon_refs",
+          "proposed_position_percent",
+          "causal_tag",
+          "causal_tag_reason",
+          "canon_contradiction",
+        ],
         description: "The structural unit you are actively evaluating this turn, or null if none.",
       },
       validation_result: {
@@ -132,6 +164,12 @@ export const EMIT_ARCHITECTURE_TURN_TOOL: Anthropic.Tool = {
         },
         description: "Anything raised this turn that belongs to another project. Empty array if none.",
       },
+      resolution: {
+        type: ["string", "null"],
+        enum: ["revert", "accept_and_update", "park", null],
+        description:
+          "Set only on the turn immediately after the author picks one of the three choices presented for an open Canon Revision Path conflict (see your grounding). Null on every other turn.",
+      },
     },
     required: [
       "reply",
@@ -142,6 +180,7 @@ export const EMIT_ARCHITECTURE_TURN_TOOL: Anthropic.Tool = {
       "validation_result",
       "validation_reason",
       "deferred_items",
+      "resolution",
     ],
   },
 };

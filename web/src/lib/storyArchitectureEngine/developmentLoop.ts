@@ -94,8 +94,11 @@ const STATUSES_REQUIRING_VALIDATION: CanonStatus[] = ["Working", "Confirmed"];
  * was supplied before allowing the transition. It does NOT enforce
  * lifecycle legality (e.g. Confirmed -> Exploring/Working, which
  * `canonEngine/transitions.ts`'s `isValidTransition` would reject for a
- * canon element) - that guard is issue #64's scope, matching issue
- * #62's own already-accepted scope note on `setUnitStatus`. A rejected
+ * canon element) - that guard now lives in architecture-chat/route.ts's
+ * Canon Revision Path (issue #64), checked with `isValidTransition`
+ * directly before this function is ever called for a given turn,
+ * matching issue #62's own already-accepted scope note on
+ * `setUnitStatus`. A rejected
  * attempt returns the ORIGINAL unit unchanged, never a partial update.
  */
 export function attemptStatusTransition(

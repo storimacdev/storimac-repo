@@ -20,6 +20,8 @@ interface TurnResponse {
   validationResult: "passed" | "failed" | "not_applicable";
   validationReason: string;
   statusAccepted: boolean | null;
+  pendingConflict: { kind: "unit_regression" | "canon_contradiction"; unitId: string } | null;
+  cascadeReview: { id: string; description: string }[] | null;
 }
 
 export default function ArchitectureInterview() {
@@ -45,6 +47,8 @@ export default function ArchitectureInterview() {
   const [validationResult, setValidationResult] = useState<"passed" | "failed" | "not_applicable" | null>(null);
   const [validationReason, setValidationReason] = useState<string | null>(null);
   const [statusAccepted, setStatusAccepted] = useState<boolean | null>(null);
+  const [pendingConflict, setPendingConflict] = useState<{ kind: string; unitId: string } | null>(null);
+  const [cascadeReview, setCascadeReview] = useState<{ id: string; description: string }[] | null>(null);
   const [compiling, setCompiling] = useState(false);
   const [compiled, setCompiled] = useState<{ markdown: string; outstandingCount: number } | null>(null);
   const [compileError, setCompileError] = useState<string | null>(null);
@@ -76,6 +80,15 @@ export default function ArchitectureInterview() {
         setMessages(rawMessages.map((m) => ({ role: m.role, content: m.content })));
         setRoutingChoice((data.story?.p4?.routing?.routingChoice as "A" | "B" | "C" | undefined) ?? null);
         setUnits((data.story?.p4Units as UnitSummary[] | undefined) ?? []);
+        // Final whole-branch review finding M4 - the canvas GET route
+        // already spreads the whole story into its response, so this
+        // was already on the wire and simply never read: without it, a
+        // page reload while a Canon Revision Path conflict is open
+        // silently dropped the banner even though the conflict was
+        // still genuinely blocking the conversation server-side.
+        setPendingConflict(
+          (data.story?.p4PendingConflict as { kind: "unit_regression" | "canon_contradiction"; unitId: string } | null | undefined) ?? null
+        );
       } catch {
         if (!cancelled) setError("Couldn't reach the server. Is the dev server running?");
       } finally {
@@ -112,6 +125,8 @@ export default function ArchitectureInterview() {
       setValidationResult(data.validationResult);
       setValidationReason(data.validationReason);
       setStatusAccepted(data.statusAccepted);
+      setPendingConflict(data.pendingConflict);
+      setCascadeReview(data.cascadeReview);
       const turnUnit = data.unit;
       if (turnUnit) {
         setUnits((prev) => {
@@ -188,6 +203,26 @@ export default function ArchitectureInterview() {
       {(statusAccepted === false || validationResult === "failed") && validationReason && (
         <div className="border-b border-red-500/30 bg-red-950/30 px-6 py-2 text-xs text-red-200">
           {statusAccepted === false ? "Status change blocked" : "Validation failed"}: {validationReason}
+        </div>
+      )}
+
+      {pendingConflict && (
+        <div className="border-b border-orange-500/30 bg-orange-950/30 px-6 py-2 text-xs text-orange-200">
+          Canon Revision Path open for unit &quot;{pendingConflict.unitId}&quot;
+          {pendingConflict.kind === "unit_regression" ? " (status regression)" : " (canon contradiction)"} -
+          present the three choices and wait for the author&apos;s pick.
+        </div>
+      )}
+      {cascadeReview && cascadeReview.length > 0 && (
+        <div className="border-b border-orange-500/30 bg-orange-950/20 px-6 py-2 text-xs text-orange-200">
+          <p className="mb-1">Also worth reviewing:</p>
+          <ul className="list-disc pl-4">
+            {cascadeReview.map((entry) => (
+              <li key={entry.id}>
+                {entry.id} - {entry.description}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
