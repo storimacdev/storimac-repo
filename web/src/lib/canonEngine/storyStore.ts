@@ -193,6 +193,19 @@ export type P4PendingConflict =
       requestedStatus: CanonStatus;
       requestedContent: string;
       requestedCanonRefs: string[];
+      /** Whether the triggering turn's content already passed Core-Purpose
+       * validation AND the causality gate (issues #111/#63), captured at
+       * detection time since those results are otherwise discarded before
+       * the author ever resolves this conflict. `accept_and_update`
+       * (canonRevision.ts's resolveP4Conflict) clamps requestedStatus down
+       * to Working when this is false and Confirmed was requested - final
+       * whole-branch review finding I2: without this, an author's "yes,
+       * accept the new idea" could reach Confirmed canon while silently
+       * bypassing both already-shipped gates. unit_regression has no
+       * equivalent field - its requestedStatus can never be Confirmed
+       * (isValidTransition(Confirmed, Confirmed) is true, so that case
+       * never reaches this trigger at all). */
+      gatesPassed: boolean;
       ts: string;
     };
 

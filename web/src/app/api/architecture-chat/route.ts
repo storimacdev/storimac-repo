@@ -99,6 +99,27 @@ export async function POST(req: NextRequest) {
 
     system += `\n\n[Canon Ingestion Summary - computed by the app, trust this over re-deriving it. Internal grounding only, never narrate this raw data to the author.]\n${canon.structuralOverview}`;
 
+    // Cross-project canon detail grounding (issue #64 final whole-branch
+    // review finding I1) - computeStructuralOverview only ever gives
+    // names/counts, never enough detail for the model to recognize a
+    // contradiction (the issue's own test case, changing a Core Wound,
+    // was undetectable without this) or for canon_contradiction's
+    // contradicted_ref to ever match a real id the Project 3 cascade
+    // path (canonRevision.ts's listDependents call) could query.
+    if (canon.p2.characters.length > 0) {
+      const characterLines = canon.p2.characters.map(
+        (c) =>
+          `- charId: ${c.charId} | name: ${c.name} | Want: ${c.want} | Need: ${c.need} | Core Flaw: ${c.coreFlaw} | Core Wound: ${c.coreWound}`
+      );
+      system += `\n\n[Signed-Off Character Psychology - computed by the app, trust this over re-deriving it. Internal grounding only, never narrate this raw data to the author. If a unit's content contradicts one of these already-locked facts, report canon_contradiction with contradicted_ref set to the charId shown here and source_project "Project 2".]\n${characterLines.join("\n")}`;
+    }
+    if (canon.p3.pillars.length > 0) {
+      const pillarLines = canon.p3.pillars.map(
+        (p) => `- elementId: ${p.elementId} | name: ${p.name} | value: ${JSON.stringify(p.value)}`
+      );
+      system += `\n\n[Confirmed World Pillars - computed by the app, trust this over re-deriving it. Internal grounding only, never narrate this raw data to the author. If a unit's content contradicts one of these already-locked facts, report canon_contradiction with contradicted_ref set to the elementId shown here and source_project "Project 3".]\n${pillarLines.join("\n")}`;
+    }
+
     // Structural Units grounding (final whole-branch review finding I1,
     // round 2) - mirrors world-chat/route.ts's own "World Entries So
     // Far" block exactly: the model's only way to reference an existing
@@ -218,6 +239,18 @@ export async function POST(req: NextRequest) {
           const existing = findUnit(units, proposed.unit_id);
 
           if (existing && !isValidTransition(existing.status, proposed.requested_status)) {
+            // Final whole-branch review finding M1: a turn can report
+            // both a regression AND a canon_contradiction at once - the
+            // regression conflict takes priority (it's the deterministic,
+            // app-verified one), and the contradiction is dropped for
+            // this turn rather than silently folded in. Disclosed, not
+            // hidden: it will resurface on its own if the model reports
+            // it again on a later turn, once this conflict is resolved.
+            if (proposed.canon_contradiction) {
+              console.warn(
+                `[architecture-chat] unit ${proposed.unit_id} reported both a status regression and a canon_contradiction in turn ${turnId} - the regression conflict takes priority this turn.`
+              );
+            }
             const newConflict: P4PendingConflict = {
               kind: "unit_regression",
               unitId: existing.unitId,
@@ -230,6 +263,16 @@ export async function POST(req: NextRequest) {
             await setP4PendingConflict(storyId, newConflict);
             pendingConflictForResponse = newConflict;
           } else if (proposed.canon_contradiction) {
+            // Captured at detection time (final whole-branch review
+            // finding I2) - see P4PendingConflict's own gatesPassed
+            // doc comment in storyStore.ts for why.
+            const causalGateAtDetection = evaluateCausalGate(
+              proposed.requested_status,
+              proposed.causal_tag,
+              delta.active_step_number,
+              proposed.causal_tag_reason
+            );
+            const coreValidAtDetection = delta.validation_result === "passed";
             const newConflict: P4PendingConflict = {
               kind: "canon_contradiction",
               unitId: proposed.unit_id,
@@ -240,6 +283,7 @@ export async function POST(req: NextRequest) {
               requestedStatus: proposed.requested_status,
               requestedContent: proposed.content,
               requestedCanonRefs: proposed.canon_refs,
+              gatesPassed: coreValidAtDetection && causalGateAtDetection.ok,
               ts: new Date().toISOString(),
             };
             await setP4PendingConflict(storyId, newConflict);

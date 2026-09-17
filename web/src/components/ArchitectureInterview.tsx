@@ -80,6 +80,15 @@ export default function ArchitectureInterview() {
         setMessages(rawMessages.map((m) => ({ role: m.role, content: m.content })));
         setRoutingChoice((data.story?.p4?.routing?.routingChoice as "A" | "B" | "C" | undefined) ?? null);
         setUnits((data.story?.p4Units as UnitSummary[] | undefined) ?? []);
+        // Final whole-branch review finding M4 - the canvas GET route
+        // already spreads the whole story into its response, so this
+        // was already on the wire and simply never read: without it, a
+        // page reload while a Canon Revision Path conflict is open
+        // silently dropped the banner even though the conflict was
+        // still genuinely blocking the conversation server-side.
+        setPendingConflict(
+          (data.story?.p4PendingConflict as { kind: "unit_regression" | "canon_contradiction"; unitId: string } | null | undefined) ?? null
+        );
       } catch {
         if (!cancelled) setError("Couldn't reach the server. Is the dev server running?");
       } finally {
