@@ -266,13 +266,20 @@ export async function POST(req: NextRequest) {
           } else if (proposed.canon_contradiction) {
             // Captured at detection time (final whole-branch review
             // finding I2) - see P4PendingConflict's own gatesPassed
-            // doc comment in storyStore.ts for why.
+            // doc comment in storyStore.ts for why. Includes the Scene
+            // Register format check (issue #66's own task review) -
+            // without it, a malformed scene (missing slugline, wrong
+            // sentence count, fabricated beat tag) could still reach
+            // Confirmed via accept_and_update, since that path bypasses
+            // the ordinary-processing branch entirely and gatesPassed
+            // is the only thing standing between it and Confirmed.
             const causalGateAtDetection = evaluateCausalGate(
               proposed.requested_status,
               proposed.causal_tag,
               delta.active_step_number,
               proposed.causal_tag_reason
             );
+            const formatCheckAtDetection = checkSceneRegisterFormat(proposed.content);
             const coreValidAtDetection = delta.validation_result === "passed";
             const newConflict: P4PendingConflict = {
               kind: "canon_contradiction",
@@ -284,7 +291,7 @@ export async function POST(req: NextRequest) {
               requestedStatus: proposed.requested_status,
               requestedContent: proposed.content,
               requestedCanonRefs: proposed.canon_refs,
-              gatesPassed: coreValidAtDetection && causalGateAtDetection.ok,
+              gatesPassed: coreValidAtDetection && causalGateAtDetection.ok && formatCheckAtDetection.ok,
               ts: new Date().toISOString(),
             };
             await setP4PendingConflict(storyId, newConflict);
