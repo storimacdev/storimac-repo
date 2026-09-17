@@ -7,6 +7,7 @@ import {
   setUnitStatus,
   setUnitContent,
   addCanonRefs,
+  setUnitStepNumber,
   type StructuralUnit,
 } from "./stateLedger";
 
@@ -57,6 +58,14 @@ export interface ResolveP4ConflictParams {
   turnId: string;
   resolvedBy: string;
   units: StructuralUnit[];
+  /** The resolving turn's active_step_number (issue #56 final review) -
+   * only ever tags the unit when non-null, same rule the ordinary-
+   * processing path in architecture-chat/route.ts already follows.
+   * Without this, every unit resolved through this path counted
+   * toward the Scene Density Monitor's numerator with no
+   * representation in its step-coverage denominator, biasing every
+   * projection upward. */
+  activeStepNumber: number | null;
 }
 
 export interface ResolveP4ConflictResult {
@@ -80,7 +89,7 @@ export interface ResolveP4ConflictResult {
  * cascade is issue #72's scope, not this one's.
  */
 export async function resolveP4Conflict(params: ResolveP4ConflictParams): Promise<ResolveP4ConflictResult> {
-  const { storyId, conflict, resolution, turnId, resolvedBy, units } = params;
+  const { storyId, conflict, resolution, turnId, resolvedBy, units, activeStepNumber } = params;
   const existing = findUnit(units, conflict.unitId);
   let updatedUnits = units;
   let cascadeReview: P4CascadeReviewEntry[] | null = null;
@@ -98,11 +107,13 @@ export async function resolveP4Conflict(params: ResolveP4ConflictParams): Promis
     // content behind it would show up in the compiled document as an
     // empty shell, and the original proposal would survive nowhere.
     const base = existing ?? createUnit(conflict.unitId, conflict.type);
-    const withContent = setUnitContent(base, conflict.requestedContent);
+    const contentApplied = setUnitContent(base, conflict.requestedContent);
+    const withContent = activeStepNumber !== null ? setUnitStepNumber(contentApplied, activeStepNumber) : contentApplied;
     updatedUnits = upsertUnit(units, setUnitStatus(withContent, "Parked"));
   } else if (resolution === "accept_and_update") {
     const base = existing ?? createUnit(conflict.unitId, conflict.type);
-    const withContent = addCanonRefs(setUnitContent(base, conflict.requestedContent), conflict.requestedCanonRefs);
+    const contentApplied = addCanonRefs(setUnitContent(base, conflict.requestedContent), conflict.requestedCanonRefs);
+    const withContent = activeStepNumber !== null ? setUnitStepNumber(contentApplied, activeStepNumber) : contentApplied;
     // Final whole-branch review finding I2: the author's "accept the new
     // idea" authorizes overriding the OTHER project's canon (via the log
     // below) and this app's own lifecycle guard - it does not waive

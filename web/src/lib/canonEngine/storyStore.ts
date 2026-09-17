@@ -281,7 +281,11 @@ export interface Story {
    * upserts into the existing array and writes the whole thing back),
    * matching setP3Pillars's own "no concurrent-multi-writer case"
    * reasoning. Optional/nullable since Stories created before this
-   * field existed won't have it in Firestore.
+   * field existed won't have it in Firestore. Note: a unit's
+   * `stepNumber` field may be `undefined` at runtime (not `null`) for
+   * any unit written before issue #56 existed - `sceneDensity.ts`'s
+   * `computeSceneDensity` guards against this explicitly (`typeof n
+   * === "number"`, not `n !== null`).
    */
   p4Units?: StructuralUnit[] | null;
   /**

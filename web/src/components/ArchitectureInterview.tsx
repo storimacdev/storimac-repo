@@ -165,6 +165,12 @@ export default function ArchitectureInterview() {
       const data = await res.json();
       if (res.ok) {
         setSceneDensity(data.sceneDensity);
+      } else {
+        // Final whole-branch review finding: a non-network failure (e.g.
+        // an expired session) previously left the Dismiss button
+        // silently doing nothing - surface it the same way sendMessage
+        // already does for its own fetch.
+        setError(data.error ?? "Couldn't dismiss the pacing alert.");
       }
     } catch {
       // Best-effort - on a network failure the banner simply stays
@@ -259,8 +265,8 @@ export default function ArchitectureInterview() {
       {sceneDensity?.alert && (
         <div className="flex items-center justify-between gap-4 border-b border-sky-500/30 bg-sky-950/20 px-6 py-2 text-xs text-sky-200">
           <span>
-            Pacing note: {sceneDensity.count} scene{sceneDensity.count === 1 ? "" : "s"} so far
-            project to about {sceneDensity.projectedTotal ?? "?"} total -{" "}
+            Pacing note: {sceneDensity.count} scene{sceneDensity.count === 1 ? "" : "s"} so far,
+            projecting to about {sceneDensity.projectedTotal ?? "?"} total -{" "}
             {sceneDensity.alert === "under"
               ? "below the 75-150 scene target. Consider whether an escalation beat or extra sub-sequence is missing."
               : "above the 75-150 scene target. Consider whether any scenes could be merged or streamlined."}

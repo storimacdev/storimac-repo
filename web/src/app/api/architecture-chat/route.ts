@@ -241,6 +241,7 @@ export async function POST(req: NextRequest) {
             turnId,
             resolvedBy: user.uid,
             units,
+            activeStepNumber: delta.active_step_number,
           });
           units = result.units;
           cascadeReview = result.cascadeReview;

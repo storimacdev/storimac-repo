@@ -26,6 +26,16 @@ export const MAX_TARGET_SCENES = 150;
  * DEVIATION_THRESHOLD_PERCENT is the same class of choice). */
 const MIN_STEPS_FOR_PROJECTION = 2;
 
+/** Below this many counted scenes, a projection is extrapolating off too
+ * small a sample - final whole-branch review finding: under the
+ * framework's own recommended default routing (Blueprint Priority), the
+ * author's first few turns touch 4 anchor steps with ~1 scene each,
+ * which without this floor would guarantee a spurious "under" alert on
+ * nearly every new outline (4 scenes / (4/10) = 10, "under") before any
+ * real pacing signal exists. A chosen default, not a sourced one, same
+ * class of choice as MIN_STEPS_FOR_PROJECTION above. */
+const MIN_COUNT_FOR_PROJECTION = 20;
+
 export interface SceneDensityReading {
   count: number;
   projectedTotal: number | null;
@@ -57,10 +67,10 @@ export function computeSceneDensity(units: StructuralUnit[]): SceneDensityReadin
   const counted = units.filter((u) => u.status === "Working" || u.status === "Confirmed");
   const count = counted.length;
   const stepsWithContent = new Set(
-    counted.map((u) => u.stepNumber).filter((n): n is number => n !== null)
+    counted.map((u) => u.stepNumber).filter((n): n is number => typeof n === "number")
   ).size;
 
-  if (stepsWithContent < MIN_STEPS_FOR_PROJECTION) {
+  if (stepsWithContent < MIN_STEPS_FOR_PROJECTION || count < MIN_COUNT_FOR_PROJECTION) {
     return { count, projectedTotal: null, rawAlert: null };
   }
 
@@ -91,7 +101,12 @@ export function applySceneDensityDismissal(
  * later recurrence of the SAME direction surfaces fresh rather than
  * staying permanently suppressed by an old click. Only
  * architecture-chat/route.ts calls this (it is the sole writer of
- * `p4SceneDensityDismissal` besides the explicit dismiss route). */
+ * `p4SceneDensityDismissal` besides the explicit dismiss route). The
+ * canvas GET route's own read-only `sceneDensity` computation relies on
+ * this being true - if `p4Units` is ever mutated by something other
+ * than architecture-chat/route.ts without also recomputing dismissal,
+ * the GET route could serve a stale suppression until the next chat
+ * turn. */
 export function nextSceneDensityDismissal(
   reading: SceneDensityReading,
   dismissal: SceneDensityDismissal
