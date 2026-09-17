@@ -446,6 +446,7 @@ export async function POST(req: NextRequest) {
       pendingConflict: pendingConflictForResponse,
       cascadeReview,
       sceneDensity: sceneDensityForResponse,
+      structuralVectorOptions: delta.structural_vector_options,
     });
   } catch (err) {
     if (err instanceof RateLimitTimeoutError) {
