@@ -1,4 +1,4 @@
-import { STRUCTURAL_STEPS, type StructuralStep } from "./structuralFramework";
+import { STRUCTURAL_STEPS, CRITICAL_BEAT_LOOKUP, type StructuralStep } from "./structuralFramework";
 import type { CanonStatus } from "@/lib/canonEngine/types";
 import { setUnitStatus, type StructuralUnit } from "./stateLedger";
 
@@ -168,6 +168,82 @@ export function evaluateCausalGate(
     ok: false,
     reason: reportedTag === "And Then" && reason && reason.trim() ? reason : defaultReason,
   };
+}
+
+export interface SceneFormatCheckResult {
+  ok: boolean;
+  reason?: string;
+}
+
+const SLUGLINE_PATTERN = /^\s*SCENE\s+\S+\s*:\s*(INT\.\s*\/\s*EXT\.|INT\.|EXT\.)/i;
+const CRITICAL_BEAT_TAG_PATTERN = /\[CRITICAL BEAT:\s*([^\]]+)\]/i;
+
+/**
+ * Splits on sentence-ending punctuation (. ! ?) followed by whitespace
+ * or end of string - a standard approximation, not a linguistically
+ * perfect parser (same disclosed-limitation class as
+ * parsePlacementPercent's own regex-based extraction above). Good
+ * enough to catch the issue's own test case (a 2-sentence submission)
+ * without over-engineering abbreviation handling this module has no
+ * real use for.
+ */
+function countSentences(text: string): number {
+  const trimmed = text.trim();
+  if (!trimmed) return 0;
+  const matches = trimmed.match(/[^.!?]+[.!?]+(?:\s|$)/g);
+  return matches ? matches.length : 1;
+}
+
+/**
+ * Framework v3.0 §3 / P4 Prompt v3.0 §4 (issue #66): every scene must
+ * open with a slugline, carry a [CRITICAL BEAT: <NAME>] tag only when
+ * it genuinely matches one of the 10 real tags
+ * (CRITICAL_BEAT_LOOKUP), and its explanatory paragraph must be
+ * exactly 3-4 sentences. Deliberately does NOT require a beat tag to
+ * be present at all - the app has no reliable way to know whether
+ * THIS scene is supposed to fulfill a Critical Beat without either
+ * trusting the model's self-report (which defeats an app-side check)
+ * or inferring it from active_step_number in a way that would be
+ * fragile for a step with zero or multiple candidate scenes. It only
+ * validates a tag's VALUE when the model already chose to include
+ * one - sp04 Section 5 already instructs the model on when a tag
+ * belongs.
+ */
+export function checkSceneRegisterFormat(content: string): SceneFormatCheckResult {
+  const trimmed = content.trim();
+  const firstNewline = trimmed.search(/\r?\n/);
+  const firstLine = firstNewline === -1 ? trimmed : trimmed.slice(0, firstNewline);
+  const rest = firstNewline === -1 ? "" : trimmed.slice(firstNewline).trim();
+
+  if (!SLUGLINE_PATTERN.test(firstLine)) {
+    return {
+      ok: false,
+      reason:
+        'Missing or malformed slugline - every scene must open with "SCENE [X]: [INT./EXT. LOCATION - TIME OF DAY]".',
+    };
+  }
+
+  const beatMatch = trimmed.match(CRITICAL_BEAT_TAG_PATTERN);
+  if (beatMatch) {
+    const tagName = beatMatch[1].trim().toUpperCase();
+    if (!CRITICAL_BEAT_LOOKUP[tagName]) {
+      return {
+        ok: false,
+        reason: `"${tagName}" is not one of the 10 recognized Critical Beat tags.`,
+      };
+    }
+  }
+
+  const paragraph = rest.replace(CRITICAL_BEAT_TAG_PATTERN, "").trim();
+  const sentenceCount = countSentences(paragraph);
+  if (sentenceCount < 3 || sentenceCount > 4) {
+    return {
+      ok: false,
+      reason: `The explanatory paragraph has ${sentenceCount} sentence(s) - it must be exactly 3-4 dense sentences.`,
+    };
+  }
+
+  return { ok: true };
 }
 
 export type RoutingChoice = "A" | "B" | "C";

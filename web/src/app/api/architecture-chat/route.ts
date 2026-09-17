@@ -40,6 +40,7 @@ import {
   checkPlacementDeviation,
   switchRoute,
   evaluateCausalGate,
+  checkSceneRegisterFormat,
   type StatusTransitionAttempt,
 } from "@/lib/storyArchitectureEngine/developmentLoop";
 
@@ -298,9 +299,14 @@ export async function POST(req: NextRequest) {
               delta.active_step_number,
               proposed.causal_tag_reason
             );
+            const formatCheck = checkSceneRegisterFormat(proposed.content);
             const coreValid = delta.validation_result === "passed";
-            const combinedValid = coreValid && causalGate.ok;
-            const combinedReason = !coreValid ? delta.validation_reason : causalGate.reason;
+            const combinedValid = coreValid && causalGate.ok && formatCheck.ok;
+            const combinedReason = !coreValid
+              ? delta.validation_reason
+              : !causalGate.ok
+                ? causalGate.reason
+                : formatCheck.reason;
 
             const attempt = attemptStatusTransition(withContent, proposed.requested_status, {
               valid: combinedValid,
