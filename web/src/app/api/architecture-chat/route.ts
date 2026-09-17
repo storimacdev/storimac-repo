@@ -11,6 +11,7 @@ import {
   setP4Routing,
   setP4Units,
   setP4PendingConflict,
+  setP4SceneDensityDismissal,
   appendMessage,
   listMessages,
   appendOutstandingQuestions,
@@ -33,6 +34,7 @@ import {
   setUnitContent,
   addCanonRefs,
   setCausalTag,
+  setUnitStepNumber,
   type StructuralUnit,
 } from "@/lib/storyArchitectureEngine/stateLedger";
 import {
@@ -43,6 +45,13 @@ import {
   checkSceneRegisterFormat,
   type StatusTransitionAttempt,
 } from "@/lib/storyArchitectureEngine/developmentLoop";
+import {
+  computeSceneDensity,
+  applySceneDensityDismissal,
+  nextSceneDensityDismissal,
+  DEFAULT_SCENE_DENSITY_DISMISSAL,
+  type SceneDensityResult,
+} from "@/lib/storyArchitectureEngine/sceneDensity";
 
 export const runtime = "nodejs";
 
@@ -95,6 +104,7 @@ export async function POST(req: NextRequest) {
     const canon = await ingestCanon(storyId);
     let units = story.p4Units ?? [];
     const pendingConflictBefore = story.p4PendingConflict ?? null;
+    const sceneDensityDismissalBefore = story.p4SceneDensityDismissal ?? DEFAULT_SCENE_DENSITY_DISMISSAL;
 
     let system = getSystemPrompt("sp04-sae-systemprompt.md");
 
@@ -182,6 +192,16 @@ export async function POST(req: NextRequest) {
     let statusAttempt: StatusTransitionAttempt | null = null;
     let pendingConflictForResponse: P4PendingConflict | null = pendingConflictBefore;
     let cascadeReview: { id: string; description: string }[] | null = null;
+    // Defaults to a reading of the PRE-turn units/dismissal state, so a
+    // thrown error inside the try block below (caught further down)
+    // still leaves the response with the last-known-good reading instead
+    // of an empty/zero one - same "effective* defaults to pre-turn state"
+    // convention effectiveOnboardingComplete/effectiveRouting already
+    // follow above.
+    let sceneDensityForResponse: SceneDensityResult = applySceneDensityDismissal(
+      computeSceneDensity(units),
+      sceneDensityDismissalBefore
+    );
 
     try {
       // Onboarding gate: flips once, on the first non-null routing_choice
@@ -221,6 +241,7 @@ export async function POST(req: NextRequest) {
             turnId,
             resolvedBy: user.uid,
             units,
+            activeStepNumber: delta.active_step_number,
           });
           units = result.units;
           cascadeReview = result.cascadeReview;
@@ -298,7 +319,15 @@ export async function POST(req: NextRequest) {
             pendingConflictForResponse = newConflict;
           } else {
             const base = existing ?? createUnit(proposed.unit_id, proposed.type);
-            const withContent = addCanonRefs(setUnitContent(base, proposed.content), proposed.canon_refs);
+            const contentApplied = addCanonRefs(setUnitContent(base, proposed.content), proposed.canon_refs);
+            // Issue #56: never overwritten with null - a turn with no
+            // active step leaves a unit's existing stepNumber untouched,
+            // same "never silently downgrade known state" rule
+            // setCausalTag already follows for causalTag.
+            const withContent =
+              delta.active_step_number !== null
+                ? setUnitStepNumber(contentApplied, delta.active_step_number)
+                : contentApplied;
 
             const causalGate = evaluateCausalGate(
               proposed.requested_status,
@@ -353,6 +382,21 @@ export async function POST(req: NextRequest) {
           }
         }
       }
+
+      // Issue #56, strictly advisory - computed from `units` in its final
+      // state for this turn, after every branch above has had its chance
+      // to change it. Never read by anything that gates a status
+      // transition; this exists purely to inform the response and persist
+      // dismissal-state resets.
+      const sceneDensityReading = computeSceneDensity(units);
+      const nextDismissal = nextSceneDensityDismissal(sceneDensityReading, sceneDensityDismissalBefore);
+      if (
+        nextDismissal.under !== sceneDensityDismissalBefore.under ||
+        nextDismissal.over !== sceneDensityDismissalBefore.over
+      ) {
+        await setP4SceneDensityDismissal(storyId, nextDismissal);
+      }
+      sceneDensityForResponse = applySceneDensityDismissal(sceneDensityReading, nextDismissal);
     } catch (stateErr) {
       console.warn(`[architecture-chat] state update failed for turn ${turnId}:`, stateErr);
     }
@@ -401,6 +445,7 @@ export async function POST(req: NextRequest) {
       statusAccepted: statusAttempt?.accepted ?? null,
       pendingConflict: pendingConflictForResponse,
       cascadeReview,
+      sceneDensity: sceneDensityForResponse,
     });
   } catch (err) {
     if (err instanceof RateLimitTimeoutError) {

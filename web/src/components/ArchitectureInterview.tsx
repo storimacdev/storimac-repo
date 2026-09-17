@@ -9,6 +9,8 @@ type ChatMessage = { role: "user" | "assistant"; content: string };
 
 type UnitSummary = { unitId: string; type: string; status: string };
 
+type SceneDensity = { count: number; projectedTotal: number | null; alert: "under" | "over" | null };
+
 interface TurnResponse {
   reply: string;
   context: string;
@@ -22,6 +24,7 @@ interface TurnResponse {
   statusAccepted: boolean | null;
   pendingConflict: { kind: "unit_regression" | "canon_contradiction"; unitId: string } | null;
   cascadeReview: { id: string; description: string }[] | null;
+  sceneDensity: SceneDensity;
 }
 
 export default function ArchitectureInterview() {
@@ -49,6 +52,7 @@ export default function ArchitectureInterview() {
   const [statusAccepted, setStatusAccepted] = useState<boolean | null>(null);
   const [pendingConflict, setPendingConflict] = useState<{ kind: string; unitId: string } | null>(null);
   const [cascadeReview, setCascadeReview] = useState<{ id: string; description: string }[] | null>(null);
+  const [sceneDensity, setSceneDensity] = useState<SceneDensity | null>(null);
   const [compiling, setCompiling] = useState(false);
   const [compiled, setCompiled] = useState<{ markdown: string; outstandingCount: number } | null>(null);
   const [compileError, setCompileError] = useState<string | null>(null);
@@ -89,6 +93,13 @@ export default function ArchitectureInterview() {
         setPendingConflict(
           (data.story?.p4PendingConflict as { kind: "unit_regression" | "canon_contradiction"; unitId: string } | null | undefined) ?? null
         );
+        // Task 3's canvas GET route computes this fresh from the
+        // persisted units/dismissal state every resume, so a page
+        // reload shows the current reading without waiting for the
+        // next chat turn - top-level on the response, a sibling of
+        // `story`, not nested under it (matching guardrailFlags/
+        // characterBibleGate's own shape).
+        setSceneDensity((data.sceneDensity as SceneDensity | undefined) ?? null);
       } catch {
         if (!cancelled) setError("Couldn't reach the server. Is the dev server running?");
       } finally {
@@ -127,6 +138,7 @@ export default function ArchitectureInterview() {
       setStatusAccepted(data.statusAccepted);
       setPendingConflict(data.pendingConflict);
       setCascadeReview(data.cascadeReview);
+      setSceneDensity(data.sceneDensity);
       const turnUnit = data.unit;
       if (turnUnit) {
         setUnits((prev) => {
@@ -139,6 +151,31 @@ export default function ArchitectureInterview() {
       setError("Couldn't reach the server.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function dismissSceneDensityAlert(direction: "under" | "over") {
+    if (!canvasId) return;
+    try {
+      const res = await fetch("/api/architecture-chat/scene-density", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storyId: canvasId, direction }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSceneDensity(data.sceneDensity);
+      } else {
+        // Final whole-branch review finding: a non-network failure (e.g.
+        // an expired session) previously left the Dismiss button
+        // silently doing nothing - surface it the same way sendMessage
+        // already does for its own fetch.
+        setError(data.error ?? "Couldn't dismiss the pacing alert.");
+      }
+    } catch {
+      // Best-effort - on a network failure the banner simply stays
+      // visible until the next successful chat turn recomputes it,
+      // same tolerance every other fetch in this component already has.
     }
   }
 
@@ -223,6 +260,25 @@ export default function ArchitectureInterview() {
               </li>
             ))}
           </ul>
+        </div>
+      )}
+      {sceneDensity?.alert && (
+        <div className="flex items-center justify-between gap-4 border-b border-sky-500/30 bg-sky-950/20 px-6 py-2 text-xs text-sky-200">
+          <span>
+            Pacing note: {sceneDensity.count} scene{sceneDensity.count === 1 ? "" : "s"} so far,
+            projecting to about {sceneDensity.projectedTotal ?? "?"} total -{" "}
+            {sceneDensity.alert === "under"
+              ? "below the 75-150 scene target. Consider whether an escalation beat or extra sub-sequence is missing."
+              : "above the 75-150 scene target. Consider whether any scenes could be merged or streamlined."}
+          </span>
+          <button
+            onClick={() => {
+              if (sceneDensity?.alert) dismissSceneDensityAlert(sceneDensity.alert);
+            }}
+            className="shrink-0 rounded-lg border border-sky-500/50 bg-neutral-900 px-2 py-1 text-xs font-semibold text-sky-200 hover:bg-sky-900/40"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 

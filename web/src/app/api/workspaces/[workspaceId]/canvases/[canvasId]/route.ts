@@ -20,6 +20,11 @@ import type { LastProject } from "@/lib/lastProject";
 import { ingestFoundation as characterIngestFoundation } from "@/lib/characterEngine/ingestFoundation";
 import { checkCharacterBibleComplete, type CharacterBibleGateResult } from "@/lib/worldEngine/characterBibleGate";
 import type { P2State } from "@/lib/canonEngine/storyStore";
+import {
+  computeSceneDensity,
+  applySceneDensityDismissal,
+  DEFAULT_SCENE_DENSITY_DISMISSAL,
+} from "@/lib/storyArchitectureEngine/sceneDensity";
 
 export const runtime = "nodejs";
 
@@ -116,6 +121,11 @@ export async function GET(
           : "interview";
     await setLastVisited(user.uid, workspaceId, canvasId, lastProject);
 
+    const sceneDensity = applySceneDensityDismissal(
+      computeSceneDensity(story.p4Units ?? []),
+      story.p4SceneDensityDismissal ?? DEFAULT_SCENE_DENSITY_DISMISSAL
+    );
+
     return NextResponse.json({
       story: { ...story, p3: normalizeP3(story.p3), p4: normalizeP4(story.p4) },
       elements,
@@ -126,6 +136,7 @@ export async function GET(
       architectureMessages,
       guardrailFlags,
       characterBibleGate,
+      sceneDensity,
     });
   } catch (err) {
     return errorResponse(err);
