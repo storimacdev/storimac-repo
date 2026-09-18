@@ -253,6 +253,40 @@ export function checkSceneRegisterFormat(content: string): SceneFormatCheckResul
   return { ok: true };
 }
 
+export interface ParsedSceneRegisterEntry {
+  slugline: string;
+  criticalBeatTag: string | null;
+  paragraph: string;
+}
+
+/**
+ * Parses a Scene Register entry's already-validated shape into its
+ * separate parts, for the compiler (issue #70) to render structurally
+ * - checkSceneRegisterFormat above already isolates the same three
+ * pieces internally but only ever returns a pass/fail verdict. Never
+ * throws: a unit whose content is malformed (only reachable if the
+ * author overrode issue #91's Formatting Check) degrades to
+ * disclosed placeholder text rather than crashing the compile.
+ */
+export function parseSceneRegisterEntry(content: string): ParsedSceneRegisterEntry {
+  const trimmed = content.trim();
+  const firstNewline = trimmed.search(/\r?\n/);
+  const firstLine = firstNewline === -1 ? trimmed : trimmed.slice(0, firstNewline);
+  const rest = firstNewline === -1 ? "" : trimmed.slice(firstNewline).trim();
+
+  const slugline = SLUGLINE_PATTERN.test(firstLine) ? firstLine.trim() : "(malformed - no slugline found)";
+
+  const beatMatch = trimmed.match(CRITICAL_BEAT_TAG_PATTERN);
+  const criticalBeatTag =
+    beatMatch && CRITICAL_BEAT_LOOKUP[beatMatch[1].trim().toUpperCase()]
+      ? beatMatch[1].trim().toUpperCase()
+      : null;
+
+  const paragraph = rest ? rest.replace(CRITICAL_BEAT_TAG_PATTERN, "").trim() || trimmed : trimmed;
+
+  return { slugline, criticalBeatTag, paragraph };
+}
+
 export type RoutingChoice = "A" | "B" | "C";
 
 /**
