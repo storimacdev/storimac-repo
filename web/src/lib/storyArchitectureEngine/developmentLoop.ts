@@ -176,7 +176,7 @@ export interface SceneFormatCheckResult {
 }
 
 const SLUGLINE_PATTERN = /^\s*SCENE\s+\S+\s*:\s*(INT\.\s*\/\s*EXT\.|INT\.|EXT\.)/i;
-const CRITICAL_BEAT_TAG_PATTERN = /\[CRITICAL BEAT:\s*([^\]]+)\]/i;
+export const CRITICAL_BEAT_TAG_PATTERN = /\[CRITICAL BEAT:\s*([^\]]+)\]/i;
 
 /**
  * Splits on sentence-ending punctuation (. ! ?) followed by whitespace

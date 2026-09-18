@@ -7,6 +7,7 @@ import { getStory } from "@/lib/canonEngine/storyStore";
 import { ingestCanon } from "@/lib/storyArchitectureEngine/ingestCanon";
 import { compileScreenplayArchitectureDocument } from "@/lib/storyArchitectureEngine/compileArchitectureDocument";
 import { runThematicAnchorAudit, type ThematicAnchorAuditResult } from "@/lib/storyArchitectureEngine/thematicAnchorAudit";
+import { runPreCompilationAudit } from "@/lib/storyArchitectureEngine/preCompilationAudit";
 
 export const runtime = "nodejs";
 
@@ -44,6 +45,12 @@ export async function POST(req: NextRequest) {
     }
 
     const units = story.p4Units ?? [];
+    // Issue #91: fully deterministic, computed unconditionally on
+    // every call (including the acknowledged retry) - unlike
+    // thematicAnchorAudit's model call, there's no cost concern and
+    // no risk of a nondeterministic contradiction, so recomputing it
+    // fresh always reflects the story's real current state.
+    const preCompilationAudit = runPreCompilationAudit(units);
     let thematicAnchorAudit: ThematicAnchorAuditResult;
     if (acknowledged) {
       // Final whole-branch review finding I2: re-running the audit here
@@ -54,15 +61,24 @@ export async function POST(req: NextRequest) {
       // complaint than the one they actually saw. The author has
       // already made their choice; nothing further needs checking on
       // this request.
+      // Second whole-branch review finding (issue #91): this marker must
+      // NOT assert gapFound: true - issue #91 made this path reachable
+      // purely from preCompilationAudit.failed, with the Thematic Anchor
+      // Audit having genuinely passed. Forcing gapFound: true here would
+      // fabricate a thematic gap that never existed in the API response,
+      // and would defeat preCompilationAudit's own fresh recomputation
+      // by permanently forcing the combined success-banner text to say
+      // "overridden" even once every real issue has been fixed. This
+      // marker means "not re-checked," not "gap confirmed."
       thematicAnchorAudit = {
         findings: [
           {
-            id: "acknowledged-by-author",
-            status: "flag",
-            detail: "Compiled despite an earlier Thematic Anchor Audit gap - the author chose to proceed anyway.",
+            id: "not-rechecked-after-acknowledgment",
+            status: "pass",
+            detail: "The Thematic Anchor Audit's consistency check was not re-run after the author chose to proceed - see the findings already shown for the original request.",
           },
         ],
-        gapFound: true,
+        gapFound: false,
         generatedAt: new Date().toISOString(),
       };
     } else {
@@ -85,13 +101,19 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (thematicAnchorAudit.gapFound && !acknowledged) {
-      return NextResponse.json({ needsAcknowledgment: true, thematicAnchorAudit }, { status: 409 });
+    // Both audits are always computed (subject to the acknowledged-path
+    // skip above) even when one alone would already force a 409 - the
+    // single combined banner on the client shows findings from BOTH, so
+    // short-circuiting either computation would silently drop findings
+    // the author should see.
+    const gapFound = thematicAnchorAudit.gapFound || preCompilationAudit.failed;
+    if (gapFound && !acknowledged) {
+      return NextResponse.json({ needsAcknowledgment: true, thematicAnchorAudit, preCompilationAudit }, { status: 409 });
     }
 
     const canon = await ingestCanon(storyId);
     const compiled = compileScreenplayArchitectureDocument(storyId, canon, units);
-    return NextResponse.json({ ...compiled, thematicAnchorAudit });
+    return NextResponse.json({ ...compiled, thematicAnchorAudit, preCompilationAudit });
   } catch (err) {
     return errorResponse(err);
   }
