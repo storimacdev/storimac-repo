@@ -13,6 +13,7 @@ type SceneDensity = { count: number; projectedTotal: number | null; alert: "unde
 
 type ThematicAnchorFinding = { id: string; status: "pass" | "flag"; detail: string };
 type ThematicAnchorAudit = { findings: ThematicAnchorFinding[]; gapFound: boolean };
+type PreCompilationAudit = { findings: ThematicAnchorFinding[]; failed: boolean };
 
 type StructuralVectorOption = {
   content: string;
@@ -71,6 +72,7 @@ export default function ArchitectureInterview() {
   const [compileError, setCompileError] = useState<string | null>(null);
   const [thematicAnchorAudit, setThematicAnchorAudit] = useState<ThematicAnchorAudit | null>(null);
   const [compileNeedsAcknowledgment, setCompileNeedsAcknowledgment] = useState(false);
+  const [preCompilationAudit, setPreCompilationAudit] = useState<PreCompilationAudit | null>(null);
 
   // Resume/hydration on mount (issue #111, final whole-branch review
   // finding I4/R1) - mirrors WorldInterview.tsx's own resume effect
@@ -208,6 +210,7 @@ export default function ArchitectureInterview() {
       const data = await res.json();
       if (res.status === 409 && data.needsAcknowledgment) {
         setThematicAnchorAudit(data.thematicAnchorAudit);
+        setPreCompilationAudit(data.preCompilationAudit);
         setCompileNeedsAcknowledgment(true);
         setCompiled(null);
         return;
@@ -216,10 +219,12 @@ export default function ArchitectureInterview() {
         setCompileError(data.error ?? "Compile failed.");
         setCompiled(null);
         setThematicAnchorAudit(null);
+        setPreCompilationAudit(null);
         setCompileNeedsAcknowledgment(false);
         return;
       }
       setThematicAnchorAudit(data.thematicAnchorAudit);
+      setPreCompilationAudit(data.preCompilationAudit);
       setCompileNeedsAcknowledgment(false);
       setCompiled(data);
     } catch {
@@ -333,11 +338,11 @@ export default function ArchitectureInterview() {
         </div>
       )}
 
-      {compileNeedsAcknowledgment && thematicAnchorAudit && (
+      {compileNeedsAcknowledgment && (thematicAnchorAudit || preCompilationAudit) && (
         <div className="border-b border-rose-500/30 bg-rose-950/30 px-6 py-3 text-xs text-rose-200">
-          <p className="mb-2 font-semibold">Thematic Anchor Audit found a gap before compiling:</p>
+          <p className="mb-2 font-semibold">Before compiling:</p>
           <ul className="mb-2 list-disc pl-4">
-            {thematicAnchorAudit.findings
+            {[...(thematicAnchorAudit?.findings ?? []), ...(preCompilationAudit?.findings ?? [])]
               .filter((f) => f.status === "flag")
               .map((f) => (
                 <li key={f.id}>{f.detail}</li>
@@ -357,10 +362,10 @@ export default function ArchitectureInterview() {
         <div className="border-b border-purple-500/30 bg-purple-950/20 px-6 py-3 text-xs text-purple-200">
           <p className="mb-2">
             Compiled — {compiled.outstandingCount} outstanding item{compiled.outstandingCount === 1 ? "" : "s"}.
-            {thematicAnchorAudit &&
-              (thematicAnchorAudit.gapFound
-                ? " Thematic Anchor Audit: overridden with gap(s) acknowledged."
-                : " Thematic Anchor Audit: passed.")}
+            {(thematicAnchorAudit || preCompilationAudit) &&
+              (thematicAnchorAudit?.gapFound || preCompilationAudit?.failed
+                ? " Pre-compile audits: overridden with issue(s) acknowledged."
+                : " Pre-compile audits: passed.")}
           </p>
           <button
             onClick={() => downloadText("screenplay-architecture.md", compiled.markdown, "text/markdown")}
