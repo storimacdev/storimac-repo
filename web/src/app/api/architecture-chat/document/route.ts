@@ -4,8 +4,7 @@ import { requireUser } from "@/lib/session";
 import { errorResponse } from "@/lib/apiErrors";
 import { getMembership } from "@/lib/workspace/workspaceStore";
 import { getStory } from "@/lib/canonEngine/storyStore";
-import { ingestCanon } from "@/lib/storyArchitectureEngine/ingestCanon";
-import { compileScreenplayArchitectureDocument } from "@/lib/storyArchitectureEngine/compileArchitectureDocument";
+import { generateScreenplayArchitectureDocument } from "@/lib/storyArchitectureEngine/screenplayArchitectureCompiler";
 import { runThematicAnchorAudit, type ThematicAnchorAuditResult } from "@/lib/storyArchitectureEngine/thematicAnchorAudit";
 import { runPreCompilationAudit } from "@/lib/storyArchitectureEngine/preCompilationAudit";
 
@@ -111,9 +110,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ needsAcknowledgment: true, thematicAnchorAudit, preCompilationAudit }, { status: 409 });
     }
 
-    const canon = await ingestCanon(storyId);
-    const compiled = compileScreenplayArchitectureDocument(storyId, canon, units);
-    return NextResponse.json({ ...compiled, thematicAnchorAudit, preCompilationAudit });
+    const version = await generateScreenplayArchitectureDocument(storyId);
+    return NextResponse.json({
+      version: version.version,
+      date: version.date,
+      summary_of_changes: version.summary_of_changes,
+      markdown: version.markdown,
+      json: version.json,
+      confirmed: version.confirmed,
+      confirmedAt: version.confirmedAt,
+      outstandingCount: version.json["7_outstanding_decisions_version_history"].outstanding.length,
+      thematicAnchorAudit,
+      preCompilationAudit,
+    });
   } catch (err) {
     return errorResponse(err);
   }
