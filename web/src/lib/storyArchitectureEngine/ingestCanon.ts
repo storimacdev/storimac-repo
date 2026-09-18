@@ -43,6 +43,12 @@ export interface IngestedProject1Canon {
   storySpine: FoundationDocument["11_story_spine"];
   principalCharacters: CastMember[];
   version: number;
+  /** Issue #115 - already computed by ingestFoundation.ts, just never
+   * copied through here until now. */
+  workingTitle: string;
+  /** Issue #115 - read directly off the fetched document, same
+   * pattern as storyDna/format/thematicBlueprint above. */
+  genreTone: FoundationDocument["6_genre_tone"];
 }
 
 /**
@@ -124,6 +130,8 @@ async function ingestProject1(
     storySpine: foundationResult.foundation.storySpine,
     principalCharacters: foundationResult.foundation.cast,
     version: version.version,
+    workingTitle: foundationResult.foundation.workingTitle,
+    genreTone: doc["6_genre_tone"],
   };
 
   return { canon, gaps };
