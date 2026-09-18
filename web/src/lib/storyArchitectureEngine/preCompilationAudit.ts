@@ -32,27 +32,43 @@ export function checkScale(units: StructuralUnit[]): PreCompilationCheckFinding 
     return {
       id: "scale",
       status: "flag",
-      detail: `${count} Confirmed scene(s) - outside the ${MIN_TARGET_SCENES}-${MAX_TARGET_SCENES} scene target range.`,
+      // "unit(s)" not "scene(s)" - a Confirmed unit may be typed Scene,
+      // Sequence, SetPiece, or PlotPoint, matching
+      // compileArchitectureDocument.ts's own identical hedge on this
+      // same count.
+      detail: `${count} Confirmed unit(s) - outside the ${MIN_TARGET_SCENES}-${MAX_TARGET_SCENES} scene target range.`,
     };
   }
   return {
     id: "scale",
     status: "pass",
-    detail: `${count} Confirmed scenes - within the ${MIN_TARGET_SCENES}-${MAX_TARGET_SCENES} scene target range.`,
+    detail: `${count} Confirmed unit(s) - within the ${MIN_TARGET_SCENES}-${MAX_TARGET_SCENES} scene target range.`,
   };
 }
 
-/** Earmark Check: all 10 Critical Beat tags (issue #58) appear
+/** Earmark Check: all of the Critical Beat tags (issue #58) appear
  * somewhere in the Confirmed Scene Register. Reuses the exact same
  * regex checkSceneRegisterFormat already validates a tag's value
- * against, applied per-unit and collected into a set. */
+ * against, applied per-unit and collected into a set. Complementary
+ * to, not in tension with, issue #66's own deliberate choice not to
+ * require a beat tag on every individual scene (the app has no
+ * reliable way to know a given scene SHOULD carry one) - #66 governs
+ * per-scene tag VALUE at write time; this governs aggregate coverage
+ * across the whole Confirmed set, once, at compile time, when the
+ * author is asserting the outline is done. An author still deciding
+ * gets a one-click "Compile anyway" override, not a hard block. */
 export function checkEarmark(units: StructuralUnit[]): PreCompilationCheckFinding {
   const confirmed = getConfirmedUnits(units);
   const foundTags = new Set<string>();
+  // Final whole-branch review finding: CRITICAL_BEAT_TAG_PATTERN is
+  // non-global (checkSceneRegisterFormat needs its capture group, which
+  // a global regex would drop), so a unit carrying two beat tags would
+  // otherwise only contribute its first. A local global clone here
+  // finds every tag per unit without touching the shared export.
+  const globalBeatTagPattern = new RegExp(CRITICAL_BEAT_TAG_PATTERN.source, "gi");
   for (const unit of confirmed) {
     const content = typeof unit.content === "string" ? unit.content : "";
-    const match = content.match(CRITICAL_BEAT_TAG_PATTERN);
-    if (match) {
+    for (const match of content.matchAll(globalBeatTagPattern)) {
       const tagName = match[1].trim().toUpperCase();
       if (CRITICAL_BEAT_LOOKUP[tagName]) {
         foundTags.add(tagName);
@@ -64,10 +80,14 @@ export function checkEarmark(units: StructuralUnit[]): PreCompilationCheckFindin
     return {
       id: "earmark",
       status: "flag",
-      detail: `${missing.length} of 10 Critical Beats not yet tagged in any Confirmed scene: ${missing.join(", ")}.`,
+      detail: `${missing.length} of ${Object.keys(CRITICAL_BEAT_LOOKUP).length} Critical Beats not yet tagged in any Confirmed scene: ${missing.join(", ")}.`,
     };
   }
-  return { id: "earmark", status: "pass", detail: "All 10 Critical Beats are tagged in the Confirmed Scene Register." };
+  return {
+    id: "earmark",
+    status: "pass",
+    detail: `All ${Object.keys(CRITICAL_BEAT_LOOKUP).length} Critical Beats are tagged in the Confirmed Scene Register.`,
+  };
 }
 
 /** Formatting Check: every Confirmed scene has a standard slugline

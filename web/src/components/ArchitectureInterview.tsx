@@ -340,14 +340,21 @@ export default function ArchitectureInterview() {
 
       {compileNeedsAcknowledgment && (thematicAnchorAudit || preCompilationAudit) && (
         <div className="border-b border-rose-500/30 bg-rose-950/30 px-6 py-3 text-xs text-rose-200">
-          <p className="mb-2 font-semibold">Before compiling:</p>
+          <p className="mb-2 font-semibold">These checks flagged issues before compiling:</p>
           <ul className="mb-2 list-disc pl-4">
-            {[...(thematicAnchorAudit?.findings ?? []), ...(preCompilationAudit?.findings ?? [])]
+            {[
+              ...(thematicAnchorAudit?.findings ?? []).map((f) => ({ ...f, key: `thematic-${f.id}` })),
+              ...(preCompilationAudit?.findings ?? []).map((f) => ({ ...f, key: `precompile-${f.id}` })),
+            ]
               .filter((f) => f.status === "flag")
               .map((f) => (
-                <li key={f.id}>{f.detail}</li>
+                <li key={f.key}>{f.detail}</li>
               ))}
           </ul>
+          <p className="mb-2 text-rose-300">
+            Only Confirmed scenes are compiled - the pacing note elsewhere on this page (if shown) projects your
+            Working + Confirmed total, which is a different, non-blocking estimate.
+          </p>
           <button
             onClick={() => compileDocument(true)}
             disabled={compiling}
