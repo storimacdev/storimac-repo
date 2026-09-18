@@ -79,7 +79,7 @@ export function ScreenplayArchitecturePdfDocument({ doc }: { doc: ScreenplayArch
             <View key={s.unit_id} style={{ marginBottom: 6 }}>
               <Text style={styles.label}>
                 {s.scene_number}. {s.slugline}
-                {s.critical_beat_tag ? `  [CRITICAL BEAT: ${s.critical_beat_tag}]` : ""}
+                {s.critical_beat_tag ? `  [CRITICAL BEAT: ${s.critical_beat_tag}]` : ""} — causal tag: {s.causal_tag}
               </Text>
               <Text style={styles.text}>{s.paragraph}</Text>
             </View>

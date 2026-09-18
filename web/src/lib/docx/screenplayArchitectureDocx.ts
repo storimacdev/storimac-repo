@@ -67,7 +67,7 @@ export async function generateScreenplayArchitectureDocxBlob(doc: ScreenplayArch
       children.push(
         new Paragraph({
           children: [
-            new TextRun({ text: `${s.scene_number}. ${s.slugline}`, bold: true }),
+            new TextRun({ text: `${s.scene_number}. ${s.slugline} — causal tag: ${s.causal_tag}`, bold: true }),
             ...(s.critical_beat_tag
               ? [new TextRun({ text: `  [CRITICAL BEAT: ${s.critical_beat_tag}]`, italics: true })]
               : []),
