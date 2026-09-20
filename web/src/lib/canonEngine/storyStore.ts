@@ -969,6 +969,116 @@ export async function confirmWorldBibleVersion(
   return updated;
 }
 
+/**
+ * Project 4's Screenplay Architecture Document (issue #70) - the
+ * 7-section compiled output (P4 Prompt v3.0 §6). Mirrors
+ * WorldBibleDocument/StoredWorldBibleVersion's exact shape and
+ * versioning precedent (issue #50) - numbered section keys,
+ * immutable-once-written versions, a snapshot of the source data at
+ * generation time for diffing the next version. Deterministic
+ * template-fill only (issue #60's own "no fabrication" posture) -
+ * unlike WorldBibleDocument, no section here is LLM-synthesized.
+ */
+export interface ScreenplayArchitectureDocument {
+  schema_version: string;
+  "1_screenplay_metadata": {
+    story_id: string;
+    screenplay_architecture_version: string;
+    working_title: string;
+    date: string;
+    status: "Compiled";
+    author: string;
+    diagnosed_complexity: string;
+    projected_scene_count: number;
+    estimated_runtime: string;
+  };
+  "2_story_dna_blueprint": {
+    summary_of_core_promise: string;
+    genre: string;
+    tone: string;
+    theme: string;
+    core_dramatic_question: string;
+  };
+  "3_structural_act_set_piece_overview": {
+    act_id: string;
+    act_name: string;
+    step_numbers: number[];
+    anchoring_set_pieces: string[];
+  }[];
+  "4_complete_approved_scene_register": {
+    unit_id: string;
+    type: string;
+    scene_number: number;
+    slugline: string;
+    critical_beat_tag: string | null;
+    paragraph: string;
+    causal_tag: string;
+  }[];
+  "5_critical_beat_earmark_index": {
+    tag: string;
+    scene_number: number | null;
+    unit_id: string | null;
+    slugline: string | null;
+  }[];
+  "6_setup_payoff_ledger": string;
+  "7_outstanding_decisions_version_history": {
+    outstanding: { unit_id: string; status: string }[];
+    version_history: { version: string; date: string; summary_of_changes: string }[];
+  };
+}
+
+export interface StoredScreenplayArchitectureVersion {
+  version: number;
+  date: string;
+  summary_of_changes: string;
+  json: ScreenplayArchitectureDocument;
+  markdown: string;
+  /** Every p4Unit's {status, content} at generation time, not just
+   * Confirmed ones - same "snapshot everything" precedent as
+   * StoredWorldBibleVersion's own elementsSnapshot, used to diff the
+   * next version. */
+  unitsSnapshot: Record<string, { status: string; content: unknown }>;
+  /** Always false/null in issue #70's scope - no confirm/structure-lint
+   * flow is being built here (unlike issue #51's World Bible
+   * equivalent). Exists for schema parity and future-proofing only. */
+  confirmed: boolean;
+  confirmedAt: string | null;
+}
+
+function p4ArchitectureVersionsCollection(storyId: string) {
+  return storiesCollection().doc(storyId).collection("p4ArchitectureVersions");
+}
+
+export async function listScreenplayArchitectureVersions(
+  storyId: string
+): Promise<Pick<StoredScreenplayArchitectureVersion, "version" | "date" | "summary_of_changes">[]> {
+  const snap = await p4ArchitectureVersionsCollection(storyId).orderBy("version", "asc").get();
+  return snap.docs.map((d) => {
+    const v = d.data() as StoredScreenplayArchitectureVersion;
+    return { version: v.version, date: v.date, summary_of_changes: v.summary_of_changes };
+  });
+}
+
+export async function getLatestScreenplayArchitectureVersion(
+  storyId: string
+): Promise<StoredScreenplayArchitectureVersion | null> {
+  const snap = await p4ArchitectureVersionsCollection(storyId).orderBy("version", "desc").limit(1).get();
+  return snap.empty ? null : (snap.docs[0].data() as StoredScreenplayArchitectureVersion);
+}
+
+/** Persists a new Screenplay Architecture Document version. Never
+ * overwrites a prior version - `stored.version` must already be
+ * `(latest?.version ?? 0) + 1`, computed by the caller
+ * (screenplayArchitectureCompiler.ts's
+ * generateScreenplayArchitectureDocument), same division of
+ * responsibility as saveWorldBibleVersion's own. */
+export async function saveScreenplayArchitectureVersion(
+  storyId: string,
+  stored: StoredScreenplayArchitectureVersion
+): Promise<void> {
+  await p4ArchitectureVersionsCollection(storyId).doc(String(stored.version)).set(stored);
+}
+
 /** Appends an author-type re-assessment (issue #8 calls this) without clobbering prior history. */
 export async function appendAuthorTypeAssessment(
   storyId: string,

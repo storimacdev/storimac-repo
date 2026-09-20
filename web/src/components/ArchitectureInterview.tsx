@@ -3,7 +3,8 @@
 import { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { useUser } from "@/components/UserProvider";
-import { downloadText } from "@/lib/download";
+import { downloadText, downloadBlob } from "@/lib/download";
+import type { ScreenplayArchitectureDocument } from "@/lib/canonEngine/storyStore";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 
@@ -68,10 +69,17 @@ export default function ArchitectureInterview() {
   const [sceneDensity, setSceneDensity] = useState<SceneDensity | null>(null);
   const [structuralVectorOptions, setStructuralVectorOptions] = useState<StructuralVectorOptions | null>(null);
   const [compiling, setCompiling] = useState(false);
-  const [compiled, setCompiled] = useState<{ markdown: string; outstandingCount: number } | null>(null);
+  const [compiled, setCompiled] = useState<{
+    markdown: string;
+    outstandingCount: number;
+    json: unknown;
+    version: number;
+  } | null>(null);
   const [compileError, setCompileError] = useState<string | null>(null);
   const [thematicAnchorAudit, setThematicAnchorAudit] = useState<ThematicAnchorAudit | null>(null);
   const [compileNeedsAcknowledgment, setCompileNeedsAcknowledgment] = useState(false);
+  const [docxGenerating, setDocxGenerating] = useState(false);
+  const [pdfGenerating, setPdfGenerating] = useState(false);
   const [preCompilationAudit, setPreCompilationAudit] = useState<PreCompilationAudit | null>(null);
 
   // Resume/hydration on mount (issue #111, final whole-branch review
@@ -234,6 +242,36 @@ export default function ArchitectureInterview() {
     }
   }
 
+  async function downloadArchitectureDocx() {
+    if (!compiled) return;
+    setDocxGenerating(true);
+    setCompileError(null);
+    try {
+      const { generateScreenplayArchitectureDocxBlob } = await import("@/lib/docx/screenplayArchitectureDocx");
+      const blob = await generateScreenplayArchitectureDocxBlob(compiled.json as ScreenplayArchitectureDocument);
+      downloadBlob(`screenplay-architecture-v${compiled.version}.docx`, blob);
+    } catch {
+      setCompileError("Couldn't generate the .docx file.");
+    } finally {
+      setDocxGenerating(false);
+    }
+  }
+
+  async function downloadArchitecturePdf() {
+    if (!compiled) return;
+    setPdfGenerating(true);
+    setCompileError(null);
+    try {
+      const { generateScreenplayArchitecturePdfBlob } = await import("@/lib/pdf/ScreenplayArchitecturePdfDocument");
+      const blob = await generateScreenplayArchitecturePdfBlob(compiled.json as ScreenplayArchitectureDocument);
+      downloadBlob(`screenplay-architecture-v${compiled.version}.pdf`, blob);
+    } catch {
+      setCompileError("Couldn't generate the .pdf file.");
+    } finally {
+      setPdfGenerating(false);
+    }
+  }
+
   if (!workspaceId || !canvasId) {
     return (
       <div className="flex min-h-dvh items-center justify-center p-4 bg-neutral-950 text-neutral-100">
@@ -375,10 +413,36 @@ export default function ArchitectureInterview() {
                 : " Pre-compile audits: passed.")}
           </p>
           <button
-            onClick={() => downloadText("screenplay-architecture.md", compiled.markdown, "text/markdown")}
+            onClick={() => downloadText(`screenplay-architecture-v${compiled.version}.md`, compiled.markdown, "text/markdown")}
             className="rounded-lg border border-purple-500/50 bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-purple-200 hover:bg-purple-900/40"
           >
             Download .md
+          </button>
+          <button
+            onClick={() =>
+              downloadText(
+                `screenplay-architecture-v${compiled.version}.json`,
+                JSON.stringify(compiled.json, null, 2),
+                "application/json"
+              )
+            }
+            className="rounded-lg border border-purple-500/50 bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-purple-200 hover:bg-purple-900/40"
+          >
+            Download .json
+          </button>
+          <button
+            onClick={downloadArchitectureDocx}
+            disabled={docxGenerating}
+            className="rounded-lg border border-purple-500/50 bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-purple-200 hover:bg-purple-900/40 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {docxGenerating ? "Generating…" : "Download .docx"}
+          </button>
+          <button
+            onClick={downloadArchitecturePdf}
+            disabled={pdfGenerating}
+            className="rounded-lg border border-purple-500/50 bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-purple-200 hover:bg-purple-900/40 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {pdfGenerating ? "Generating…" : "Download .pdf"}
           </button>
         </div>
       )}
