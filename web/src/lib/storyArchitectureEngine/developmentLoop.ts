@@ -256,6 +256,7 @@ export function checkSceneRegisterFormat(content: string): SceneFormatCheckResul
 export interface ParsedSceneRegisterEntry {
   slugline: string;
   criticalBeatTag: string | null;
+  criticalBeatTags: string[];
   paragraph: string;
 }
 
@@ -267,6 +268,17 @@ export interface ParsedSceneRegisterEntry {
  * throws: a unit whose content is malformed (only reachable if the
  * author overrode issue #91's Formatting Check) degrades to
  * disclosed placeholder text rather than crashing the compile.
+ *
+ * Final whole-branch review finding: CRITICAL_BEAT_TAG_PATTERN is
+ * non-global (checkSceneRegisterFormat needs its capture group), so a
+ * single .match() only ever finds a unit's FIRST beat tag. A unit
+ * carrying two valid tags is genuinely reachable -
+ * checkSceneRegisterFormat only validates the first tag it finds, not
+ * that there's exactly one - so criticalBeatTags below collects every
+ * valid tag via a local global clone of the pattern (mirrors issue
+ * #91's checkEarmark; never mutates the shared non-global export).
+ * criticalBeatTag stays the first tag, unchanged, for any caller that
+ * only wants Section 4's single-tag display value.
  */
 export function parseSceneRegisterEntry(content: string): ParsedSceneRegisterEntry {
   const trimmed = content.trim();
@@ -276,15 +288,20 @@ export function parseSceneRegisterEntry(content: string): ParsedSceneRegisterEnt
 
   const slugline = SLUGLINE_PATTERN.test(firstLine) ? firstLine.trim() : "(malformed - no slugline found)";
 
-  const beatMatch = trimmed.match(CRITICAL_BEAT_TAG_PATTERN);
-  const criticalBeatTag =
-    beatMatch && CRITICAL_BEAT_LOOKUP[beatMatch[1].trim().toUpperCase()]
-      ? beatMatch[1].trim().toUpperCase()
-      : null;
+  const globalBeatTagPattern = new RegExp(CRITICAL_BEAT_TAG_PATTERN.source, "gi");
+  const criticalBeatTags: string[] = [];
+  for (const match of trimmed.matchAll(globalBeatTagPattern)) {
+    const tagName = match[1].trim().toUpperCase();
+    if (CRITICAL_BEAT_LOOKUP[tagName] && !criticalBeatTags.includes(tagName)) {
+      criticalBeatTags.push(tagName);
+    }
+  }
+  const criticalBeatTag = criticalBeatTags[0] ?? null;
 
-  const paragraph = rest ? rest.replace(CRITICAL_BEAT_TAG_PATTERN, "").trim() || trimmed : trimmed;
+  const strippedRest = rest.replace(globalBeatTagPattern, "").trim();
+  const paragraph = rest ? strippedRest || trimmed : trimmed;
 
-  return { slugline, criticalBeatTag, paragraph };
+  return { slugline, criticalBeatTag, criticalBeatTags, paragraph };
 }
 
 export type RoutingChoice = "A" | "B" | "C";

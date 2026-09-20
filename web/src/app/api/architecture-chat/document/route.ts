@@ -19,9 +19,9 @@ export const runtime = "nodejs";
  * which point compilation proceeds anyway (disclosure, not
  * prevention - matching the issue's own "surface it explicitly...
  * rather than silently compiling around it" wording, not a hard
- * block). No versioning/storage of either the audit or the document
- * itself yet, matching compileArchitectureDocument.ts's own current
- * on-demand, non-persisted shape. */
+ * block). The compiled document is versioned and persisted (issue
+ * #70's StoredScreenplayArchitectureVersion) - only the audit result
+ * itself stays on-demand and non-persisted. */
 export async function POST(req: NextRequest) {
   try {
     if (!process.env.ANTHROPIC_API_KEY) {

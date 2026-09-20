@@ -41,22 +41,33 @@ export function compileScreenplayArchitectureDocumentJson(
   const outstanding = units.filter((u) => u.status !== "Confirmed");
   const date = new Date().toISOString().slice(0, 10);
 
-  const sceneRegister = confirmed.map((unit, index) => {
+  const parsedEntries = confirmed.map((unit, index) => {
     const content = typeof unit.content === "string" ? unit.content : "";
-    const parsed = parseSceneRegisterEntry(content);
-    return {
-      unit_id: unit.unitId,
-      type: unit.type,
-      scene_number: index + 1,
-      slugline: parsed.slugline,
-      critical_beat_tag: parsed.criticalBeatTag,
-      paragraph: parsed.paragraph,
-      causal_tag: unit.causalTag,
-    };
+    return { unit, index, parsed: parseSceneRegisterEntry(content) };
   });
 
+  const sceneRegister = parsedEntries.map(({ unit, index, parsed }) => ({
+    unit_id: unit.unitId,
+    type: unit.type,
+    scene_number: index + 1,
+    slugline: parsed.slugline,
+    critical_beat_tag: parsed.criticalBeatTag,
+    paragraph: parsed.paragraph,
+    causal_tag: unit.causalTag,
+  }));
+
+  // Final whole-branch review finding: matching only against
+  // sceneRegister[i].critical_beat_tag (singular) missed a Critical
+  // Beat tagged as a scene's SECOND tag, contradicting issue #91's own
+  // multi-tag-aware Earmark Check. Matching against
+  // parsedEntries[i].parsed.criticalBeatTags (plural) fixes that while
+  // keeping the invariant intact: scene_number/unit_id/slugline are
+  // still read from sceneRegister (Section 4) by the same index, never
+  // re-derived independently - Section 5 still cannot name a scene
+  // Section 4 doesn't contain.
   const earmarkIndex = Object.keys(CRITICAL_BEAT_LOOKUP).map((tag) => {
-    const entry = sceneRegister.find((s) => s.critical_beat_tag === tag);
+    const matchIndex = parsedEntries.findIndex(({ parsed }) => parsed.criticalBeatTags.includes(tag));
+    const entry = matchIndex === -1 ? undefined : sceneRegister[matchIndex];
     return {
       tag,
       scene_number: entry?.scene_number ?? null,
