@@ -5,6 +5,9 @@ import { useSearchParams } from "next/navigation";
 import { useUser } from "@/components/UserProvider";
 import { downloadText, downloadBlob } from "@/lib/download";
 import type { ScreenplayArchitectureDocument } from "@/lib/canonEngine/storyStore";
+import Link from "next/link";
+import UserMenu from "@/components/UserMenu";
+import { useScrollToLatest } from "@/lib/useScrollToLatest";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 
@@ -46,6 +49,7 @@ export default function ArchitectureInterview() {
   const workspaceId = searchParams.get("workspaceId");
   const canvasId = searchParams.get("canvasId");
   const { setLastProject } = useUser();
+  const { containerRef, endRef, isNearBottom, handleScroll, scrollToLatest } = useScrollToLatest();
 
   useEffect(() => {
     if (!workspaceId || !canvasId) return;
@@ -125,6 +129,7 @@ export default function ArchitectureInterview() {
         // `story`, not nested under it (matching guardrailFlags/
         // characterBibleGate's own shape).
         setSceneDensity((data.sceneDensity as SceneDensity | undefined) ?? null);
+        requestAnimationFrame(() => scrollToLatest("auto"));
       } catch {
         if (!cancelled) setError("Couldn't reach the server. Is the dev server running?");
       } finally {
@@ -134,7 +139,7 @@ export default function ArchitectureInterview() {
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, canvasId]);
+  }, [workspaceId, canvasId, scrollToLatest]);
 
   async function sendMessage() {
     if (!canvasId || !input.trim() || loading) return;
@@ -155,6 +160,7 @@ export default function ArchitectureInterview() {
         return;
       }
       setMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
+      requestAnimationFrame(() => scrollToLatest("smooth"));
       setRoutingChoice(data.routing_choice);
       setActiveStep(data.active_step_number);
       setPlacementFlag(data.placementFlag.flagged ? data.placementFlag : null);
@@ -285,7 +291,12 @@ export default function ArchitectureInterview() {
   return (
     <div className="flex min-h-dvh flex-col bg-neutral-950 text-neutral-100">
       <div className="flex items-center justify-between border-b border-neutral-800 px-6 py-3">
-        <p className="text-sm font-semibold text-neutral-200">Story Architecture</p>
+        <div className="flex items-center gap-4">
+          <Link href="/dashboard" className="text-sm text-neutral-400 hover:text-neutral-200">
+            ← Back
+          </Link>
+          <p className="text-sm font-semibold text-neutral-200">Story Architecture</p>
+        </div>
         <div className="flex items-center gap-3 text-xs text-neutral-400">
           <span>Routing: {routingChoice ?? "not chosen yet"}</span>
           <span>Active Step: {activeStep ?? "—"}</span>
@@ -298,6 +309,7 @@ export default function ArchitectureInterview() {
           >
             {compiling ? "Compiling…" : "Compile"}
           </button>
+          <UserMenu />
         </div>
       </div>
 
@@ -448,7 +460,7 @@ export default function ArchitectureInterview() {
       )}
       {compileError && <p className="border-b border-red-500/30 px-6 py-2 text-xs text-red-400">{compileError}</p>}
 
-      <div className="flex-1 overflow-y-auto px-6 py-6">
+      <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-6 py-6">
         {resuming && (
           <div className="mb-4 text-left">
             <p className="inline-block max-w-2xl rounded-xl bg-neutral-900 px-4 py-2 text-sm text-neutral-400">
@@ -465,6 +477,15 @@ export default function ArchitectureInterview() {
             </div>
           ))}
         {error && <p className="text-xs text-red-400">{error}</p>}
+        <div ref={endRef} />
+        {!isNearBottom && (
+          <button
+            onClick={() => scrollToLatest("smooth")}
+            className="sticky bottom-3 z-10 self-center rounded-full border border-purple-500/50 bg-neutral-900 px-4 py-1.5 text-xs font-semibold text-purple-200 shadow-lg hover:bg-purple-900/40"
+          >
+            ↓ Jump to latest
+          </button>
+        )}
       </div>
 
       <div className="border-t border-neutral-800 px-6 py-4">
