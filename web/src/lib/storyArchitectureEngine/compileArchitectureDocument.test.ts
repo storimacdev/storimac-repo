@@ -5,7 +5,7 @@ import {
   renderScreenplayArchitectureMarkdown,
   type CompileScreenplayArchitectureDocumentParams,
 } from "./compileArchitectureDocument";
-import { createUnit, setUnitContent, setUnitStatus, type StructuralUnit } from "./stateLedger";
+import { createUnit, setCausalTag, setUnitContent, setUnitStatus, type StructuralUnit } from "./stateLedger";
 import { CRITICAL_BEAT_LOOKUP } from "./structuralFramework";
 import type { IngestedCanon, IngestedProject1Canon } from "./ingestCanon";
 
@@ -237,7 +237,7 @@ describe("renderScreenplayArchitectureMarkdown", () => {
     ];
     // causalTag defaults to "UNVALIDATED" from createUnit; give this unit
     // a real, distinctive validated tag the way evaluateCausalGate would.
-    const taggedUnits: StructuralUnit[] = [{ ...units[0], causalTag: "Therefore" }];
+    const taggedUnits: StructuralUnit[] = [setCausalTag(units[0], "Therefore")];
 
     const doc = compileScreenplayArchitectureDocumentJson(baseParams(taggedUnits, buildCanon(buildP1Canon())));
 

@@ -41,14 +41,33 @@ function buildLegacyUnit(id: string, status: CountedStatus = "Working"): Structu
   return setUnitStatus(createUnit(id, "Scene"), status);
 }
 
+/** A unit shaped like a REAL pre-issue-#56 Firestore document: the
+ * `stepNumber` key is entirely ABSENT (`undefined` at runtime), not set to
+ * `null` - see storyStore.ts's own note on this exact distinction, and why
+ * computeSceneDensity's guard is `typeof n === "number"`, not `n !== null`.
+ * `buildLegacyUnit` above covers the `null` shape; this covers the shape
+ * that actually occurs in production. */
+function buildUndefinedStepNumberUnit(id: string, status: CountedStatus = "Working"): StructuralUnit {
+  const unit = setUnitStatus(createUnit(id, "Scene"), status) as Partial<StructuralUnit> & Omit<StructuralUnit, "stepNumber">;
+  delete unit.stepNumber;
+  return unit as StructuralUnit;
+}
+
 describe("computeSceneDensity", () => {
-  it("does not count a legacy unit's null stepNumber as a phantom step (final review fix)", () => {
-    // 19 units spread across 2 real steps, plus 1 legacy unit with no
-    // stepNumber at all. If the legacy unit's null were ever miscounted as
-    // a distinct 3rd step, projectedTotal would come out to round(20*10/3)
-    // = 67 ("under") instead of the correct 100 ("null").
-    const units = [...buildCountedUnits([10, 9]), buildLegacyUnit("legacy-1")];
+  it("does not count a legacy unit's null OR undefined stepNumber as a phantom step (final review fix)", () => {
+    // 18 units spread across 2 real steps, plus one legacy unit with
+    // stepNumber explicitly null (createUnit's own initialized value) and
+    // one shaped like a REAL pre-#56 Firestore document, where the
+    // stepNumber key is entirely absent (undefined at runtime, not null).
+    // If either were ever miscounted as a distinct 3rd/4th step,
+    // projectedTotal would come out wrong instead of the correct 100.
+    const units = [
+      ...buildCountedUnits([10, 8]),
+      buildLegacyUnit("legacy-null"),
+      buildUndefinedStepNumberUnit("legacy-undefined"),
+    ];
     expect(units).toHaveLength(20);
+    expect(units.find((u) => u.unitId === "legacy-undefined")?.stepNumber).toBeUndefined();
 
     const result = computeSceneDensity(units);
 
