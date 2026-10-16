@@ -8,6 +8,7 @@ import type { StructuralUnit, StructuralUnitType } from "@/lib/storyArchitecture
 import type { ContinuityMatrix } from "@/lib/screenplayEngine/continuityMatrix";
 import { createEmptyContinuityMatrix } from "@/lib/screenplayEngine/continuityMatrix";
 import type { SceneRecord } from "@/lib/screenplayEngine/sceneLedger";
+import type { ContinuityViolation, ContinuityMatrixUpdate } from "@/lib/screenplayEngine/continuityMatrix";
 
 /**
  * Story persistence — GitHub issue #12, reference implementation of the
@@ -340,7 +341,37 @@ export interface Story {
    * this field existed won't have it in Firestore.
    */
   p5Scenes?: SceneRecord[] | null;
+  /**
+   * Project 5's pending Conflict Intercept conflict (issue #98),
+   * cleared once the author picks one of the three resolution choices.
+   * Mirrors P4PendingConflict's shape - either a structural deviation
+   * from the Project 4 blueprint (detected via model self-report, same
+   * as P4's canon_contradiction) or a deterministic continuity
+   * contradiction against already-Confirmed scenes (detected via
+   * continuityMatrix.ts's checkContinuityBeforeDraft). Optional/
+   * nullable since Stories created before this field existed won't
+   * have it in Firestore.
+   */
+  p5PendingConflict?: P5PendingConflict | null;
 }
+
+export type P5PendingConflict =
+  | {
+      kind: "structural_deviation";
+      sceneNumber: number;
+      explanation: string;
+      requestedDraftText: string;
+      requestedMatrixUpdate: Omit<ContinuityMatrixUpdate, "sceneNumber">;
+      ts: string;
+    }
+  | {
+      kind: "continuity_contradiction";
+      sceneNumber: number;
+      violations: ContinuityViolation[];
+      requestedDraftText: string;
+      requestedMatrixUpdate: Omit<ContinuityMatrixUpdate, "sceneNumber">;
+      ts: string;
+    };
 
 /** Fills in defaults for a Story doc written before p5ContinuityMatrix
  * existed - same reasoning as normalizeP3/normalizeP4. */
@@ -656,6 +687,13 @@ export async function setP5Scenes(storyId: string, scenes: SceneRecord[]): Promi
     .update({ p5Scenes: scenes, updatedAt: new Date().toISOString() });
 }
 
+/** Records or clears Project 5's pending Conflict Intercept conflict (issue #98); pass null to clear once resolved. */
+export async function setP5PendingConflict(storyId: string, conflict: P5PendingConflict | null): Promise<void> {
+  await storiesCollection()
+    .doc(storyId)
+    .update({ p5PendingConflict: conflict, updatedAt: new Date().toISOString() });
+}
+
 /** Records or clears Project 2's pending Story Foundation conflict (issue #30); pass null to clear once resolved. */
 export async function setP2PendingConflict(
   storyId: string,
@@ -823,6 +861,28 @@ function p4CanonRevisionLogCollection(storyId: string) {
 /** Appends a resolved conflict to Project 4's Canon Revision log (issue #64). */
 export async function appendP4CanonRevisionLog(storyId: string, entry: P4CanonRevisionLogEntry): Promise<void> {
   await p4CanonRevisionLogCollection(storyId).add(entry);
+}
+
+/** Project 5's Conflict Intercept log (issue #98) - one entry per
+ * resolved conflict, mirroring P4CanonRevisionLogEntry's exact shape
+ * (same shared ConflictResolution pattern, ARCHITECTURE.md §2). */
+export interface P5ConflictLogEntry {
+  kind: "structural_deviation" | "continuity_contradiction";
+  sceneNumber: number;
+  description: string;
+  resolution: "revert" | "accept_and_update" | "park";
+  resolvedBy: string;
+  ts: string;
+  turnId: string;
+}
+
+function p5ConflictLogCollection(storyId: string) {
+  return storiesCollection().doc(storyId).collection("p5ConflictLog");
+}
+
+/** Appends a resolved conflict to Project 5's Conflict Intercept log (issue #98). */
+export async function appendP5ConflictLog(storyId: string, entry: P5ConflictLogEntry): Promise<void> {
+  await p5ConflictLogCollection(storyId).add(entry);
 }
 
 /** Project 2's compiled, permanent Character Bible entries (issue #34,

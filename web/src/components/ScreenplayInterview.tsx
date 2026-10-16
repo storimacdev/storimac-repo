@@ -34,6 +34,8 @@ interface TurnResponse {
   } | null;
   structuralDeviation: { deviates: boolean; explanation: string } | null;
   delivery: string | null;
+  pendingConflict: { kind: "structural_deviation" | "continuity_contradiction"; sceneNumber: number } | null;
+  downstreamContinuityDamage: string[] | null;
   gaps: { project: string; field: string; reason: string }[];
   deferredItems: { item: string; defer_to_project: string | null; notes: string }[];
 }
@@ -66,6 +68,11 @@ export default function ScreenplayInterview() {
   );
   const [draftBlockingReasons, setDraftBlockingReasons] = useState<string[]>([]);
   const [delivery, setDelivery] = useState<string | null>(null);
+  const [pendingConflict, setPendingConflict] = useState<{
+    kind: "structural_deviation" | "continuity_contradiction";
+    sceneNumber: number;
+  } | null>(null);
+  const [downstreamDamage, setDownstreamDamage] = useState<string[]>([]);
 
   async function sendMessage(text: string) {
     if (!canvasId || !text.trim() || loading) return;
@@ -93,6 +100,8 @@ export default function ScreenplayInterview() {
       setStructuralDeviation(data.structuralDeviation?.deviates ? data.structuralDeviation : null);
       setDraftBlockingReasons(data.draftValidation?.ok === false ? data.draftValidation.blockingReasons : []);
       setDelivery(data.delivery);
+      setPendingConflict(data.pendingConflict);
+      setDownstreamDamage(data.downstreamContinuityDamage ?? []);
       setLastProject("screenplay");
     } catch {
       setError("Couldn't reach the server.");
@@ -122,6 +131,41 @@ export default function ScreenplayInterview() {
         <div className="border-b border-amber-700/40 bg-amber-950/30 px-4 py-2 text-xs text-amber-200">
           {gaps.length} canon gap{gaps.length === 1 ? "" : "s"}:{" "}
           {gaps.map((g) => `${g.project} ${g.field}`).join(", ")}
+        </div>
+      )}
+
+      {pendingConflict && (
+        <div className="border-b border-red-700/40 bg-red-950/40 px-4 py-3 text-xs text-red-200">
+          <p className="font-semibold">
+            Conflict Intercept — Scene {pendingConflict.sceneNumber} ({pendingConflict.kind.replace("_", " ")})
+          </p>
+          {downstreamDamage.length > 0 && (
+            <p className="mt-1 text-red-300">Downstream impact: {downstreamDamage.join(" ")}</p>
+          )}
+          <p className="mt-1">Drafting is frozen for this scene until you choose how to proceed.</p>
+          <div className="mt-2 flex gap-2">
+            <button
+              onClick={() => sendMessage("Revert the proposal and keep the scene as it was.")}
+              disabled={loading}
+              className="rounded-lg border border-red-500/50 px-3 py-1.5 text-xs font-semibold text-red-200 hover:bg-red-500/10 disabled:opacity-50"
+            >
+              A: Revert
+            </button>
+            <button
+              onClick={() => sendMessage("Accept the new idea as correct going forward, and log the change.")}
+              disabled={loading}
+              className="rounded-lg border border-red-500/50 px-3 py-1.5 text-xs font-semibold text-red-200 hover:bg-red-500/10 disabled:opacity-50"
+            >
+              B: Accept &amp; update
+            </button>
+            <button
+              onClick={() => sendMessage("Park this idea for later as an outstanding decision.")}
+              disabled={loading}
+              className="rounded-lg border border-red-500/50 px-3 py-1.5 text-xs font-semibold text-red-200 hover:bg-red-500/10 disabled:opacity-50"
+            >
+              C: Park
+            </button>
+          </div>
         </div>
       )}
 
