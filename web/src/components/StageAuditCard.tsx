@@ -22,6 +22,13 @@ const STATUS_MARK: Record<StageAuditFindingView["status"], string> = {
 export default function StageAuditCard({ audit, onApprove, disabled }: StageAuditCardProps) {
   if (audit.authorApproved) return null;
 
+  // Defensive guard (issue #126): no writer in this codebase produces a
+  // non-array `findings` today, but a future migration or manual
+  // Firestore repair could leave a legacy/malformed `p3Stage4Audit`
+  // shape behind, and `.map` on anything else would crash this card's
+  // render rather than just showing nothing to audit yet.
+  const findings = Array.isArray(audit.findings) ? audit.findings : [];
+
   return (
     <div
       data-testid="stage-audit-card"
@@ -29,7 +36,7 @@ export default function StageAuditCard({ audit, onApprove, disabled }: StageAudi
     >
       <p className="mb-2 font-semibold text-orange-200">System Integration Audit</p>
       <ul className="mb-3 space-y-1.5 text-xs text-neutral-300">
-        {audit.findings.map((f) => (
+        {findings.map((f) => (
           <li key={f.id}>
             {STATUS_MARK[f.status]} {f.detail}
           </li>
