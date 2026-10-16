@@ -25,8 +25,9 @@ import {
 } from "@/lib/canonEngine/storyStore";
 import { createWorldEntry, updateWorldEntry } from "@/lib/worldEngine/worldEntryStore";
 import { buildConflictContextMessage, resolveP3Conflict } from "@/lib/worldEngine/conflictResolution";
-import { listElements, WORLD_ENTRIES_COLLECTION, upsertElement, WORLD_ELEMENTS_COLLECTION } from "@/lib/canonEngine/canonStore";
+import { listElements, getElement, WORLD_ENTRIES_COLLECTION, upsertElement, WORLD_ELEMENTS_COLLECTION } from "@/lib/canonEngine/canonStore";
 import { pillarElementId } from "@/lib/worldEngine/pillarElementId";
+import { sameDependsOnSet } from "@/lib/worldEngine/dependsOnEquality";
 import type { ImportanceDepthCheck } from "@/lib/worldEngine/worldEntry";
 import { extractTurn, TurnValidationError } from "@/lib/canonEngine/extractTurn";
 import { RateLimitTimeoutError } from "@/lib/rateLimit/anthropicGate";
@@ -390,70 +391,50 @@ export async function POST(req: NextRequest) {
     // written here, via dotted-field-path updates, so this can never
     // clobber a value an author confirmed concurrently via
     // PATCH /api/world-chat/wcl or PATCH /api/world-chat/pillars while
-    // this turn's model call was in flight.
+    // this turn's model call was in flight. Issue #118: wrapped in the
+    // same graceful-degradation try/catch the Stage 3 block below already
+    // has (issue #43) - this sits in the identical position, after this
+    // turn's appendMessage already persisted the reply, so an uncaught
+    // Firestore failure here would 500 the response after the turn
+    // already exists in the transcript, stranding the author (a retry
+    // would immediately 409 "Nothing to retry"). p3ForResponse is only
+    // updated after its matching write succeeds, so a failure here leaves
+    // it (and the response the author sees) matching whatever is actually
+    // in Firestore rather than claiming a proposal that was never
+    // persisted.
     let p3ForResponse: P3State = normalizeP3(story.p3);
-    if (delta.proposed_wcl !== null) {
-      await setP3ProposedLevel(storyId, delta.proposed_wcl);
-      p3ForResponse = { ...p3ForResponse, proposedWorldComplexityLevel: delta.proposed_wcl };
-    }
-    if (delta.proposed_pillars !== null) {
-      await setP3ProposedPillars(storyId, delta.proposed_pillars);
-      p3ForResponse = { ...p3ForResponse, proposedPillars: delta.proposed_pillars };
-    }
-
-    // Pillar-to-pillar dependency graph (issue #48) - lazily creates each
-    // named pillar's CanonElement if it doesn't exist yet (mirroring how
-    // canon-status/route.ts already lazily creates pillars on first
-    // status-set, issue #41), writing only depends_on so an existing
-    // pillar's status/value is never touched by this. Both the pillar
-    // itself and every pillar it depends on are converted from the
-    // model's display-name strings to their derived pillarElementId -
-    // the model has no grounding-block exposure to a pillar's actual
-    // element id (unlike World Entries, which do get one via the
-    // [World Entries So Far...] block), so this conversion has to happen
-    // here, not be asked of the model. Every downstream consumer of a
-    // pillar's depends_on (e.g. issue #48's own Dependency Review gate in
-    // canon-status/route.ts) looks up dependents by elementId, so storing
-    // anything other than the derived id here would silently never match.
-    // Degrades gracefully - logged, never a hard error to the author -
-    // same convention as every other Stage-3-adjacent write in this route.
-    if (delta.pillar_dependencies.length > 0) {
-      try {
-        const knownPillarSet = new Set(knownPillars);
-        for (const { pillar, depends_on } of delta.pillar_dependencies) {
-          if (!knownPillarSet.has(pillar)) {
-            console.warn(`[world-chat] pillar_dependencies referenced unknown pillar "${pillar}" for turn ${turnId}, skipping`);
-            continue;
-          }
-          const validDependsOn = depends_on.filter((dep) => {
-            const known = knownPillarSet.has(dep);
-            if (!known) {
-              console.warn(`[world-chat] pillar_dependencies for "${pillar}" referenced unknown pillar "${dep}" for turn ${turnId}, skipping that dependency`);
-            }
-            return known;
-          });
-          await upsertElement(
-            storyId,
-            pillarElementId(pillar),
-            { depends_on: validDependsOn.map((p) => pillarElementId(p)) },
-            turnId,
-            false,
-            WORLD_ELEMENTS_COLLECTION
-          );
-        }
-      } catch (pillarDepsErr) {
-        console.warn(`[world-chat] pillar_dependencies persistence failed for turn ${turnId}:`, pillarDepsErr);
+    try {
+      if (delta.proposed_wcl !== null) {
+        await setP3ProposedLevel(storyId, delta.proposed_wcl);
+        p3ForResponse = { ...p3ForResponse, proposedWorldComplexityLevel: delta.proposed_wcl };
       }
+      if (delta.proposed_pillars !== null) {
+        await setP3ProposedPillars(storyId, delta.proposed_pillars);
+        p3ForResponse = { ...p3ForResponse, proposedPillars: delta.proposed_pillars };
+      }
+    } catch (p3ProposalErr) {
+      console.warn(`[world-chat] WCL/pillar proposal persistence failed for turn ${turnId}:`, p3ProposalErr);
     }
 
     // Conflict Resolution Protocol (issue #47) - resolves an already-open
     // conflict if the author just picked a choice, or opens a new
     // Foundation-level one if the model self-reported a contradiction
-    // this turn. Runs before Stage 3 below so that block can check
-    // whether a conflict is still open and, if so, skip all Stage 3
-    // writes this turn (halts forward progress per the AC).
+    // this turn. Runs before the pillar-dependency graph and Stage 3
+    // below so both blocks can check whether a conflict is still open
+    // and, if so, skip their writes this turn (halts forward progress
+    // per the AC).
     let pendingConflictForResponse: P3PendingConflict | null = pendingConflictBefore;
     let cascadeReview: { entryId: string; name: string }[] | null = null;
+    // Issue #119: the name of the entry the cascadeReview above is about,
+    // so the UI can say "These entries depend on {name}, which you just
+    // revised" instead of a copy that's ambiguous whenever a brand-new,
+    // unrelated pendingConflict also lands in this same response (e.g.
+    // the model opens a fresh confirmed_entry conflict on a different
+    // entry later in this same turn, after this one was just resolved
+    // via Revise). Only ever set alongside cascadeReview itself, which
+    // resolveP3Conflict only ever populates for the "revise" +
+    // "confirmed_entry" case - see conflictResolution.ts.
+    let cascadeReviewEntryName: string | null = null;
     try {
       if (pendingConflictBefore && delta.resolution !== null) {
         const result = await resolveP3Conflict({
@@ -464,6 +445,9 @@ export async function POST(req: NextRequest) {
           resolvedBy: user.uid,
         });
         cascadeReview = result.cascadeReview;
+        if (cascadeReview && pendingConflictBefore.kind === "confirmed_entry") {
+          cascadeReviewEntryName = pendingConflictBefore.entryName;
+        }
         // Persist the clear before updating the in-memory value (final
         // review, Task 5): if setP3PendingConflict throws, the outer
         // catch's console.warn still fires, but pendingConflictForResponse
@@ -484,6 +468,82 @@ export async function POST(req: NextRequest) {
       }
     } catch (conflictErr) {
       console.warn(`[world-chat] conflict resolution failed for turn ${turnId}:`, conflictErr);
+    }
+
+    // Pillar-to-pillar dependency graph (issue #48) - lazily creates each
+    // named pillar's CanonElement if it doesn't exist yet (mirroring how
+    // canon-status/route.ts already lazily creates pillars on first
+    // status-set, issue #41), writing only depends_on so an existing
+    // pillar's status/value is never touched by this. Both the pillar
+    // itself and every pillar it depends on are converted from the
+    // model's display-name strings to their derived pillarElementId -
+    // the model has no grounding-block exposure to a pillar's actual
+    // element id (unlike World Entries, which do get one via the
+    // [World Entries So Far...] block), so this conversion has to happen
+    // here, not be asked of the model. Every downstream consumer of a
+    // pillar's depends_on (e.g. issue #48's own Dependency Review gate in
+    // canon-status/route.ts) looks up dependents by elementId, so storing
+    // anything other than the derived id here would silently never match.
+    // Degrades gracefully - logged, never a hard error to the author -
+    // same convention as every other Stage-3-adjacent write in this route.
+    //
+    // Issue #120: gated on !pendingConflictForResponse and moved below
+    // the Conflict Resolution Protocol block above, for consistency with
+    // the entry-level depends_on write in Stage 3 below. #48's final
+    // review judged the previous unconditional placement defensible (a
+    // pillar-relationship declaration doesn't itself represent a
+    // canon-content change that could conflict with anything the way a
+    // proposed entry edit can), but it's simpler to reason about - and no
+    // worse for the author - to halt this alongside every other
+    // Stage-3-adjacent write while a conflict is still open: the model is
+    // instructed to re-report unchanged pillar_dependencies on every
+    // turn anyway, so a skipped turn here is only ever deferred to the
+    // next one, not lost, once the conflict clears.
+    if (!pendingConflictForResponse && delta.pillar_dependencies.length > 0) {
+      try {
+        const knownPillarSet = new Set(knownPillars);
+        for (const { pillar, depends_on } of delta.pillar_dependencies) {
+          if (!knownPillarSet.has(pillar)) {
+            console.warn(`[world-chat] pillar_dependencies referenced unknown pillar "${pillar}" for turn ${turnId}, skipping`);
+            continue;
+          }
+          const validDependsOn = depends_on.filter((dep) => {
+            const known = knownPillarSet.has(dep);
+            if (!known) {
+              console.warn(`[world-chat] pillar_dependencies for "${pillar}" referenced unknown pillar "${dep}" for turn ${turnId}, skipping that dependency`);
+            }
+            return known;
+          });
+          const nextDependsOn = validDependsOn.map((p) => pillarElementId(p));
+
+          // Issue #121: skip the write entirely if the pillar's stored
+          // depends_on already matches this turn's report (order
+          // doesn't carry meaning in this list) - the schema asks the
+          // model to re-report unchanged dependencies on every turn
+          // they're still true, and applyStateDelta appends a `history`
+          // entry on every write regardless of whether anything
+          // changed, so without this check a long session accumulates
+          // one no-op history entry per pillar per turn, unboundedly,
+          // against Firestore's 1MB document ceiling. Costs one extra
+          // read per pillar per turn to avoid the vast majority of
+          // no-op writes.
+          const existingPillar = await getElement(storyId, pillarElementId(pillar), WORLD_ELEMENTS_COLLECTION);
+          if (existingPillar && sameDependsOnSet(existingPillar.depends_on ?? [], nextDependsOn)) {
+            continue;
+          }
+
+          await upsertElement(
+            storyId,
+            pillarElementId(pillar),
+            { depends_on: nextDependsOn },
+            turnId,
+            false,
+            WORLD_ELEMENTS_COLLECTION
+          );
+        }
+      } catch (pillarDepsErr) {
+        console.warn(`[world-chat] pillar_dependencies persistence failed for turn ${turnId}:`, pillarDepsErr);
+      }
     }
 
     // Stage 3 Discover/Develop/Validate cycle (issue #43) - the model's
@@ -577,6 +637,7 @@ export async function POST(req: NextRequest) {
       entryWarning,
       pendingConflict: pendingConflictForResponse,
       cascadeReview,
+      cascadeReviewEntryName,
       stage4Audit: stage4AuditForResponse,
     });
   } catch (err) {
