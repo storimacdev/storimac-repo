@@ -7,9 +7,7 @@ import {
   getStory,
   listOutstandingQuestions,
   listCharacterBibleEntries,
-  getLatestWorldBibleVersion,
-  listWorldBibleVersions,
-  saveWorldBibleVersion,
+  saveNextWorldBibleVersion,
   normalizeP3,
   type StoredWorldBibleVersion,
   type WorldBibleDocument,
@@ -40,14 +38,35 @@ import type { FoundationDocument } from "@/lib/canonEngine/foundationDoc";
  * structural one, an accepted and disclosed limitation for this feature).
  */
 
+// Issue #128: the grounding block fed into runWorldBibleSynthesis had no
+// cap, risking the shared Anthropic rate-limit gate's ITPM ceiling
+// (anthropicGate.ts, default 200k) at large canon sizes - and unlike a
+// per-turn budget problem, a compile that exceeds it can never succeed
+// until the canon shrinks, so this caps rather than merely bounds growth.
+// FIELD_CHAR_BUDGET mirrors character-chat/route.ts's truncateFactValue
+// (issue #107); the entry/edge count caps mirror the "...and N more" note
+// issue #123 suggested for its own redundancy-check block. Worst case at
+// the caps below (~200 tokens/entry x 300 entries + ~15 tokens/edge x 500
+// edges =~ 67.5k tokens) stays comfortably under the 200k ITPM ceiling
+// alongside the rest of the prompt.
+const ENTRY_FIELD_CHAR_BUDGET = 200;
+const MAX_SYNTHESIS_ENTRIES = 300;
+const MAX_DEPENDENCY_EDGES = 500;
+
+function truncateEntryField(text: string): string {
+  return text.length > ENTRY_FIELD_CHAR_BUDGET ? `${text.slice(0, ENTRY_FIELD_CHAR_BUDGET)}…` : text;
+}
+
 export function buildSynthesisEntryDescriptions(confirmedEntries: CanonElement[]): string {
   if (confirmedEntries.length === 0) return "(None yet.)";
-  return confirmedEntries
-    .map((e) => {
-      const v = e.value as WorldEntryValue | undefined;
-      return `- ${v?.name ?? e.element_id} (${v?.category ?? "?"}): ${v?.functionalDescription ?? ""} Governing rules: ${v?.governingRules ?? ""}`;
-    })
-    .join("\n");
+  const included = confirmedEntries.slice(0, MAX_SYNTHESIS_ENTRIES);
+  const lines = included.map((e) => {
+    const v = e.value as WorldEntryValue | undefined;
+    return `- ${v?.name ?? e.element_id} (${v?.category ?? "?"}): ${truncateEntryField(v?.functionalDescription ?? "")} Governing rules: ${truncateEntryField(v?.governingRules ?? "")}`;
+  });
+  const omitted = confirmedEntries.length - included.length;
+  if (omitted > 0) lines.push(`...and ${omitted} more Confirmed entries not shown.`);
+  return lines.join("\n");
 }
 
 /** Real recorded depends_on edges between Confirmed entries, rendered as
@@ -64,7 +83,12 @@ export function buildDependencyEdgeDescriptions(confirmedEntries: CanonElement[]
       edges.push(`"${v?.name ?? e.element_id}" depends on "${depValue?.name ?? depId}".`);
     }
   }
-  return edges.length ? edges.join("\n") : "No recorded dependencies between Confirmed entries.";
+  if (edges.length === 0) return "No recorded dependencies between Confirmed entries.";
+  if (edges.length <= MAX_DEPENDENCY_EDGES) return edges.join("\n");
+  const omitted = edges.length - MAX_DEPENDENCY_EDGES;
+  return [...edges.slice(0, MAX_DEPENDENCY_EDGES), `...and ${omitted} more recorded dependencies not shown.`].join(
+    "\n"
+  );
 }
 
 const WorldBiblePillarSummarySchema = z.object({
@@ -188,6 +212,30 @@ const EMIT_WORLD_BIBLE_SYNTHESIS_TOOL: Anthropic.Tool = {
  * it" mechanism, so the caller (worldEngine/worldBibleCompiler.ts's
  * generateWorldBibleDocument, Task 4) lets it propagate as a visible
  * compile failure rather than degrading to a placeholder finding.
+ *
+ * Issue #127 - maxTokens: extractTurn.ts's header comment advises keeping
+ * a tool schema's long free-text field(s) ordered last in
+ * properties/required so a mid-JSON truncation drops only the free-text
+ * tail; that advice can't help here, because all 11 required fields on
+ * EMIT_WORLD_BIBLE_SYNTHESIS_TOOL are long-form prose - there is no
+ * "short required fields first" ordering to protect, so any truncation
+ * corrupts the whole payload regardless of field order. Of the issue's
+ * three options (raise maxTokens / split into two calls / document the
+ * limitation), raising is the one applied below: Claude Sonnet 5 supports
+ * up to 128K output tokens, so 8192 had enormous headroom to spare, and
+ * splitting the call would be a real change to Decision 2's "one
+ * consolidated call" architecture (needing its own design pass, not a
+ * silent code change) for a problem a larger budget already solves.
+ * 24000 (not closer to the 128K ceiling) is chosen because this call
+ * reserves its full maxTokens against the shared gate's OTPM ceiling
+ * (anthropicGate.ts, default 60000 output-tokens-per-minute) for the
+ * duration of the call - a much larger value would eat most or all of
+ * that shared budget on one request. 24000 is already ~3x the old
+ * budget and comfortable headroom over a worst-case rich-world estimate
+ * (11 prose sections + a per-pillar array), while a compile remains a
+ * rare, explicit, author-triggered action rather than a per-turn cost, so
+ * reserving well under half the OTPM budget for its duration is
+ * acceptable.
  */
 export async function runWorldBibleSynthesis(
   anthropic: Anthropic,
@@ -211,7 +259,7 @@ export async function runWorldBibleSynthesis(
     ],
     tool: EMIT_WORLD_BIBLE_SYNTHESIS_TOOL,
     schema: WorldBibleSynthesisSchema,
-    maxTokens: 8192,
+    maxTokens: 24000,
   });
 }
 
@@ -446,18 +494,23 @@ function diffSummary(prev: WorldEntriesSnapshot | null, current: WorldEntriesSna
  * canon and cross-project data, runs the one prose-synthesis call, compiles
  * and renders the document, and persists it as a new immutable version
  * (prior versions are never overwritten - Decision 5). Mirrors
- * generateFoundationDocument's exact orchestration shape (issue #18/#19).
+ * generateFoundationDocument's exact orchestration shape (issue #18/#19),
+ * including its issue #129 fix: the slow, external work (the Anthropic
+ * synthesis call and the cross-project/canon reads below) all happens
+ * before the version number is ever read, and the version read + compute
+ * + write happens atomically in saveNextWorldBibleVersion - two concurrent
+ * compiles for the same story can no longer both read the same prior
+ * version and silently clobber one another's write.
  */
 export async function generateWorldBibleDocument(storyId: string): Promise<StoredWorldBibleVersion> {
   const story = await getStory(storyId);
   if (!story) throw new Error(`Story "${storyId}" not found.`);
 
-  const [worldEntries, outstanding, p1Versions, p2Characters, prior] = await Promise.all([
+  const [worldEntries, outstanding, p1Versions, p2Characters] = await Promise.all([
     listElements(storyId, WORLD_ENTRIES_COLLECTION),
     listOutstandingQuestions(storyId),
     listDocumentVersions(storyId),
     listCharacterBibleEntries(storyId),
-    getLatestWorldBibleVersion(storyId),
   ]);
 
   const p1Doc = p1Versions.length > 0 ? await getDocumentVersion(storyId, p1Versions[p1Versions.length - 1].version) : null;
@@ -468,44 +521,36 @@ export async function generateWorldBibleDocument(storyId: string): Promise<Store
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   const synthesis = await runWorldBibleSynthesis(anthropic, confirmedEntries, pillars);
 
-  const version = (prior?.version ?? 0) + 1;
   const snapshot: WorldEntriesSnapshot = {};
   for (const e of worldEntries) snapshot[e.element_id] = { status: e.status, value: e.value };
-
   const date = new Date().toISOString().slice(0, 10);
-  const summary = diffSummary(prior?.elementsSnapshot ?? null, snapshot);
 
-  const priorHistory = prior
-    ? (await listWorldBibleVersions(storyId)).map((v) => ({
-        version: `v${v.version}`,
-        date: v.date,
-        summary_of_changes: v.summary_of_changes,
-      }))
-    : [];
-  const versionHistory = [...priorHistory, { version: `v${version}`, date, summary_of_changes: summary }];
+  return saveNextWorldBibleVersion(storyId, (prior, priorHistory) => {
+    const version = (prior?.version ?? 0) + 1;
+    const summary = diffSummary(prior?.elementsSnapshot ?? null, snapshot);
+    const versionHistory = [...priorHistory, { version: `v${version}`, date, summary_of_changes: summary }];
 
-  const json = compileWorldBibleDocument({
-    story,
-    worldEntries,
-    synthesis,
-    outstanding,
-    p1Doc: p1Doc?.json ?? null,
-    p2Characters,
-    version,
-    versionHistory,
+    const json = compileWorldBibleDocument({
+      story,
+      worldEntries,
+      synthesis,
+      outstanding,
+      p1Doc: p1Doc?.json ?? null,
+      p2Characters,
+      version,
+      versionHistory,
+    });
+    const markdown = renderWorldBibleMarkdown(json);
+
+    return {
+      version,
+      date,
+      summary_of_changes: summary,
+      json,
+      markdown,
+      elementsSnapshot: snapshot,
+      confirmed: false,
+      confirmedAt: null,
+    };
   });
-  const markdown = renderWorldBibleMarkdown(json);
-
-  const stored: StoredWorldBibleVersion = {
-    version,
-    date,
-    summary_of_changes: summary,
-    json,
-    markdown,
-    elementsSnapshot: snapshot,
-    confirmed: false,
-    confirmedAt: null,
-  };
-  await saveWorldBibleVersion(storyId, stored);
-  return stored;
 }
