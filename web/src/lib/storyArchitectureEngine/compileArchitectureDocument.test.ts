@@ -247,4 +247,21 @@ describe("renderScreenplayArchitectureMarkdown", () => {
 
     expect(markdown).toContain("Therefore");
   });
+
+  it("renders a whitespace-only Project 1 field as '—', matching the docx/pdf exports' trim-aware convention (issue #175)", () => {
+    // A whitespace-only working title is the reachable case issue #175
+    // describes: `canon.p1?.workingTitle || "(not yet Confirmed)"` lets a
+    // non-empty, whitespace-only string through as truthy, so it's the
+    // compiled JSON's own field value (not a fallback) that reaches
+    // mdValue here with content that's visually empty.
+    const canon = buildCanon(buildP1Canon({ workingTitle: "   " }));
+    const doc = compileScreenplayArchitectureDocumentJson(baseParams([], canon));
+
+    expect(doc["1_screenplay_metadata"].working_title).toBe("   ");
+
+    const markdown = renderScreenplayArchitectureMarkdown(doc);
+
+    expect(markdown).toContain("Working Title: —");
+    expect(markdown).not.toContain("Working Title:    \n");
+  });
 });

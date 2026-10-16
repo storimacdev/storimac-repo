@@ -119,8 +119,13 @@ export function compileScreenplayArchitectureDocumentJson(
   };
 }
 
+// Issue #175: match the stricter, trim-aware convention
+// screenplayArchitectureDocx.ts's docxValue and
+// ScreenplayArchitecturePdfDocument.tsx's pdfValue already use, so a
+// whitespace-only field value can't render as blank here while
+// rendering as "—" in the docx/PDF exports of the same compiled data.
 function mdValue(v: string): string {
-  return v || "—";
+  return v && v.trim() ? v : "—";
 }
 
 export function renderScreenplayArchitectureMarkdown(doc: ScreenplayArchitectureDocument): string {
