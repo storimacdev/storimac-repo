@@ -163,8 +163,18 @@ export function parkScene(scene: SceneRecord, now?: string): SceneRecord {
  * first (an author may legitimately revisit an open one); otherwise
  * resumes whichever scene is still open, or starts the next one after
  * the highest resolved scene number once every existing scene is
- * Confirmed/Parked. */
-export function determineActiveSceneNumber(scenes: SceneRecord[], requested: number | null): number {
+ * Confirmed/Parked.
+ *
+ * Takes only `sceneNumber`/`status` (issue #100) rather than a full
+ * `SceneRecord[]`, so this same resume-pointer rule can run both
+ * server-side (screenplay-chat/route.ts, with the full ledger) and
+ * client-side (ScreenplayInterview.tsx's resume effect, with only the
+ * subset of scene fields the resume API response carries) without
+ * duplicating the logic in two places. */
+export function determineActiveSceneNumber(
+  scenes: Pick<SceneRecord, "sceneNumber" | "status">[],
+  requested: number | null
+): number {
   if (requested !== null) return requested;
   const open = scenes.find((s) => s.status !== "Confirmed" && s.status !== "Parked");
   if (open) return open.sceneNumber;
