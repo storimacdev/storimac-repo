@@ -224,6 +224,48 @@ describe("compileScreenplayArchitectureDocumentJson", () => {
   });
 });
 
+describe("compileScreenplayArchitectureDocumentJson - draft-aware params (issue #71)", () => {
+  it("omitting status/scopeLabel/versionLabel/actScope produces today's exact full-compile output (regression safety)", () => {
+    const units: StructuralUnit[] = [
+      confirmedUnit("confirmed-1", "SCENE 1: INT. HOUSE - DAY\nShe waits quietly. The room is still. Nothing moves for a while."),
+    ];
+    const result = compileScreenplayArchitectureDocumentJson(baseParams(units, buildCanon(buildP1Canon())));
+
+    expect(result["1_screenplay_metadata"].status).toBe("Compiled");
+    expect(result["1_screenplay_metadata"].scope).toBeNull();
+    expect(result["1_screenplay_metadata"].screenplay_architecture_version).toBe("v1");
+    expect(result["3_structural_act_set_piece_overview"]).toHaveLength(4);
+
+    const markdown = renderScreenplayArchitectureMarkdown(result);
+    expect(markdown).not.toContain("Scope:");
+  });
+
+  it("a Draft status/scopeLabel/actScope renders correctly in both JSON and markdown", () => {
+    const units: StructuralUnit[] = [
+      confirmedUnit("confirmed-1", "SCENE 1: INT. HOUSE - DAY\nShe waits quietly. The room is still. Nothing moves for a while."),
+    ];
+    const params: CompileScreenplayArchitectureDocumentParams = {
+      ...baseParams(units, buildCanon(buildP1Canon())),
+      status: "Draft",
+      scopeLabel: "Act 1 (THE THESIS) - draft",
+      versionLabel: "draft-v1",
+      actScope: "1",
+    };
+    const result = compileScreenplayArchitectureDocumentJson(params);
+
+    expect(result["1_screenplay_metadata"].status).toBe("Draft");
+    expect(result["1_screenplay_metadata"].scope).toBe("Act 1 (THE THESIS) - draft");
+    expect(result["1_screenplay_metadata"].screenplay_architecture_version).toBe("draft-v1");
+    expect(result["3_structural_act_set_piece_overview"]).toHaveLength(1);
+    expect(result["3_structural_act_set_piece_overview"][0].act_id).toBe("1");
+
+    const markdown = renderScreenplayArchitectureMarkdown(result);
+    expect(markdown).toContain("Status: Draft");
+    expect(markdown).toContain("Scope: Act 1 (THE THESIS) - draft");
+    expect(markdown).toContain("Version: draft-v1");
+  });
+});
+
 describe("compileScreenplayArchitectureDocumentJson - Setup & Payoff Ledger (issue #173)", () => {
   it("pairs a [SETUP: ...] tag with a later [PAYOFF: ...] tag of the same name, resolving scene_number/slugline from the SAME Section 4 entries, never re-derived independently", () => {
     const units: StructuralUnit[] = [

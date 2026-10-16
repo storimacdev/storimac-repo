@@ -986,7 +986,11 @@ export interface ScreenplayArchitectureDocument {
     screenplay_architecture_version: string;
     working_title: string;
     date: string;
-    status: "Compiled";
+    status: "Compiled" | "Draft";
+    /** Issue #71 - null for every full compile; a human-readable Act
+     * label ("Act 1 (THE THESIS) - partial compile, draft only, not
+     * final canon") for a partial-compile draft. */
+    scope: string | null;
     author: string;
     diagnosed_complexity: string;
     projected_scene_count: number;

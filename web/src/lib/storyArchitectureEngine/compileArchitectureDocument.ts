@@ -1,5 +1,5 @@
 import type { IngestedCanon } from "./ingestCanon";
-import { STRUCTURAL_ACTS, STRUCTURAL_STEPS, CRITICAL_BEAT_LOOKUP } from "./structuralFramework";
+import { STRUCTURAL_ACTS, STRUCTURAL_STEPS, CRITICAL_BEAT_LOOKUP, type ActId } from "./structuralFramework";
 import { getConfirmedUnits, type StructuralUnit } from "./stateLedger";
 import { parseSceneRegisterEntry } from "./developmentLoop";
 import { buildSetupPayoffLedger } from "./setupPayoffLedger";
@@ -30,12 +30,33 @@ export interface CompileScreenplayArchitectureDocumentParams {
   units: StructuralUnit[];
   version: number;
   versionHistory: { version: string; date: string; summary_of_changes: string }[];
+  // Issue #71: all four below are optional and independently defaulted
+  // so a full compile's call sites and output stay byte-identical to
+  // before this issue - only a partial-compile orchestrator passes
+  // these explicitly. The compiler itself stays scope-agnostic; Act-
+  // filtering of `units` happens in the ORCHESTRATOR, never in here
+  // (see docs/superpowers/specs/2026-10-16-p4-partial-compile-design.md
+  // §2 for why).
+  status?: "Compiled" | "Draft";
+  scopeLabel?: string | null;
+  versionLabel?: string;
+  actScope?: ActId | null;
 }
 
 export function compileScreenplayArchitectureDocumentJson(
   params: CompileScreenplayArchitectureDocumentParams
 ): ScreenplayArchitectureDocument {
-  const { storyId, canon, units, version, versionHistory } = params;
+  const {
+    storyId,
+    canon,
+    units,
+    version,
+    versionHistory,
+    status = "Compiled",
+    scopeLabel = null,
+    versionLabel = `v${version}`,
+    actScope = null,
+  } = params;
   const confirmed = getConfirmedUnits(units);
   const outstanding = units.filter((u) => u.status !== "Confirmed");
   const date = new Date().toISOString().slice(0, 10);
@@ -102,7 +123,10 @@ export function compileScreenplayArchitectureDocumentJson(
         : null,
   }));
 
-  const actOverview = STRUCTURAL_ACTS.map((act) => ({
+  // Issue #71: filtered to the requested Act only for a partial-compile
+  // draft (actScope non-null); unchanged (all 4 Acts) for every full
+  // compile, since actScope defaults to null.
+  const actOverview = STRUCTURAL_ACTS.filter((act) => actScope === null || act.id === actScope).map((act) => ({
     act_id: act.id,
     act_name: act.name,
     step_numbers: act.stepNumbers,
@@ -115,10 +139,11 @@ export function compileScreenplayArchitectureDocumentJson(
     schema_version: "1.0",
     "1_screenplay_metadata": {
       story_id: storyId,
-      screenplay_architecture_version: `v${version}`,
+      screenplay_architecture_version: versionLabel,
       working_title: canon.p1?.workingTitle || "(not yet Confirmed)",
       date,
-      status: "Compiled",
+      status,
+      scope: scopeLabel,
       author: NOT_TRACKED_AUTHOR,
       diagnosed_complexity: "N/A",
       projected_scene_count: confirmed.length,
@@ -159,6 +184,7 @@ export function renderScreenplayArchitectureMarkdown(doc: ScreenplayArchitecture
       `- Working Title: ${mdValue(meta.working_title)}\n` +
       `- Date: ${meta.date}\n` +
       `- Status: ${meta.status}\n` +
+      (meta.scope ? `- Scope: ${meta.scope}\n` : "") +
       `- Author: ${meta.author}\n` +
       `- Diagnosed Complexity: ${meta.diagnosed_complexity}\n` +
       `- Projected Scene Count: ${meta.projected_scene_count} (target range: 75-150 scenes)\n` +
