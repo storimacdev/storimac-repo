@@ -7,6 +7,7 @@ import type { RoutingState } from "@/lib/storyArchitectureEngine/developmentLoop
 import type { StructuralUnit, StructuralUnitType } from "@/lib/storyArchitectureEngine/stateLedger";
 import type { ContinuityMatrix } from "@/lib/screenplayEngine/continuityMatrix";
 import { createEmptyContinuityMatrix } from "@/lib/screenplayEngine/continuityMatrix";
+import type { SceneRecord } from "@/lib/screenplayEngine/sceneLedger";
 
 /**
  * Story persistence — GitHub issue #12, reference implementation of the
@@ -329,6 +330,16 @@ export interface Story {
    * `createEmptyContinuityMatrix()` by `normalizeP5ContinuityMatrix`.
    */
   p5ContinuityMatrix?: ContinuityMatrix | null;
+  /**
+   * Project 5's per-scene session ledger (issue #93) - the author's
+   * screenplay-chat session is the sole owner of this array each turn
+   * (the live agent reports the full current scene it's working on;
+   * the route upserts into the existing array and writes the whole
+   * thing back), matching setP4Units's own "no concurrent-multi-writer
+   * case" reasoning. Optional/nullable since Stories created before
+   * this field existed won't have it in Firestore.
+   */
+  p5Scenes?: SceneRecord[] | null;
 }
 
 /** Fills in defaults for a Story doc written before p5ContinuityMatrix
@@ -372,6 +383,10 @@ export const WORLD_MESSAGES_COLLECTION = "worldMessages";
 /** Project 4's message subcollection name (issue #111) - same reasoning
  * as WORLD_MESSAGES_COLLECTION/CHARACTER_MESSAGES_COLLECTION. */
 export const ARCHITECTURE_MESSAGES_COLLECTION = "architectureMessages";
+
+/** Project 5's message subcollection name (issue #93) - same reasoning
+ * as ARCHITECTURE_MESSAGES_COLLECTION. */
+export const SCREENPLAY_MESSAGES_COLLECTION = "screenplayMessages";
 
 export class StoryAccessError extends Error {
   constructor(message: string) {
@@ -633,6 +648,14 @@ export async function setP5ContinuityMatrix(storyId: string, matrix: ContinuityM
     .update({ p5ContinuityMatrix: matrix, updatedAt: new Date().toISOString() });
 }
 
+/** Whole-array-replace, matching setP4Units's exact precedent (issue
+ * #93). */
+export async function setP5Scenes(storyId: string, scenes: SceneRecord[]): Promise<void> {
+  await storiesCollection()
+    .doc(storyId)
+    .update({ p5Scenes: scenes, updatedAt: new Date().toISOString() });
+}
+
 /** Records or clears Project 2's pending Story Foundation conflict (issue #30); pass null to clear once resolved. */
 export async function setP2PendingConflict(
   storyId: string,
@@ -665,7 +688,11 @@ export async function setP3Stage4Audit(
 
 export interface StoredOutstandingQuestion {
   item: string;
-  defer_to: "Project 2" | "Project 3" | "Project 4" | "Project 5" | null;
+  /** "Project 1" added for issue #93 - Project 5 is the first project
+   * able to defer something back to Story Foundation (every earlier
+   * project's own deferred_items schema only ever targets a strictly
+   * downstream project). */
+  defer_to: "Project 1" | "Project 2" | "Project 3" | "Project 4" | "Project 5" | null;
   notes: string;
   ts: string;
   /** The P2 character this item was deferred from, if any (issue #34's
