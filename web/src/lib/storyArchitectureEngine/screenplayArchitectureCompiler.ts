@@ -3,11 +3,16 @@ import {
   getLatestScreenplayArchitectureVersion,
   saveScreenplayArchitectureVersion,
   listScreenplayArchitectureVersions,
+  listScreenplayArchitectureDrafts,
+  getLatestScreenplayArchitectureDraft,
+  saveScreenplayArchitectureDraft,
   type StoredScreenplayArchitectureVersion,
+  type StoredScreenplayArchitectureDraft,
 } from "@/lib/canonEngine/storyStore";
 import { ingestCanon } from "./ingestCanon";
 import { compileScreenplayArchitectureDocumentJson, renderScreenplayArchitectureMarkdown } from "./compileArchitectureDocument";
 import type { StructuralUnit } from "./stateLedger";
+import { STRUCTURAL_ACTS, type ActId } from "./structuralFramework";
 
 /**
  * Generates the next Screenplay Architecture Document version for a
@@ -24,8 +29,10 @@ type UnitsSnapshot = Record<string, { status: string; content: unknown }>;
 
 /** Byte-for-byte the same shape as worldBibleCompiler.ts's own
  * diffSummary - added/changed/removed, comparing JSON.stringify'd
- * content and status per unit. */
-function diffSummary(prev: UnitsSnapshot | null, current: UnitsSnapshot): string {
+ * content and status per unit. Exported (issue #71) so
+ * generatePartialScreenplayArchitectureDraft below reuses it verbatim
+ * for a scope's own draft history, instead of duplicating it. */
+export function diffUnitsSnapshot(prev: UnitsSnapshot | null, current: UnitsSnapshot): string {
   if (!prev) return "Initial generation.";
   const changes: string[] = [];
   for (const [id, cur] of Object.entries(current)) {
@@ -61,7 +68,7 @@ export async function generateScreenplayArchitectureDocument(
   for (const u of units) snapshot[u.unitId] = { status: u.status, content: u.content };
 
   const date = new Date().toISOString().slice(0, 10);
-  const summary = diffSummary(prior?.unitsSnapshot ?? null, snapshot);
+  const summary = diffUnitsSnapshot(prior?.unitsSnapshot ?? null, snapshot);
 
   const priorHistory = prior
     ? (await listScreenplayArchitectureVersions(storyId)).map((v) => ({
@@ -86,5 +93,83 @@ export async function generateScreenplayArchitectureDocument(
     confirmedAt: null,
   };
   await saveScreenplayArchitectureVersion(storyId, stored);
+  return stored;
+}
+
+export interface GeneratePartialScreenplayArchitectureDraftParams {
+  storyId: string;
+  /** The caller's already-fetched FULL units snapshot - same
+   * "caller already has it" convention issue #174 established for
+   * the full compiler above. This function does the Act-filtering
+   * itself; the caller never pre-filters. */
+  units: StructuralUnit[];
+  actId: ActId;
+}
+
+/**
+ * Issue #71: compiles ONE named Act as a versioned DRAFT - never
+ * touches `p4ArchitectureVersions`/its counter above (see
+ * docs/superpowers/specs/2026-10-16-p4-partial-compile-design.md §3).
+ * Each Act gets its own independent `draftVersion` sequence, looked up
+ * and persisted entirely separately from the full document's own
+ * version history and counter.
+ */
+export async function generatePartialScreenplayArchitectureDraft(
+  params: GeneratePartialScreenplayArchitectureDraftParams
+): Promise<StoredScreenplayArchitectureDraft> {
+  const { storyId, units, actId } = params;
+  const act = STRUCTURAL_ACTS.find((a) => a.id === actId);
+  if (!act) throw new Error(`Unknown Act id "${actId}".`);
+
+  const scopeKey = `act-${actId}`;
+  const scopedUnits = units.filter((u) => u.stepNumber !== null && act.stepNumbers.includes(u.stepNumber));
+
+  const [canon, priorDraft] = await Promise.all([
+    ingestCanon(storyId),
+    getLatestScreenplayArchitectureDraft(storyId, scopeKey),
+  ]);
+
+  const draftVersion = (priorDraft?.draftVersion ?? 0) + 1;
+  const snapshot: UnitsSnapshot = {};
+  for (const u of scopedUnits) snapshot[u.unitId] = { status: u.status, content: u.content };
+
+  const date = new Date().toISOString().slice(0, 10);
+  const summary = diffUnitsSnapshot(priorDraft?.unitsSnapshot ?? null, snapshot);
+
+  const priorHistory = priorDraft
+    ? (await listScreenplayArchitectureDrafts(storyId, scopeKey)).map((d) => ({
+        version: `draft-v${d.draftVersion}`,
+        date: d.date,
+        summary_of_changes: d.summaryOfChanges,
+      }))
+    : [];
+  const versionHistory = [...priorHistory, { version: `draft-v${draftVersion}`, date, summary_of_changes: summary }];
+
+  const json = compileScreenplayArchitectureDocumentJson({
+    storyId,
+    canon,
+    units: scopedUnits,
+    version: draftVersion,
+    versionHistory,
+    status: "Draft",
+    scopeLabel: `Act ${act.id} (${act.name}) - partial compile, draft only, not final canon`,
+    versionLabel: `draft-v${draftVersion}`,
+    actScope: act.id,
+  });
+  const markdown = renderScreenplayArchitectureMarkdown(json);
+
+  const stored: StoredScreenplayArchitectureDraft = {
+    draftId: `${scopeKey}-${draftVersion}`,
+    scopeKey,
+    scope: { type: "act", act_id: act.id },
+    draftVersion,
+    date,
+    summaryOfChanges: summary,
+    json,
+    markdown,
+    unitsSnapshot: snapshot,
+    createdAt: new Date().toISOString(),
+  };
+  await saveScreenplayArchitectureDraft(storyId, stored);
   return stored;
 }
