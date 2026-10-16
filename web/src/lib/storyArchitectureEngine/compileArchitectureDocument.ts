@@ -2,6 +2,7 @@ import type { IngestedCanon } from "./ingestCanon";
 import { STRUCTURAL_ACTS, STRUCTURAL_STEPS, CRITICAL_BEAT_LOOKUP } from "./structuralFramework";
 import { getConfirmedUnits, type StructuralUnit } from "./stateLedger";
 import { parseSceneRegisterEntry } from "./developmentLoop";
+import { buildSetupPayoffLedger } from "./setupPayoffLedger";
 import type { ScreenplayArchitectureDocument } from "@/lib/canonEngine/storyStore";
 
 /**
@@ -22,8 +23,6 @@ import type { ScreenplayArchitectureDocument } from "@/lib/canonEngine/storyStor
 
 const NOT_TRACKED_AUTHOR = "(not tracked - no per-user authorship exists in this app yet)";
 const NOT_TRACKED_RUNTIME = "(not tracked - no runtime-estimation model exists yet)";
-const NOT_TRACKED_LEDGER =
-  "Not yet tracked - no issue currently owns Setup & Payoff tracking (see the filed follow-up).";
 
 export interface CompileScreenplayArchitectureDocumentParams {
   storyId: string;
@@ -76,6 +75,33 @@ export function compileScreenplayArchitectureDocumentJson(
     };
   });
 
+  // Issue #173: built from the SAME parsedEntries/sceneRegister arrays
+  // Sections 4 and 5 already build above (Confirmed-only, ordered) -
+  // never an independent re-scan of `units` - so Section 6 inherits
+  // the exact same Section 4 cross-reference invariant Section 5
+  // already has: it can never name a scene Section 4 doesn't contain.
+  // The sceneNumber/slugline null-narrowing below is defensive only -
+  // every parsedEntries/sceneRegister pair for a Confirmed unit always
+  // carries a real scene_number/slugline by construction.
+  const setupPayoffLedger = buildSetupPayoffLedger(
+    parsedEntries.map(({ unit, index }) => ({
+      unitId: unit.unitId,
+      content: typeof unit.content === "string" ? unit.content : "",
+      sceneNumber: sceneRegister[index].scene_number,
+      slugline: sceneRegister[index].slugline,
+    }))
+  ).map((entry) => ({
+    setup_name: entry.name,
+    planted:
+      entry.planted && entry.planted.sceneNumber !== null && entry.planted.slugline !== null
+        ? { unit_id: entry.planted.unitId, scene_number: entry.planted.sceneNumber, slugline: entry.planted.slugline }
+        : null,
+    paid_off:
+      entry.paidOff && entry.paidOff.sceneNumber !== null && entry.paidOff.slugline !== null
+        ? { unit_id: entry.paidOff.unitId, scene_number: entry.paidOff.sceneNumber, slugline: entry.paidOff.slugline }
+        : null,
+  }));
+
   const actOverview = STRUCTURAL_ACTS.map((act) => ({
     act_id: act.id,
     act_name: act.name,
@@ -111,7 +137,7 @@ export function compileScreenplayArchitectureDocumentJson(
     "3_structural_act_set_piece_overview": actOverview,
     "4_complete_approved_scene_register": sceneRegister,
     "5_critical_beat_earmark_index": earmarkIndex,
-    "6_setup_payoff_ledger": NOT_TRACKED_LEDGER,
+    "6_setup_payoff_ledger": setupPayoffLedger,
     "7_outstanding_decisions_version_history": {
       outstanding: outstanding.map((u) => ({ unit_id: u.unitId, status: u.status })),
       version_history: versionHistory,
@@ -184,7 +210,23 @@ export function renderScreenplayArchitectureMarkdown(doc: ScreenplayArchitecture
         .join("\n")
   );
 
-  sections.push("## 6. Setup & Payoff Ledger\n" + doc["6_setup_payoff_ledger"]);
+  const ledger = doc["6_setup_payoff_ledger"];
+  sections.push(
+    "## 6. Setup & Payoff Ledger\n" +
+      (ledger.length > 0
+        ? "| Setup Name | Planted | Paid Off |\n|---|---|---|\n" +
+          ledger
+            .map(
+              (e) =>
+                `| ${e.setup_name} | ${
+                  e.planted ? `Scene ${e.planted.scene_number}: ${e.planted.slugline}` : "— (orphaned - no [SETUP: ...] tag found)"
+                } | ${
+                  e.paid_off ? `Scene ${e.paid_off.scene_number}: ${e.paid_off.slugline}` : "— (dangling - not yet paid off)"
+                } |`
+            )
+            .join("\n")
+        : "_No [SETUP: ...]/[PAYOFF: ...] tags found in the Confirmed Scene Register yet._")
+  );
 
   const outstandingSection = doc["7_outstanding_decisions_version_history"];
   sections.push(

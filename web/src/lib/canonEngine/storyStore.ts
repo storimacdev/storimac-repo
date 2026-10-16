@@ -1020,7 +1020,19 @@ export interface ScreenplayArchitectureDocument {
     unit_id: string | null;
     slugline: string | null;
   }[];
-  "6_setup_payoff_ledger": string;
+  /** Issue #173 - real tracked data, no longer a disclosed-placeholder
+   * string. Each entry is keyed by a free-text, author-tagged name (no
+   * fixed catalog exists, unlike Section 5's 10 Critical Beats) -
+   * see setupPayoffLedger.ts. `planted`/`paid_off` are independently
+   * nullable: a setup with `paid_off: null` is dangling (normal
+   * mid-development state, not an error); a payoff with `planted:
+   * null` is orphaned (paid off something no [SETUP: ...] tag ever
+   * named - a real continuity slip worth the author's attention). */
+  "6_setup_payoff_ledger": {
+    setup_name: string;
+    planted: { unit_id: string; scene_number: number; slugline: string } | null;
+    paid_off: { unit_id: string; scene_number: number; slugline: string } | null;
+  }[];
   "7_outstanding_decisions_version_history": {
     outstanding: { unit_id: string; status: string }[];
     version_history: { version: string; date: string; summary_of_changes: string }[];

@@ -52,6 +52,7 @@ import {
   DEFAULT_SCENE_DENSITY_DISMISSAL,
   type SceneDensityResult,
 } from "@/lib/storyArchitectureEngine/sceneDensity";
+import { computeSetupPayoffAdvisory } from "@/lib/storyArchitectureEngine/setupPayoffLedger";
 
 export const runtime = "nodejs";
 
@@ -402,6 +403,13 @@ export async function POST(req: NextRequest) {
       console.warn(`[architecture-chat] state update failed for turn ${turnId}:`, stateErr);
     }
 
+    // Issue #173: strictly advisory, computed fresh every turn from
+    // `units` in its final state - never gates anything, never
+    // persisted/dismissible (unlike sceneDensity's own dismissal
+    // state), since a dangling setup is normal mid-development state,
+    // not an alert the author needs to acknowledge once.
+    const setupPayoffAdvisory = computeSetupPayoffAdvisory(units);
+
     await appendMessage(
       storyId,
       { role: "assistant", content: delta.reply, context: delta.context, ts: new Date().toISOString(), turnId },
@@ -447,6 +455,7 @@ export async function POST(req: NextRequest) {
       pendingConflict: pendingConflictForResponse,
       cascadeReview,
       sceneDensity: sceneDensityForResponse,
+      setupPayoffAdvisory,
       structuralVectorOptions: delta.structural_vector_options,
     });
   } catch (err) {

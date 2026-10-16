@@ -25,6 +25,7 @@ import {
   applySceneDensityDismissal,
   DEFAULT_SCENE_DENSITY_DISMISSAL,
 } from "@/lib/storyArchitectureEngine/sceneDensity";
+import { computeSetupPayoffAdvisory } from "@/lib/storyArchitectureEngine/setupPayoffLedger";
 
 export const runtime = "nodejs";
 
@@ -125,6 +126,10 @@ export async function GET(
       computeSceneDensity(story.p4Units ?? []),
       story.p4SceneDensityDismissal ?? DEFAULT_SCENE_DENSITY_DISMISSAL
     );
+    // Issue #173: same "compute fresh on resume" precedent as
+    // sceneDensity directly above - a page reload shows the current
+    // advisory without waiting for the next chat turn.
+    const setupPayoffAdvisory = computeSetupPayoffAdvisory(story.p4Units ?? []);
 
     return NextResponse.json({
       story: { ...story, p3: normalizeP3(story.p3), p4: normalizeP4(story.p4) },
@@ -137,6 +142,7 @@ export async function GET(
       guardrailFlags,
       characterBibleGate,
       sceneDensity,
+      setupPayoffAdvisory,
     });
   } catch (err) {
     return errorResponse(err);

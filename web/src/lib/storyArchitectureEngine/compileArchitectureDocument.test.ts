@@ -224,6 +224,88 @@ describe("compileScreenplayArchitectureDocumentJson", () => {
   });
 });
 
+describe("compileScreenplayArchitectureDocumentJson - Setup & Payoff Ledger (issue #173)", () => {
+  it("pairs a [SETUP: ...] tag with a later [PAYOFF: ...] tag of the same name, resolving scene_number/slugline from the SAME Section 4 entries, never re-derived independently", () => {
+    const units: StructuralUnit[] = [
+      confirmedUnit(
+        "u1",
+        "SCENE 1: INT. HOUSE - DAY\n[SETUP: the music box] She winds it once, uneasy about the sound."
+      ),
+      confirmedUnit(
+        "u2",
+        "SCENE 2: EXT. STREET - DAY\nShe walks away steady. The city hums around her. Nothing feels the same."
+      ),
+      confirmedUnit(
+        "u3",
+        "SCENE 3: INT. ATTIC - NIGHT\n[PAYOFF: THE MUSIC BOX] The box finally plays its old song again."
+      ),
+    ];
+
+    const result = compileScreenplayArchitectureDocumentJson(baseParams(units, buildCanon(buildP1Canon())));
+
+    const sceneRegister = result["4_complete_approved_scene_register"];
+    const ledger = result["6_setup_payoff_ledger"];
+
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0].setup_name).toBe("the music box");
+
+    const u1Entry = sceneRegister.find((s) => s.unit_id === "u1");
+    const u3Entry = sceneRegister.find((s) => s.unit_id === "u3");
+    expect(u1Entry).toBeDefined();
+    expect(u3Entry).toBeDefined();
+
+    expect(ledger[0].planted).toEqual({
+      unit_id: "u1",
+      scene_number: u1Entry!.scene_number,
+      slugline: u1Entry!.slugline,
+    });
+    expect(ledger[0].paid_off).toEqual({
+      unit_id: "u3",
+      scene_number: u3Entry!.scene_number,
+      slugline: u3Entry!.slugline,
+    });
+  });
+
+  it("leaves paid_off null for a setup with no matching payoff anywhere in the Confirmed set (dangling)", () => {
+    const units: StructuralUnit[] = [
+      confirmedUnit(
+        "u1",
+        "SCENE 1: INT. HOUSE - DAY\n[SETUP: a locked door] She tries the handle. It will not budge at all."
+      ),
+    ];
+    const result = compileScreenplayArchitectureDocumentJson(baseParams(units, buildCanon(buildP1Canon())));
+    const ledger = result["6_setup_payoff_ledger"];
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0].planted).not.toBeNull();
+    expect(ledger[0].paid_off).toBeNull();
+  });
+
+  it("leaves planted null for a payoff with no matching setup anywhere in the Confirmed set (orphaned)", () => {
+    const units: StructuralUnit[] = [
+      confirmedUnit(
+        "u1",
+        "SCENE 1: INT. HOUSE - DAY\n[PAYOFF: a stray thread] She resolves something never once planted."
+      ),
+    ];
+    const result = compileScreenplayArchitectureDocumentJson(baseParams(units, buildCanon(buildP1Canon())));
+    const ledger = result["6_setup_payoff_ledger"];
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0].planted).toBeNull();
+    expect(ledger[0].paid_off).not.toBeNull();
+  });
+
+  it("renders an empty array (not a placeholder string) when no Confirmed unit carries any setup/payoff tag", () => {
+    const units: StructuralUnit[] = [
+      confirmedUnit("u1", "SCENE 1: INT. HOUSE - DAY\nNothing tagged here at all, just a plain scene."),
+    ];
+    const result = compileScreenplayArchitectureDocumentJson(baseParams(units, buildCanon(buildP1Canon())));
+    expect(result["6_setup_payoff_ledger"]).toEqual([]);
+
+    const markdown = renderScreenplayArchitectureMarkdown(result);
+    expect(markdown).toContain("No [SETUP: ...]/[PAYOFF: ...] tags found in the Confirmed Scene Register yet.");
+  });
+});
+
 describe("renderScreenplayArchitectureMarkdown", () => {
   it("includes a Section 4 unit's causal_tag text in the rendered markdown - the baseline the docx/pdf exports must match", () => {
     const units: StructuralUnit[] = [
