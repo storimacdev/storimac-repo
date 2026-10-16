@@ -97,6 +97,15 @@ export const ScreenplayTurnSchema = z.object({
       loops_to_close: z.array(z.string()),
     })
     .nullable(),
+  /** Phase 3 (issue #95): the Dialogue & Voice Audit self-report -
+   * whether this draft's dialogue carries subtext rather than
+   * on-the-nose exposition. Null only when draft_text is also null. */
+  dialogue_voice_audit: z
+    .object({
+      subtext_present: z.boolean(),
+      notes: z.string(),
+    })
+    .nullable(),
   deferred_items: z.array(
     z.object({
       item: z.string().min(1),
@@ -247,6 +256,15 @@ export const EMIT_SCREENPLAY_TURN_TOOL: Anthropic.Tool = {
         required: ["flashback", "montage", "loops_to_close"],
         description: "Special Screenplay Processing Paths (issue #99) layered onto draft_text. Null only when draft_text is also null.",
       },
+      dialogue_voice_audit: {
+        type: ["object", "null"],
+        properties: {
+          subtext_present: { type: "boolean", description: "Whether this draft's dialogue carries subtext rather than on-the-nose exposition." },
+          notes: { type: "string", description: "Specific notes on dialogue voice, either way." },
+        },
+        required: ["subtext_present", "notes"],
+        description: "Phase 3 Dialogue & Voice Audit self-report. Null only when draft_text is also null.",
+      },
       deferred_items: {
         type: "array",
         items: {
@@ -278,6 +296,7 @@ export const EMIT_SCREENPLAY_TURN_TOOL: Anthropic.Tool = {
       "structural_deviation",
       "continuity_requirements",
       "special_processing",
+      "dialogue_voice_audit",
       "deferred_items",
     ],
   },

@@ -33,6 +33,7 @@ interface TurnResponse {
     advisoryFindings: { leanParagraphs: unknown[]; visualDiscipline: unknown[] };
   } | null;
   structuralDeviation: { deviates: boolean; explanation: string } | null;
+  delivery: string | null;
   gaps: { project: string; field: string; reason: string }[];
   deferredItems: { item: string; defer_to_project: string | null; notes: string }[];
 }
@@ -65,6 +66,7 @@ export default function ScreenplayInterview() {
     null
   );
   const [draftBlockingReasons, setDraftBlockingReasons] = useState<string[]>([]);
+  const [delivery, setDelivery] = useState<string | null>(null);
 
   async function sendMessage(text: string) {
     if (!canvasId || !text.trim() || loading) return;
@@ -91,6 +93,7 @@ export default function ScreenplayInterview() {
       setContinuityViolations(data.continuityViolations);
       setStructuralDeviation(data.structuralDeviation?.deviates ? data.structuralDeviation : null);
       setDraftBlockingReasons(data.draftValidation?.ok === false ? data.draftValidation.blockingReasons : []);
+      setDelivery(data.delivery);
       setLastProject("screenplay");
     } catch {
       setError("Couldn't reach the server.");
@@ -148,10 +151,12 @@ export default function ScreenplayInterview() {
         </div>
       )}
 
-      {scene?.draftText && scene.status === "Working" && (
-        <div className="max-h-48 overflow-y-auto border-b border-neutral-800 bg-neutral-900/60 px-4 py-2 text-xs">
-          <p className="mb-1 font-semibold text-neutral-400">Current draft (Scene {scene.sceneNumber}):</p>
-          <pre className="whitespace-pre-wrap text-neutral-300">{scene.draftText}</pre>
+      {delivery && scene?.status === "Working" && (
+        <div className="max-h-64 overflow-y-auto border-b border-neutral-800 bg-neutral-900/60 px-4 py-2 text-xs">
+          <p className="mb-1 font-semibold text-neutral-400">
+            Phase 3 delivery (Scene {scene.sceneNumber}) — THE SCREENPLAY / COMPLIANCE REPORT:
+          </p>
+          <pre className="whitespace-pre-wrap text-neutral-300">{delivery}</pre>
         </div>
       )}
 
