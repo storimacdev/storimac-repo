@@ -1,4 +1,5 @@
 import type { CanonStatus } from "@/lib/canonEngine/types";
+import type { ContinuityMatrixUpdate } from "./continuityMatrix";
 
 /**
  * The state ledger for Project 5's scenes — GitHub issue #93 (Phase 1
@@ -39,6 +40,15 @@ export interface SceneRecord {
    * once set, no code path in this module ever overwrites it; see
    * `confirmScene`'s own guard. */
   confirmedText: string | null;
+  /** The Continuity Matrix outcomes (knowledge gained, physical
+   * changes, loops opened/closed) this scene's current draft would
+   * apply if Confirmed - captured whenever draft_text is (re)proposed
+   * so Phase 4's confirmation turn (issue #96) can apply them to the
+   * matrix without re-asking the model to repeat itself. Never applied
+   * to the actual Continuity Matrix until the scene is genuinely
+   * Confirmed (issue #97 AC5: "updated when a scene is Confirmed", not
+   * before). */
+  pendingMatrixUpdate: Omit<ContinuityMatrixUpdate, "sceneNumber"> | null;
   lastUpdated: string;
 }
 
@@ -55,6 +65,7 @@ export function createSceneRecord(sceneNumber: number, now?: string): SceneRecor
     signedOff: false,
     draftText: null,
     confirmedText: null,
+    pendingMatrixUpdate: null,
     lastUpdated: nowOrDefault(now),
   };
 }
@@ -110,6 +121,18 @@ export function signOffAssignment(scene: SceneRecord, now?: string): SceneRecord
 
 export function setDraftText(scene: SceneRecord, text: string, now?: string): SceneRecord {
   return { ...scene, draftText: text, status: "Working", lastUpdated: nowOrDefault(now) };
+}
+
+/** Captures this draft's Continuity Matrix outcomes for later
+ * application on Confirm (issue #96). Independent of setDraftText so a
+ * caller can update one without disturbing the other if needed, though
+ * the route always calls both together. */
+export function setPendingMatrixUpdate(
+  scene: SceneRecord,
+  update: Omit<ContinuityMatrixUpdate, "sceneNumber"> | null,
+  now?: string
+): SceneRecord {
+  return { ...scene, pendingMatrixUpdate: update, lastUpdated: nowOrDefault(now) };
 }
 
 /** Issue #96 AC3: freezes a scene's text as immutable Confirmed canon.

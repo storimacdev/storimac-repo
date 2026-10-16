@@ -10,6 +10,7 @@ import {
   listMessages,
   appendOutstandingQuestions,
   setP5Scenes,
+  setP5ContinuityMatrix,
   normalizeP5ContinuityMatrix,
   SCREENPLAY_MESSAGES_COLLECTION,
 } from "@/lib/canonEngine/storyStore";
@@ -30,6 +31,7 @@ import {
   setAssignmentSummary,
   signOffAssignment,
   setDraftText,
+  setPendingMatrixUpdate,
   canOpenAssignmentGate,
   determineActiveSceneNumber,
   type SceneRecord,
@@ -38,6 +40,7 @@ import { validateSceneDraft, type SceneDraftingValidation } from "@/lib/screenpl
 import { checkContinuityBeforeDraft, type ContinuityViolation } from "@/lib/screenplayEngine/continuityMatrix";
 import { validateSpecialProcessingPaths } from "@/lib/screenplayEngine/specialProcessingPaths";
 import { buildComplianceReport, formatScreenplayDelivery } from "@/lib/screenplayEngine/qaDelivery";
+import { validateRevisionClassification, canonizeScene } from "@/lib/screenplayEngine/revisionCanonization";
 
 export const runtime = "nodejs";
 
@@ -45,15 +48,15 @@ const SCREENPLAY_MESSAGE_WINDOW = 20;
 
 /**
  * The live P5 Screenwriter/Dramaturg turn handler — GitHub issues #93
- * (Phase 1, Assignment Confirmation Gate) and #94 (Phase 2, Scene
- * Drafting). Follows architecture-chat/route.ts's exact shape (auth/
- * story lookup -> transcript persistence -> system-prompt assembly
- * with grounding blocks -> one extractTurn call -> deterministic
- * post-processing -> state persistence -> response). Phases 1-2 are
- * wired so far; later issues (#95 QA/delivery, #96 revision/
- * canonization, #98 conflict intercept) extend this same route rather
- * than adding a second one, matching how architecture-chat/route.ts
- * itself grew across P4's issues.
+ * (Phase 1, Assignment Confirmation Gate), #94 (Phase 2, Scene
+ * Drafting), #95 (Phase 3, QA & Delivery), and #96 (Phase 4, Revision
+ * & Canonization). Follows architecture-chat/route.ts's exact shape
+ * (auth/story lookup -> transcript persistence -> system-prompt
+ * assembly with grounding blocks -> one extractTurn call ->
+ * deterministic post-processing -> state persistence -> response).
+ * Phases 1-4 are wired so far; issue #98 (Conflict Intercept) extends
+ * this same route rather than adding a second one, matching how
+ * architecture-chat/route.ts itself grew across P4's issues.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -91,7 +94,7 @@ export async function POST(req: NextRequest) {
 
     const canon = await ingestScreenplayCanon(storyId);
     let scenes = story.p5Scenes ?? [];
-    const continuityMatrix = normalizeP5ContinuityMatrix(story.p5ContinuityMatrix);
+    let continuityMatrix = normalizeP5ContinuityMatrix(story.p5ContinuityMatrix);
 
     let system = getSystemPrompt("sp05-se-systemprompt.md");
 
@@ -130,6 +133,10 @@ export async function POST(req: NextRequest) {
       system += `\n\n[Scene Register Gap - internal grounding only. ${readiness.reason} Tell the author this scene cannot be gated yet and ask how to proceed - never invent a Scene Register entry.]`;
     } else if (readiness.entry && !existingScene?.signedOff) {
       system += buildAssignmentGateGroundingMessage(readiness.entry);
+    } else if (readiness.ready && existingScene?.signedOff && existingScene.status === "Working") {
+      // Phase 4 (issue #96): already drafted - this turn is either a
+      // revision or an approval, not a first draft.
+      system += `\n\n[Phase 4 - Revision & Canonization - internal grounding only. Scene ${existingScene.sceneNumber} has a draft awaiting the author's revision notes or approval. If the author requests a change, re-report the full draft_text with the edit applied at the smallest necessary scope (Line -> Action Paragraph -> Full Scene - never a full rewrite unless the author explicitly asked for one, in which case set full_rewrite_requested true), plus revision_classification (feedback_type: Visuals/Dialogue/Pacing/Subtext/Continuity/Structure, scope, and a description of what changed). If the author explicitly approves this scene's current text, set scene_approved true and report nothing else about this scene's content this turn - approval freezes the current draft_text as immutable canon exactly as it stands. Never report scene_approved true unless the author's message is genuinely explicit approval.]`;
     } else if (readiness.ready && existingScene?.signedOff && existingScene.status !== "Confirmed") {
       // Phase 2 (issue #94): the gate has passed - draft now. Surfaces
       // the live Continuity Matrix state so the model's draft itself
@@ -138,7 +145,7 @@ export async function POST(req: NextRequest) {
       const openLoopLines = continuityMatrix.openLoops
         .filter((l) => l.status === "open")
         .map((l) => `- [${l.id}] (${l.kind}) planted scene ${l.plantedSceneNumber}: ${l.description}`);
-      system += `\n\n[Phase 2 - Scene Drafting - internal grounding only. Scene ${existingScene.sceneNumber} is signed off. Draft it now in strict industry screenplay format per Sections 3-4: Strict Visual Discipline, active present tense, Lean Action Paragraphs, Performable Dialogue & Subtext, Enter Late/Leave Early, and the Conflict Mandate. Report draft_text, conflict_mandate, enter_late_leave_early, dialogue_voice_audit, and continuity_requirements (every fact/physical-state this draft relies on) together this turn. Once accepted, the app composes the Phase 3 split delivery (THE SCREENPLAY / COMPLIANCE REPORT) automatically - do not draft that split yourself. If this scene uses a flashback or montage (Section 6), use BEGIN FLASHBACK:/END FLASHBACK. or BEGIN MONTAGE:/END MONTAGE. formatting and report special_processing (flashback justification, per-shot montage evolution, and any Open Loop ids this scene pays off via loops_to_close - a loop can only be closed if it was planted in an earlier Confirmed scene). Never alter a structural fact from the Project 4 blueprint (scene count, turning point, cast) without reporting structural_deviation - that halts drafting for the Conflict Intercept protocol rather than silently reinterpreting the blueprint.${
+      system += `\n\n[Phase 2 - Scene Drafting - internal grounding only. Scene ${existingScene.sceneNumber} is signed off. Draft it now in strict industry screenplay format per Sections 3-4: Strict Visual Discipline, active present tense, Lean Action Paragraphs, Performable Dialogue & Subtext, Enter Late/Leave Early, and the Conflict Mandate. Report draft_text, conflict_mandate, enter_late_leave_early, dialogue_voice_audit, continuity_outcomes (every fact/physical-state this scene newly establishes, for the Continuity Matrix once Confirmed), and continuity_requirements (every fact/physical-state this draft relies on) together this turn. Once accepted, the app composes the Phase 3 split delivery (THE SCREENPLAY / COMPLIANCE REPORT) automatically - do not draft that split yourself. If this scene uses a flashback or montage (Section 6), use BEGIN FLASHBACK:/END FLASHBACK. or BEGIN MONTAGE:/END MONTAGE. formatting and report special_processing (flashback justification, per-shot montage evolution, any newly planted Open Loops via loops_opened, and any Open Loop ids this scene pays off via loops_to_close - a loop can only be closed if it was planted in an earlier Confirmed scene). Never alter a structural fact from the Project 4 blueprint (scene count, turning point, cast) without reporting structural_deviation - that halts drafting for the Conflict Intercept protocol rather than silently reinterpreting the blueprint.${
         openLoopLines.length > 0 ? `\nOpen Loops currently tracked:\n${openLoopLines.join("\n")}` : ""
       }]`;
     }
@@ -190,11 +197,17 @@ export async function POST(req: NextRequest) {
         effectiveScene = signed;
       }
 
-      // Phase 2 (issue #94): only ever advances a scene to Working - a
-      // model-requested "Confirmed" is intentionally not honored here.
-      // Confirming is Phase 4's job (issue #96); Phase 2's drafting
-      // route has no author-sign-off step of its own to justify
-      // freezing text as immutable canon.
+      // Issue #96: a draft_text report on a scene that was ALREADY
+      // Working before this turn is a revision, not the initial draft
+      // - requires a Phase 4 revision classification (AC1/AC2), unlike
+      // the first draft which has nothing yet to classify a change
+      // against.
+      const wasAlreadyDrafted = base.status === "Working";
+
+      // Phase 2 (issue #94) / Phase 4 revision (issue #96): only ever
+      // advances a scene to Working - a model-requested "Confirmed" is
+      // intentionally not honored via draft_text. Confirming happens
+      // only through the explicit scene_approved gate below.
       if (delta.draft_text && effectiveScene && effectiveScene.signedOff && effectiveScene.status !== "Confirmed") {
         const continuityCheck = checkContinuityBeforeDraft(continuityMatrix, effectiveScene.sceneNumber, {
           requiredKnowledge: (delta.continuity_requirements?.required_knowledge ?? []).map((k) => ({
@@ -244,13 +257,47 @@ export async function POST(req: NextRequest) {
             loopsToClose: delta.special_processing?.loops_to_close ?? [],
           });
 
+          const revisionCheck = wasAlreadyDrafted
+            ? validateRevisionClassification(
+                {
+                  feedbackType: delta.revision_classification?.feedback_type ?? "Structure",
+                  scope: delta.revision_classification?.scope ?? "Full Scene",
+                  description: delta.revision_classification?.description ?? "",
+                },
+                delta.full_rewrite_requested
+              )
+            : { ok: true, reason: "" };
+
           draftValidation = {
-            ok: validation.ok && specialProcessing.ok,
-            blockingReasons: [...validation.blockingReasons, ...specialProcessing.blockingReasons],
+            ok: validation.ok && specialProcessing.ok && revisionCheck.ok,
+            blockingReasons: [
+              ...validation.blockingReasons,
+              ...specialProcessing.blockingReasons,
+              ...(revisionCheck.ok ? [] : [revisionCheck.reason]),
+            ],
             advisoryFindings: validation.advisoryFindings,
           };
           if (draftValidation.ok) {
-            const drafted = setDraftText(effectiveScene, delta.draft_text);
+            const drafted = setPendingMatrixUpdate(setDraftText(effectiveScene, delta.draft_text), {
+              knowledgeGained: (delta.continuity_outcomes?.knowledge_gained ?? []).map((k) => ({
+                characterId: k.character_id,
+                characterName: k.character_name,
+                fact: k.fact,
+                state: k.state,
+              })),
+              physicalChanges: (delta.continuity_outcomes?.physical_changes ?? []).map((p) => ({
+                subject: p.subject,
+                kind: p.kind,
+                detail: p.detail,
+              })),
+              loopsOpened: (delta.special_processing?.loops_opened ?? []).map((l) => ({
+                id: l.id,
+                description: l.description,
+                kind: l.kind,
+                payoffSceneNumber: l.payoff_scene_number,
+              })),
+              loopsClosed: delta.special_processing?.loops_to_close ?? [],
+            });
             scenes = upsertScene(scenes, drafted);
             effectiveScene = drafted;
 
@@ -270,6 +317,32 @@ export async function POST(req: NextRequest) {
             });
             delivery = formatScreenplayDelivery(delta.draft_text, compliance);
           }
+        }
+      }
+
+      // Phase 4 (issue #96) AC3/AC4: the only path that ever freezes a
+      // scene as Confirmed canon - gated entirely on explicit
+      // scene_approved, independent of whether draft_text was also
+      // reported this same turn (an author may approve on a later,
+      // separate turn with no new draft text at all).
+      const candidateForApproval = findScene(scenes, sceneNumber) ?? effectiveScene;
+      if (
+        delta.scene_approved &&
+        candidateForApproval &&
+        candidateForApproval.status === "Working" &&
+        candidateForApproval.draftText
+      ) {
+        const canonized = canonizeScene({
+          scene: candidateForApproval,
+          finalText: candidateForApproval.draftText,
+          matrix: continuityMatrix,
+          explicitApproval: true,
+        });
+        if (canonized.ok && canonized.scene && canonized.matrix) {
+          scenes = upsertScene(scenes, canonized.scene);
+          continuityMatrix = canonized.matrix;
+          effectiveScene = canonized.scene;
+          await setP5ContinuityMatrix(storyId, continuityMatrix);
         }
       }
 

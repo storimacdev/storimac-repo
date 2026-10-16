@@ -7,6 +7,7 @@ import {
   setAssignmentSummary,
   signOffAssignment,
   setDraftText,
+  setPendingMatrixUpdate,
   confirmScene,
   parkScene,
   getConfirmedScenes,
@@ -76,6 +77,26 @@ describe("setAssignmentSummary / signOffAssignment", () => {
     const signed = signOffAssignment(withSummary);
     expect(signed.signedOff).toBe(true);
     expect(signed.phase).toBe("drafting");
+  });
+});
+
+describe("setPendingMatrixUpdate", () => {
+  it("starts null on a fresh scene", () => {
+    expect(createSceneRecord(1).pendingMatrixUpdate).toBeNull();
+  });
+
+  it("stores the update independently of draftText", () => {
+    const scene = setPendingMatrixUpdate(createSceneRecord(1), {
+      knowledgeGained: [{ characterId: "c1", characterName: "Alex", fact: "a secret", state: "knows" }],
+    });
+    expect(scene.pendingMatrixUpdate?.knowledgeGained).toHaveLength(1);
+    expect(scene.draftText).toBeNull();
+  });
+
+  it("can be cleared back to null", () => {
+    const withUpdate = setPendingMatrixUpdate(createSceneRecord(1), { knowledgeGained: [] });
+    const cleared = setPendingMatrixUpdate(withUpdate, null);
+    expect(cleared.pendingMatrixUpdate).toBeNull();
   });
 });
 
