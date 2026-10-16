@@ -28,7 +28,10 @@ export const WorldBibleDocumentSchema = z.object({
     world_bible_version: z.string(),
     working_title: z.string(),
     date: z.string(),
-    status: z.literal("Compiled"),
+    // Issue #134 - widened from z.literal("Compiled") since
+    // confirmWorldBibleVersion now persists "Confirmed" into this same
+    // field once a version is confirmed (see storyStore.ts).
+    status: z.enum(["Compiled", "Confirmed"]),
     related_project_1_version: z.string(),
     related_project_2_status: z.string(),
   }),

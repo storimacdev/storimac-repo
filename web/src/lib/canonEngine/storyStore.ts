@@ -872,7 +872,12 @@ export interface WorldBibleDocument {
     world_bible_version: string; // "v{n}", matches FoundationDocument's own version string format
     working_title: string;
     date: string;
-    status: "Compiled";
+    // Issue #134 - widened from the frozen literal "Compiled" so
+    // confirmWorldBibleVersion can persist the real post-confirm status;
+    // every export format (.md/.json/.docx/.pdf) reads this field, so
+    // updating it here (rather than deriving it separately in each of the
+    // four renderers) fixes all four export formats at once.
+    status: "Compiled" | "Confirmed";
     related_project_1_version: string;
     related_project_2_status: string;
   };
@@ -960,8 +965,25 @@ export async function confirmWorldBibleVersion(
     throw new Error(`World Bible version ${version} not found for story "${storyId}".`);
   }
   const stored = snap.data() as StoredWorldBibleVersion;
+  // Issue #134 - confirming a version previously only set the top-level
+  // confirmed/confirmedAt fields, never updating json["1_document_metadata"]
+  // .status away from the frozen "Compiled" literal set at compile time
+  // (worldBibleCompiler.ts's compileWorldBibleDocument). So a Confirmed
+  // version still reported "Status: Compiled" in all four of its own
+  // export formats. The .docx/.pdf exporters render `m.status` fresh from
+  // `json` on every export, so updating it here fixes those two formats
+  // automatically; the pre-rendered `markdown` string (and the raw `.json`
+  // download, which serializes this same object) need the literal value
+  // patched directly, since markdown is cached at compile time rather than
+  // re-rendered per export.
+  const confirmedJson: WorldBibleDocument = {
+    ...stored.json,
+    "1_document_metadata": { ...stored.json["1_document_metadata"], status: "Confirmed" },
+  };
   const updated: StoredWorldBibleVersion = {
     ...stored,
+    json: confirmedJson,
+    markdown: stored.markdown.replace("| Status | Compiled |", "| Status | Confirmed |"),
     confirmed: true,
     confirmedAt: new Date().toISOString(),
   };
