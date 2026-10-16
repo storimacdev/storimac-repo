@@ -23,6 +23,12 @@ runConfig:
   concurrency: 40
   cpuMillicores: 1000
   memoryMiB: 512
+  # Explicit request timeout (issue #103). Worst-case single chat-turn
+  # latency is ~112s: two gated Anthropic-call attempts (anthropicGate.ts)
+  # at up to ~8s rate-limit wait each, plus two ~44-48s model calls. 180s
+  # leaves comfortable headroom above that without defaulting to whatever
+  # the platform's default request timeout happens to be.
+  timeoutSeconds: 180
 
 env:
   - variable: ANTHROPIC_API_KEY

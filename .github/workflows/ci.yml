@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    name: Lint, build, and unit test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    env:
+      # Client-side Firebase config (see web/apphosting.yaml / .env.local.example).
+      # Public by design, not secrets — but `next build` statically
+      # prerenders /onboarding, /character-bible, etc., which call
+      # initializeApp() at module load, so these must be present at build
+      # time or the build fails with auth/invalid-api-key.
+      NEXT_PUBLIC_FIREBASE_API_KEY: AIzaSyBf7_sSUweM8mlaa8rEC7AEzNDyzGVz-C4
+      NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: storimac.firebaseapp.com
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: storimac
+      NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: storimac.firebasestorage.app
+      NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "84713589523"
+      NEXT_PUBLIC_FIREBASE_APP_ID: "1:84713589523:web:218bfc27c7687dffac28e6"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit tests
+        run: npm run test
+
+  security-rules:
+    name: Firebase security-rules tests (emulator)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # The Firestore/Storage emulators run on the JVM; ubuntu-latest
+      # doesn't ship one by default.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools@15
+
+      # Verifies storage.rules' cross-service firestore.get() ownership
+      # check (see web/src/lib/security/storageRules.emulator.test.ts and
+      # ARCHITECTURE.md §7, issue #103) against the real emulator.
+      - name: Run security-rules tests against the Firebase emulator
+        working-directory: web
+        run: npm run test:rules:emulators
