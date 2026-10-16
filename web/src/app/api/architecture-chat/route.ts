@@ -15,6 +15,7 @@ import {
   appendMessage,
   listMessages,
   appendOutstandingQuestions,
+  appendP4ContinuityLedgerEntry,
   ARCHITECTURE_MESSAGES_COLLECTION,
   type P4PendingConflict,
 } from "@/lib/canonEngine/storyStore";
@@ -373,6 +374,33 @@ export async function POST(req: NextRequest) {
             units = upsertUnit(units, finalUnit);
             await setP4Units(storyId, units);
             effectiveUnit = finalUnit;
+
+            // Dependency & Continuity Ledger (issue #72) - records every
+            // genuine NEW arrival at Confirmed reached through ordinary
+            // turn processing (the common case; the Canon Revision
+            // Path's own equivalent transitions are logged separately
+            // by resolveP4Conflict). Only fires once per arrival -
+            // `existing`'s status (immediately before this turn) must
+            // not already have been Confirmed, so a later turn that
+            // simply re-reports an already-Confirmed unit's content
+            // doesn't produce a duplicate entry. Best-effort/non-
+            // blocking, matching the deferred_items write further below
+            // in this same handler - a ledger-write failure must never
+            // fail an otherwise-successful chat turn.
+            if (attempt.accepted && finalUnit.status === "Confirmed" && existing?.status !== "Confirmed") {
+              try {
+                await appendP4ContinuityLedgerEntry(storyId, {
+                  kind: "confirmed_transition",
+                  unitId: finalUnit.unitId,
+                  description: `Unit "${finalUnit.unitId}" confirmed`,
+                  resolvedBy: user.uid,
+                  ts: new Date().toISOString(),
+                  turnId,
+                });
+              } catch (ledgerErr) {
+                console.warn(`[architecture-chat] continuity ledger write failed for turn ${turnId}:`, ledgerErr);
+              }
+            }
 
             if (proposed.proposed_position_percent !== null) {
               const step = STRUCTURAL_STEPS.find((s) => s.stepNumber === delta.active_step_number);

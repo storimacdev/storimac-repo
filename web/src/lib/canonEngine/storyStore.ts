@@ -769,6 +769,64 @@ export async function appendP4CanonRevisionLog(storyId: string, entry: P4CanonRe
   await p4CanonRevisionLogCollection(storyId).add(entry);
 }
 
+/** Project 4's Dependency & Continuity Ledger (issue #72) - a durable,
+ * author-queryable record distinct from p4CanonRevisionLog above:
+ * p4CanonRevisionLog only ever captures a Canon-Revision-Path
+ * *resolution*; this ledger additionally captures every ordinary
+ * Confirmed transition reached through everyday turn processing (the
+ * common case - most units become Confirmed without ever triggering a
+ * conflict), which had no durable record anywhere before this issue.
+ * See docs/superpowers/specs/2026-10-16-p4-canon-revision-cascade-ledger-design.md
+ * for why this is additive rather than a reshape of p4CanonRevisionLog. */
+export type P4ContinuityLedgerEntry =
+  | {
+      kind: "confirmed_transition";
+      unitId: string;
+      description: string;
+      resolvedBy: string;
+      ts: string;
+      turnId: string;
+    }
+  | {
+      kind: "canon_revision";
+      unitId: string;
+      description: string;
+      resolution: "revert" | "accept_and_update" | "park";
+      /** Present only when this resolution's trigger was a canon_contradiction. */
+      sourceProject?: "Project 1" | "Project 2" | "Project 3";
+      contradictedRef?: string;
+      /** The merged, de-duplicated cascade-review result computed at
+       * resolution time (canonRevision.ts) - present (possibly empty)
+       * whenever cascade tracing ran for this resolution, absent when it
+       * didn't apply (e.g. "revert"/"park", which trigger no cascade
+       * computation at all). */
+      downstreamUnits?: { id: string; description: string }[];
+      resolvedBy: string;
+      ts: string;
+      turnId: string;
+    };
+
+function p4ContinuityLedgerCollection(storyId: string) {
+  return storiesCollection().doc(storyId).collection("p4ContinuityLedger");
+}
+
+/** Appends one entry to Project 4's Dependency & Continuity Ledger (issue #72). */
+export async function appendP4ContinuityLedgerEntry(
+  storyId: string,
+  entry: P4ContinuityLedgerEntry
+): Promise<void> {
+  await p4ContinuityLedgerCollection(storyId).add(entry);
+}
+
+/** Reads the full ledger, oldest first - mirrors listP3ConflictLog's own
+ * shape exactly (issue #159 is the separate, narrower effort to add an
+ * equivalent reader for p4CanonRevisionLog specifically; this is this
+ * issue's own, broader ledger). */
+export async function listP4ContinuityLedger(storyId: string): Promise<P4ContinuityLedgerEntry[]> {
+  const snap = await p4ContinuityLedgerCollection(storyId).orderBy("ts", "asc").get();
+  return snap.docs.map((d) => d.data() as P4ContinuityLedgerEntry);
+}
+
 /** Project 2's compiled, permanent Character Bible entries (issue #34,
  * CDRM §7) - one per signed-off character, written exactly once. */
 export interface CharacterBibleEntry {
