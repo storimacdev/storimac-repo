@@ -253,6 +253,54 @@ export function checkSceneRegisterFormat(content: string): SceneFormatCheckResul
   return { ok: true };
 }
 
+export interface StepNumberCheckResult {
+  ok: boolean;
+  reason?: string;
+}
+
+/**
+ * Issue #169, gap 1 ("never-set"): before this check existed, nothing on
+ * the road to Confirmed required a non-null `active_step_number` -
+ * `evaluateCausalGate` only reads it for the Step-1 exemption, and
+ * neither the Core-Purpose gate nor `checkSceneRegisterFormat` reads it
+ * at all. A turn reporting `requested_status: "Confirmed"`, a valid
+ * causal tag, and `validation_result: "passed"` with
+ * `active_step_number: null` could produce a `Confirmed` unit with
+ * `stepNumber: null` forever, permanently unattributable to any of the
+ * 10 structural steps for #56's Scene Density coverage measure and
+ * #65's Thematic Anchor Audit.
+ *
+ * Deliberately forward-only: gates the NEXT write attempt at Confirmed,
+ * never rewrites or re-validates a unit that already reached Confirmed
+ * before this check existed (which may already sit at `stepNumber:
+ * null`) - same "never silently rewrite existing data" convention this
+ * module's own `checkSceneRegisterFormat`/`evaluateCausalGate` already
+ * follow for data written before THEIR own issues shipped. Gates
+ * Confirmed only, mirroring `evaluateCausalGate`'s own scope - a
+ * Working/Exploring/Parked unit may still carry a null `stepNumber`
+ * (merely advisory for #56's projection, not a hard requirement).
+ *
+ * Issue #169's gap 2 (the field's "last-touched-under" vs "belongs-to"
+ * semantics, and whether it should really be two separate fields) is
+ * NOT addressed here - that is a data-model question with no single
+ * objectively-correct answer, left to whichever future issue decides
+ * it, per #169's own framing ("these may legitimately need to be two
+ * different fields rather than one field serving both meanings").
+ */
+export function checkStepNumberRequirement(targetStatus: CanonStatus, stepNumber: number | null): StepNumberCheckResult {
+  if (targetStatus !== "Confirmed") {
+    return { ok: true };
+  }
+  if (stepNumber === null) {
+    return {
+      ok: false,
+      reason:
+        "This unit has no structural step attached yet - report which of the 10 structural steps (active_step_number) this content belongs to before confirming it.",
+    };
+  }
+  return { ok: true };
+}
+
 export interface ParsedSceneRegisterEntry {
   slugline: string;
   criticalBeatTag: string | null;

@@ -30,6 +30,17 @@ export const ArchitectureTurnSchema = z.object({
       requested_status: z.enum(["Exploring", "Working", "Confirmed", "Parked"]),
       canon_refs: z.array(z.string()),
       proposed_position_percent: z.number().min(0).max(100).nullable(),
+      // Issue #147 (informational, reviewed - no change): both fields
+      // stay hard-required in the Zod schema and the Anthropic tool
+      // schema. A model omission of either would retry once (extractTurn's
+      // existing behavior) then 502 the whole turn - a new whole-turn
+      // failure mode issue #63 introduced that didn't exist before it.
+      // Left as-is because the tool schema already forces the field and
+      // both are documented clearly to the model; revisit with an
+      // app-side default (e.g. causal_tag -> "UNVALIDATED") only if a
+      // real conversation is observed hitting this in practice - no such
+      // evidence exists yet, and inventing a default now would be
+      // guessing at a failure mode that may never occur.
       causal_tag: z.enum(["Therefore", "But", "And Then"]).nullable(),
       causal_tag_reason: z.string(),
       canon_contradiction: z
@@ -43,10 +54,18 @@ export const ArchitectureTurnSchema = z.object({
     .nullable(),
   validation_result: z.enum(["passed", "failed", "not_applicable"]),
   validation_reason: z.string(),
+  // Issue #141: non-nullable, matching worldTurnSchema.ts's/
+  // characterTurnSchema.ts's own precedent for this exact field - a
+  // deferred item is only ever logged once its target project is
+  // known, so there's no turn where defer_to_project is legitimately
+  // null. appendOutstandingQuestions's StoredOutstandingQuestion.defer_to
+  // stays broader (nullable, and also accepts "Project 4") - this
+  // schema only needs to be assignable TO that wider type, which a
+  // non-nullable 3-member enum still is.
   deferred_items: z.array(
     z.object({
       item: z.string().min(1),
-      defer_to_project: z.enum(["Project 2", "Project 3", "Project 5"]).nullable(),
+      defer_to_project: z.enum(["Project 2", "Project 3", "Project 5"]),
       notes: z.string(),
     })
   ),
@@ -194,9 +213,9 @@ export const EMIT_ARCHITECTURE_TURN_TOOL: Anthropic.Tool = {
           properties: {
             item: { type: "string", description: "What was raised." },
             defer_to_project: {
-              type: ["string", "null"],
-              enum: ["Project 2", "Project 3", "Project 5", null],
-              description: "Which other project this actually belongs to, if any.",
+              type: "string",
+              enum: ["Project 2", "Project 3", "Project 5"],
+              description: "Which other project this actually belongs to.",
             },
             notes: { type: "string", description: "Any additional context for the deferral." },
           },
