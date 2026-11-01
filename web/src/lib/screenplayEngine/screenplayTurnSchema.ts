@@ -94,9 +94,62 @@ export const ScreenplayTurnSchema = z.object({
           shots: z.array(z.object({ description: z.string(), evolution_description: z.string() })),
         })
         .nullable(),
+      /** Issue #96 extension: motifs/sound cues/setups newly planted by
+       * this draft, so Phase 4's confirmation can register them in the
+       * Continuity Matrix's Open Loops alongside any closed this turn. */
+      loops_opened: z.array(
+        z.object({
+          id: z.string().min(1),
+          description: z.string().min(1),
+          kind: z.enum(["setup", "visual_motif", "sound_cue"]),
+          payoff_scene_number: z.number().int().min(1).nullable(),
+        })
+      ),
       loops_to_close: z.array(z.string()),
     })
     .nullable(),
+  /** Issue #96: the Continuity Matrix outcomes this draft would apply
+   * if Confirmed - distinct from continuity_requirements (the
+   * pre-conditions this draft relies on). Captured now, applied only
+   * once the scene is actually Confirmed (issue #97 AC5). Null only
+   * when draft_text is also null. */
+  continuity_outcomes: z
+    .object({
+      knowledge_gained: z.array(
+        z.object({
+          character_id: z.string().min(1),
+          character_name: z.string().min(1),
+          fact: z.string().min(1),
+          state: z.enum(["knows", "suspects", "lying"]),
+        })
+      ),
+      physical_changes: z.array(
+        z.object({
+          subject: z.string().min(1),
+          kind: z.enum(["injury", "costume", "prop", "weather", "time_elapsed"]),
+          detail: z.string().min(1),
+        })
+      ),
+    })
+    .nullable(),
+  /** Phase 4 (issue #96): the author's revision feedback classification
+   * for scene_number, or null when no revision is being discussed this
+   * turn. */
+  revision_classification: z
+    .object({
+      feedback_type: z.enum(["Visuals", "Dialogue", "Pacing", "Subtext", "Continuity", "Structure"]),
+      scope: z.enum(["Line", "Action Paragraph", "Full Scene"]),
+      description: z.string(),
+    })
+    .nullable(),
+  /** Phase 4: true only when the author has explicitly asked for a
+   * full-scene rewrite - required for revision_classification.scope
+   * to legitimately be "Full Scene". False on every other turn. */
+  full_rewrite_requested: z.boolean(),
+  /** Phase 4 (AC4): true only on the turn where the author gives
+   * explicit approval to freeze scene_number's current text as
+   * immutable Confirmed canon. False on every other turn. */
+  scene_approved: z.boolean(),
   /** Phase 3 (issue #95): the Dialogue & Voice Audit self-report -
    * whether this draft's dialogue carries subtext rather than
    * on-the-nose exposition. Null only when draft_text is also null. */
@@ -247,14 +300,80 @@ export const EMIT_SCREENPLAY_TURN_TOOL: Anthropic.Tool = {
             },
             required: ["present", "shots"],
           },
+          loops_opened: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string", description: "A stable id for this new Open Loop." },
+                description: { type: "string", description: "What was planted." },
+                kind: { type: "string", enum: ["setup", "visual_motif", "sound_cue"] },
+                payoff_scene_number: { type: ["number", "null"], description: "The intended Project 4 payoff scene, if known." },
+              },
+              required: ["id", "description", "kind", "payoff_scene_number"],
+            },
+            description: "Motifs/sound cues/setups newly planted by this draft.",
+          },
           loops_to_close: {
             type: "array",
             items: { type: "string" },
             description: "Open Loop ids (visual motifs, sound bridges/cues, setups) this draft pays off - must already exist as a planted Open Loop.",
           },
         },
-        required: ["flashback", "montage", "loops_to_close"],
+        required: ["flashback", "montage", "loops_opened", "loops_to_close"],
         description: "Special Screenplay Processing Paths (issue #99) layered onto draft_text. Null only when draft_text is also null.",
+      },
+      continuity_outcomes: {
+        type: ["object", "null"],
+        properties: {
+          knowledge_gained: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                character_id: { type: "string" },
+                character_name: { type: "string" },
+                fact: { type: "string" },
+                state: { type: "string", enum: ["knows", "suspects", "lying"] },
+              },
+              required: ["character_id", "character_name", "fact", "state"],
+            },
+            description: "Facts this scene newly establishes a character knows/suspects/lies about.",
+          },
+          physical_changes: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                subject: { type: "string" },
+                kind: { type: "string", enum: ["injury", "costume", "prop", "weather", "time_elapsed"] },
+                detail: { type: "string" },
+              },
+              required: ["subject", "kind", "detail"],
+            },
+            description: "Physical/timeline state this scene newly establishes.",
+          },
+        },
+        required: ["knowledge_gained", "physical_changes"],
+        description: "The Continuity Matrix outcomes this draft would apply once Confirmed (issue #96/#97 AC5). Null only when draft_text is also null.",
+      },
+      revision_classification: {
+        type: ["object", "null"],
+        properties: {
+          feedback_type: { type: "string", enum: ["Visuals", "Dialogue", "Pacing", "Subtext", "Continuity", "Structure"] },
+          scope: { type: "string", enum: ["Line", "Action Paragraph", "Full Scene"] },
+          description: { type: "string", description: "What changed and why." },
+        },
+        required: ["feedback_type", "scope", "description"],
+        description: "Phase 4: classification of the author's revision feedback for scene_number. Null when no revision is being discussed this turn.",
+      },
+      full_rewrite_requested: {
+        type: "boolean",
+        description: "True only when the author has explicitly asked for a full-scene rewrite this turn.",
+      },
+      scene_approved: {
+        type: "boolean",
+        description: "True only on the turn where the author gives explicit approval to freeze scene_number's current text as immutable Confirmed canon.",
       },
       dialogue_voice_audit: {
         type: ["object", "null"],
@@ -296,6 +415,10 @@ export const EMIT_SCREENPLAY_TURN_TOOL: Anthropic.Tool = {
       "structural_deviation",
       "continuity_requirements",
       "special_processing",
+      "continuity_outcomes",
+      "revision_classification",
+      "full_rewrite_requested",
+      "scene_approved",
       "dialogue_voice_audit",
       "deferred_items",
     ],

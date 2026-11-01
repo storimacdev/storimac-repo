@@ -39,13 +39,12 @@ interface TurnResponse {
 }
 
 /**
- * Project 5 (Screenplay Edition) chat UI — GitHub issue #93 (Phase 1
- * gate). Deliberately smaller than ArchitectureInterview.tsx/
+ * Project 5 (Screenplay Edition) chat UI — GitHub issues #93-#96
+ * (Phases 1-4). Deliberately smaller than ArchitectureInterview.tsx/
  * WorldInterview.tsx: P5 has no compiled-document export concern
  * (issue #102 is explicitly out of scope for this build), so there is
  * no compile/.docx/.pdf panel to carry over. Extended by later issues
- * (#94 draft display, #95 split Screenplay/Compliance Report, #96
- * revision controls, #98 conflict banner, #100 resume-on-reload).
+ * (#98 conflict banner, #100 resume-on-reload).
  */
 export default function ScreenplayInterview() {
   const searchParams = useSearchParams();
@@ -151,12 +150,27 @@ export default function ScreenplayInterview() {
         </div>
       )}
 
-      {delivery && scene?.status === "Working" && (
+      {scene?.status === "Confirmed" && (
+        <div className="border-b border-emerald-700/40 bg-emerald-950/30 px-4 py-2 text-xs text-emerald-200">
+          Scene {scene.sceneNumber} is Confirmed — its text is now frozen, immutable canon.
+        </div>
+      )}
+
+      {(delivery || (scene?.draftText && scene.status === "Working")) && scene && scene.status === "Working" && (
         <div className="max-h-64 overflow-y-auto border-b border-neutral-800 bg-neutral-900/60 px-4 py-2 text-xs">
           <p className="mb-1 font-semibold text-neutral-400">
             Phase 3 delivery (Scene {scene.sceneNumber}) — THE SCREENPLAY / COMPLIANCE REPORT:
           </p>
-          <pre className="whitespace-pre-wrap text-neutral-300">{delivery}</pre>
+          <pre className="whitespace-pre-wrap text-neutral-300">{delivery ?? scene.draftText}</pre>
+          <div className="mt-2 flex gap-2">
+            <button
+              onClick={() => sendMessage("I approve this scene exactly as drafted. Please confirm it.")}
+              disabled={loading}
+              className="rounded-lg bg-gradient-to-r from-red-600 to-orange-500 px-3 py-1.5 text-xs font-semibold text-white hover:from-red-500 hover:to-orange-400 disabled:opacity-50"
+            >
+              Approve scene
+            </button>
+          </div>
         </div>
       )}
 
