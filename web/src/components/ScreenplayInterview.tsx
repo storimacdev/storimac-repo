@@ -26,6 +26,13 @@ interface TurnResponse {
   phase: string | null;
   scene: SceneSummary | null;
   summaryFormatIssue: string | null;
+  continuityViolations: { kind: string; message: string }[] | null;
+  draftValidation: {
+    ok: boolean;
+    blockingReasons: string[];
+    advisoryFindings: { leanParagraphs: unknown[]; visualDiscipline: unknown[] };
+  } | null;
+  structuralDeviation: { deviates: boolean; explanation: string } | null;
   gaps: { project: string; field: string; reason: string }[];
   deferredItems: { item: string; defer_to_project: string | null; notes: string }[];
 }
@@ -53,6 +60,11 @@ export default function ScreenplayInterview() {
   const [scene, setScene] = useState<SceneSummary | null>(null);
   const [gaps, setGaps] = useState<{ project: string; field: string; reason: string }[]>([]);
   const [summaryFormatIssue, setSummaryFormatIssue] = useState<string | null>(null);
+  const [continuityViolations, setContinuityViolations] = useState<{ kind: string; message: string }[] | null>(null);
+  const [structuralDeviation, setStructuralDeviation] = useState<{ deviates: boolean; explanation: string } | null>(
+    null
+  );
+  const [draftBlockingReasons, setDraftBlockingReasons] = useState<string[]>([]);
 
   async function sendMessage(text: string) {
     if (!canvasId || !text.trim() || loading) return;
@@ -76,6 +88,9 @@ export default function ScreenplayInterview() {
       setScene(data.scene);
       setGaps(data.gaps);
       setSummaryFormatIssue(data.summaryFormatIssue);
+      setContinuityViolations(data.continuityViolations);
+      setStructuralDeviation(data.structuralDeviation?.deviates ? data.structuralDeviation : null);
+      setDraftBlockingReasons(data.draftValidation?.ok === false ? data.draftValidation.blockingReasons : []);
       setLastProject("screenplay");
     } catch {
       setError("Couldn't reach the server.");
@@ -111,6 +126,32 @@ export default function ScreenplayInterview() {
       {summaryFormatIssue && (
         <div className="border-b border-red-700/40 bg-red-950/30 px-4 py-2 text-xs text-red-200">
           Assignment summary format issue: {summaryFormatIssue}
+        </div>
+      )}
+
+      {continuityViolations && continuityViolations.length > 0 && (
+        <div className="border-b border-red-700/40 bg-red-950/30 px-4 py-2 text-xs text-red-200">
+          Continuity Matrix violation(s): {continuityViolations.map((v) => v.message).join(" ")}
+        </div>
+      )}
+
+      {structuralDeviation && (
+        <div className="border-b border-amber-700/40 bg-amber-950/30 px-4 py-2 text-xs text-amber-200">
+          Structural deviation from the Project 4 blueprint flagged — this requires the Conflict Intercept protocol
+          before drafting can proceed: {structuralDeviation.explanation}
+        </div>
+      )}
+
+      {draftBlockingReasons.length > 0 && (
+        <div className="border-b border-red-700/40 bg-red-950/30 px-4 py-2 text-xs text-red-200">
+          Draft did not clear the Screenplay Narrative Execution Standards: {draftBlockingReasons.join(" ")}
+        </div>
+      )}
+
+      {scene?.draftText && scene.status === "Working" && (
+        <div className="max-h-48 overflow-y-auto border-b border-neutral-800 bg-neutral-900/60 px-4 py-2 text-xs">
+          <p className="mb-1 font-semibold text-neutral-400">Current draft (Scene {scene.sceneNumber}):</p>
+          <pre className="whitespace-pre-wrap text-neutral-300">{scene.draftText}</pre>
         </div>
       )}
 

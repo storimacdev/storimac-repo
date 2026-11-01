@@ -10,6 +10,7 @@ import {
   listMessages,
   appendOutstandingQuestions,
   setP5Scenes,
+  normalizeP5ContinuityMatrix,
   SCREENPLAY_MESSAGES_COLLECTION,
 } from "@/lib/canonEngine/storyStore";
 import { extractTurn, TurnValidationError } from "@/lib/canonEngine/extractTurn";
@@ -28,25 +29,29 @@ import {
   createSceneRecord,
   setAssignmentSummary,
   signOffAssignment,
+  setDraftText,
   canOpenAssignmentGate,
   determineActiveSceneNumber,
   type SceneRecord,
 } from "@/lib/screenplayEngine/sceneLedger";
+import { validateSceneDraft, type SceneDraftingValidation } from "@/lib/screenplayEngine/sceneDrafting";
+import { checkContinuityBeforeDraft, type ContinuityViolation } from "@/lib/screenplayEngine/continuityMatrix";
 
 export const runtime = "nodejs";
 
 const SCREENPLAY_MESSAGE_WINDOW = 20;
 
 /**
- * The live P5 Screenwriter/Dramaturg turn handler — GitHub issue #93
- * (Phase 1, Assignment Confirmation Gate). Follows architecture-chat/
- * route.ts's exact shape (auth/story lookup -> transcript persistence ->
- * system-prompt assembly with grounding blocks -> one extractTurn call
- * -> deterministic post-processing -> state persistence -> response).
- * Only Phase 1 is wired so far; later issues (#94 drafting, #95 QA/
- * delivery, #96 revision/canonization, #98 conflict intercept) extend
- * this same route rather than adding a second one, matching how
- * architecture-chat/route.ts itself grew across P4's issues.
+ * The live P5 Screenwriter/Dramaturg turn handler — GitHub issues #93
+ * (Phase 1, Assignment Confirmation Gate) and #94 (Phase 2, Scene
+ * Drafting). Follows architecture-chat/route.ts's exact shape (auth/
+ * story lookup -> transcript persistence -> system-prompt assembly
+ * with grounding blocks -> one extractTurn call -> deterministic
+ * post-processing -> state persistence -> response). Phases 1-2 are
+ * wired so far; later issues (#95 QA/delivery, #96 revision/
+ * canonization, #98 conflict intercept) extend this same route rather
+ * than adding a second one, matching how architecture-chat/route.ts
+ * itself grew across P4's issues.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -84,6 +89,7 @@ export async function POST(req: NextRequest) {
 
     const canon = await ingestScreenplayCanon(storyId);
     let scenes = story.p5Scenes ?? [];
+    const continuityMatrix = normalizeP5ContinuityMatrix(story.p5ContinuityMatrix);
 
     let system = getSystemPrompt("sp05-se-systemprompt.md");
 
@@ -122,6 +128,17 @@ export async function POST(req: NextRequest) {
       system += `\n\n[Scene Register Gap - internal grounding only. ${readiness.reason} Tell the author this scene cannot be gated yet and ask how to proceed - never invent a Scene Register entry.]`;
     } else if (readiness.entry && !existingScene?.signedOff) {
       system += buildAssignmentGateGroundingMessage(readiness.entry);
+    } else if (readiness.ready && existingScene?.signedOff && existingScene.status !== "Confirmed") {
+      // Phase 2 (issue #94): the gate has passed - draft now. Surfaces
+      // the live Continuity Matrix state so the model's draft itself
+      // avoids an obvious contradiction, on top of the deterministic
+      // post-check below (issue #97 AC5).
+      const openLoopLines = continuityMatrix.openLoops
+        .filter((l) => l.status === "open")
+        .map((l) => `- [${l.id}] (${l.kind}) planted scene ${l.plantedSceneNumber}: ${l.description}`);
+      system += `\n\n[Phase 2 - Scene Drafting - internal grounding only. Scene ${existingScene.sceneNumber} is signed off. Draft it now in strict industry screenplay format per Sections 3-4: Strict Visual Discipline, active present tense, Lean Action Paragraphs, Performable Dialogue & Subtext, Enter Late/Leave Early, and the Conflict Mandate. Report draft_text, conflict_mandate, enter_late_leave_early, and continuity_requirements (every fact/physical-state this draft relies on) together this turn. Never alter a structural fact from the Project 4 blueprint (scene count, turning point, cast) without reporting structural_deviation - that halts drafting for the Conflict Intercept protocol rather than silently reinterpreting the blueprint.${
+        openLoopLines.length > 0 ? `\nOpen Loops currently tracked:\n${openLoopLines.join("\n")}` : ""
+      }]`;
     }
 
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -142,6 +159,9 @@ export async function POST(req: NextRequest) {
 
     let effectiveScene: SceneRecord | null = existingScene;
     let summaryFormatIssue: string | null = null;
+    let continuityViolations: ContinuityViolation[] | null = null;
+    let draftValidation: SceneDraftingValidation | null = null;
+    let structuralDeviation: { deviates: boolean; explanation: string } | null = null;
 
     try {
       const sceneNumber = delta.scene_number ?? activeSceneNumber;
@@ -165,6 +185,50 @@ export async function POST(req: NextRequest) {
         const signed = signOffAssignment(effectiveScene);
         scenes = upsertScene(scenes, signed);
         effectiveScene = signed;
+      }
+
+      // Phase 2 (issue #94): only ever advances a scene to Working - a
+      // model-requested "Confirmed" is intentionally not honored here.
+      // Confirming is Phase 4's job (issue #96); Phase 2's drafting
+      // route has no author-sign-off step of its own to justify
+      // freezing text as immutable canon.
+      if (delta.draft_text && effectiveScene && effectiveScene.signedOff && effectiveScene.status !== "Confirmed") {
+        const continuityCheck = checkContinuityBeforeDraft(continuityMatrix, effectiveScene.sceneNumber, {
+          requiredKnowledge: (delta.continuity_requirements?.required_knowledge ?? []).map((k) => ({
+            characterId: k.character_id,
+            fact: k.fact,
+          })),
+          referencedSubjects: (delta.continuity_requirements?.referenced_physical ?? []).map((p) => ({
+            subject: p.subject,
+            kind: p.kind,
+            expectedDetail: p.expected_detail,
+          })),
+        });
+
+        if (!continuityCheck.ok) {
+          continuityViolations = continuityCheck.violations;
+        } else if (delta.structural_deviation?.deviates) {
+          structuralDeviation = delta.structural_deviation;
+        } else {
+          const validation = validateSceneDraft(delta.draft_text, {
+            conflictMandate: {
+              present: delta.conflict_mandate?.present ?? false,
+              oppositionDescription: delta.conflict_mandate?.opposition_description ?? "",
+              permanentShiftDescription: delta.conflict_mandate?.permanent_shift_description ?? "",
+            },
+            enterLateLeaveEarly: {
+              enteredLate: delta.enter_late_leave_early?.entered_late ?? false,
+              leftEarly: delta.enter_late_leave_early?.left_early ?? false,
+              reason: delta.enter_late_leave_early?.reason ?? "",
+            },
+          });
+          draftValidation = validation;
+          if (validation.ok) {
+            const drafted = setDraftText(effectiveScene, delta.draft_text);
+            scenes = upsertScene(scenes, drafted);
+            effectiveScene = drafted;
+          }
+        }
       }
 
       await setP5Scenes(storyId, scenes);
@@ -196,6 +260,9 @@ export async function POST(req: NextRequest) {
       phase: delta.phase,
       scene: effectiveScene,
       summaryFormatIssue,
+      continuityViolations,
+      draftValidation,
+      structuralDeviation,
       gaps: canon.gaps,
       deferredItems: delta.deferred_items,
     });
