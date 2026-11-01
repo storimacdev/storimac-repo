@@ -44,17 +44,26 @@ export interface ConflictProcessingResult {
    */
   resolvedField: string | null;
   /**
-   * Set only on a resolution turn where `conflictDetected` pointed at a
-   * DIFFERENT field than the one just resolved (issue #106). Rather than
-   * starting to track that field as a second pending conflict in the same
-   * turn - which would fight over the single turn-level
-   * conflictDetected/conflictDescription fields with the resolution this
-   * turn already applied, and could misattach the OLD conflict's
-   * description to the wrong field - the app downgrades it (and any
-   * other stray Confirmed proposal this turn) to Working and logs a
-   * warning. It will be caught by ordinary fresh detection on a later
-   * turn if the model re-proposes it as Confirmed once nothing is being
-   * resolved.
+   * Set in either of two situations where a fresh conflict can't become
+   * the new pending conflict because the singular pending-conflict slot
+   * is already occupied, and is downgraded-and-deferred instead of being
+   * silently dropped:
+   * - A resolution turn where `conflictDetected` pointed at a DIFFERENT
+   *   field than the one just resolved, for the SAME character (issue
+   *   #106) - starting to track that field as a second pending conflict
+   *   in the same turn would fight over the single turn-level
+   *   conflictDetected/conflictDescription fields with the resolution
+   *   this turn already applied, and could misattach the OLD conflict's
+   *   description to the wrong field.
+   * - Any turn where `conflictDetected` is set for the current character
+   *   while a DIFFERENT character's conflict is already pending (issue
+   *   #117) - the pending-conflict slot is singular by design (mirrors
+   *   P1's own StoryPendingConflict convention), so there's nowhere to
+   *   put a second, concurrent conflict for a different character.
+   * Both cases downgrade the stray Confirmed proposal(s) this turn to
+   * Working and log a warning. The conflict will be caught by ordinary
+   * fresh detection on a later turn once the model re-proposes it as
+   * Confirmed and nothing else is occupying the pending-conflict slot.
    */
   suppressedConflictField: string | null;
 }
@@ -161,6 +170,16 @@ function findConflictCulprit(
  *   a bare re-proposal of the same field as Confirmed, with no
  *   `resolution` set, must not slip through just because it isn't a
  *   "new" detection turn.
+ * - A conflict for a DIFFERENT character is pending, and THIS turn's own
+ *   `conflictDetected` is true with a Confirmed culprit in `rawUpdates`
+ *   (issue #117): the singular pending-conflict slot is already occupied,
+ *   so - same reasoning as #106's same-character case above, just
+ *   triggered by a different character's data - the culprit (and any
+ *   other stray Confirmed proposal this turn) is downgraded to Working
+ *   and signaled via `suppressedConflictField` instead of being silently
+ *   dropped. The other character's pending conflict is left untouched; a
+ *   later turn's fresh detection will pick this one up for real once that
+ *   conflict is resolved and the slot is free again.
  * - Otherwise: `enforcedUpdates` passes through unchanged, and any
  *   pending conflict for a different character is left untouched.
  */
@@ -261,6 +280,30 @@ export function processConflict(params: ProcessConflictParams): ConflictProcessi
       resolvedField: null,
       suppressedConflictField: null,
     };
+  }
+
+  // Issue #117: a conflict is pending for a DIFFERENT character, and this
+  // turn's OWN character has a fresh conflictDetected proposal. The
+  // pending-conflict slot is singular by design (mirrors P1's own
+  // StoryPendingConflict convention), so there's nowhere to put a second,
+  // concurrent conflict for a different character - apply the same
+  // suppress-and-defer treatment #106 established for the same-character
+  // chained case: downgrade the stray Confirmed proposal(s) to Working and
+  // signal it via suppressedConflictField for the route to log. The other
+  // character's pending conflict is left untouched; a later turn's fresh
+  // detection (above) will catch this one for real once that conflict is
+  // resolved and the slot is free again.
+  if (pendingConflict && pendingConflict.charId !== charId && conflictDetected) {
+    const culprit = findConflictCulprit(rawUpdates, alreadyConfirmedFields);
+    if (culprit) {
+      return {
+        enforcedUpdates: downgradeAllConfirmed(enforcedUpdates, alreadyConfirmedFields),
+        nextPendingConflict: pendingConflict,
+        logEntry: null,
+        resolvedField: null,
+        suppressedConflictField: culprit.field,
+      };
+    }
   }
 
   return { enforcedUpdates, nextPendingConflict: pendingConflict, logEntry: null, resolvedField: null, suppressedConflictField: null };
