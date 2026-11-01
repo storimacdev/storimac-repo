@@ -22,6 +22,11 @@ type UnitSummary = { unitId: string; type: string; status: string; causalTag?: "
 
 type SceneDensity = { count: number; projectedTotal: number | null; alert: "under" | "over" | null };
 
+// Issue #173 - strictly advisory, mirrors SceneDensity's own shape but
+// with no dismissal state: a dangling setup is normal mid-development
+// state, re-shown every turn/resume rather than acknowledged once.
+type SetupPayoffAdvisory = { danglingSetups: string[]; orphanedPayoffs: string[] };
+
 type ThematicAnchorFinding = { id: string; status: "pass" | "flag"; detail: string };
 type ThematicAnchorAudit = { findings: ThematicAnchorFinding[]; gapFound: boolean };
 type PreCompilationAudit = { findings: ThematicAnchorFinding[]; failed: boolean };
@@ -48,6 +53,7 @@ interface TurnResponse {
   pendingConflict: { kind: "unit_regression" | "canon_contradiction"; unitId: string } | null;
   cascadeReview: P4CascadeReviewEntry[] | null;
   sceneDensity: SceneDensity;
+  setupPayoffAdvisory: SetupPayoffAdvisory;
   structuralVectorOptions: StructuralVectorOptions | null;
 }
 
@@ -78,6 +84,7 @@ export default function ArchitectureInterview() {
   const [pendingConflict, setPendingConflict] = useState<{ kind: string; unitId: string } | null>(null);
   const [cascadeReview, setCascadeReview] = useState<P4CascadeReviewEntry[] | null>(null);
   const [sceneDensity, setSceneDensity] = useState<SceneDensity | null>(null);
+  const [setupPayoffAdvisory, setSetupPayoffAdvisory] = useState<SetupPayoffAdvisory | null>(null);
   const [structuralVectorOptions, setStructuralVectorOptions] = useState<StructuralVectorOptions | null>(null);
   const [compiling, setCompiling] = useState(false);
   const [compiled, setCompiled] = useState<{
@@ -140,6 +147,9 @@ export default function ArchitectureInterview() {
         // `story`, not nested under it (matching guardrailFlags/
         // characterBibleGate's own shape).
         setSceneDensity((data.sceneDensity as SceneDensity | undefined) ?? null);
+        // Same "compute fresh on resume" precedent sceneDensity directly
+        // above already established (issue #173).
+        setSetupPayoffAdvisory((data.setupPayoffAdvisory as SetupPayoffAdvisory | undefined) ?? null);
         requestAnimationFrame(() => scrollToLatest("auto"));
       } catch {
         if (!cancelled) setError("Couldn't reach the server. Is the dev server running?");
@@ -166,6 +176,7 @@ export default function ArchitectureInterview() {
     setPendingConflict(data.pendingConflict);
     setCascadeReview(data.cascadeReview);
     setSceneDensity(data.sceneDensity);
+    setSetupPayoffAdvisory(data.setupPayoffAdvisory);
     setStructuralVectorOptions(data.structuralVectorOptions);
     const turnUnit = data.unit;
     if (turnUnit) {
@@ -457,6 +468,17 @@ export default function ArchitectureInterview() {
           </ul>
         </div>
       )}
+      {setupPayoffAdvisory &&
+        (setupPayoffAdvisory.danglingSetups.length > 0 || setupPayoffAdvisory.orphanedPayoffs.length > 0) && (
+          <div className="border-b border-sky-500/30 bg-sky-950/20 px-6 py-2 text-xs text-sky-200">
+            {setupPayoffAdvisory.danglingSetups.length > 0 && (
+              <p>Planted, not yet paid off: {setupPayoffAdvisory.danglingSetups.join(", ")}</p>
+            )}
+            {setupPayoffAdvisory.orphanedPayoffs.length > 0 && (
+              <p>Paid off, but no matching [SETUP: ...] tag found: {setupPayoffAdvisory.orphanedPayoffs.join(", ")}</p>
+            )}
+          </div>
+        )}
       {structuralVectorOptions && structuralVectorOptions.options.length > 0 && (
         <div className="border-b border-teal-500/30 bg-teal-950/20 px-6 py-3 text-xs text-teal-200">
           <p className="mb-2 font-semibold">

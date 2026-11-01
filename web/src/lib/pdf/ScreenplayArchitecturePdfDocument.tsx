@@ -94,7 +94,20 @@ export function ScreenplayArchitecturePdfDocument({ doc }: { doc: ScreenplayArch
         ))}
 
         <Text style={styles.h2}>6. Setup & Payoff Ledger</Text>
-        <Text style={styles.text}>{doc["6_setup_payoff_ledger"]}</Text>
+        {doc["6_setup_payoff_ledger"].length === 0 ? (
+          <Text style={styles.text}>
+            No [SETUP: ...]/[PAYOFF: ...] tags found in the Confirmed Scene Register yet.
+          </Text>
+        ) : (
+          doc["6_setup_payoff_ledger"].map((e) => (
+            <Text key={e.setup_name} style={styles.li}>
+              {e.setup_name} — Planted:{" "}
+              {e.planted ? `Scene ${e.planted.scene_number}: ${e.planted.slugline}` : "— (orphaned - no [SETUP: ...] tag found)"} —
+              Paid Off:{" "}
+              {e.paid_off ? `Scene ${e.paid_off.scene_number}: ${e.paid_off.slugline}` : "— (dangling - not yet paid off)"}
+            </Text>
+          ))
+        )}
 
         <Text style={styles.h2}>7. Outstanding Decisions & Version History</Text>
         {outstandingSection.outstanding.length === 0 ? (

@@ -123,7 +123,64 @@ export async function generateScreenplayArchitectureDocxBlob(doc: ScreenplayArch
   );
 
   children.push(sectionHeading("6. Setup & Payoff Ledger"));
-  children.push(new Paragraph(doc["6_setup_payoff_ledger"]));
+  if (doc["6_setup_payoff_ledger"].length === 0) {
+    children.push(new Paragraph("No [SETUP: ...]/[PAYOFF: ...] tags found in the Confirmed Scene Register yet."));
+  } else {
+    children.push(
+      new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        rows: [
+          new TableRow({
+            children: [
+              new TableCell({
+                width: { size: 33, type: WidthType.PERCENTAGE },
+                children: [new Paragraph({ children: [new TextRun({ text: "Setup Name", bold: true })] })],
+              }),
+              new TableCell({
+                width: { size: 33, type: WidthType.PERCENTAGE },
+                children: [new Paragraph({ children: [new TextRun({ text: "Planted", bold: true })] })],
+              }),
+              new TableCell({
+                width: { size: 33, type: WidthType.PERCENTAGE },
+                children: [new Paragraph({ children: [new TextRun({ text: "Paid Off", bold: true })] })],
+              }),
+            ],
+          }),
+          ...doc["6_setup_payoff_ledger"].map(
+            (e) =>
+              new TableRow({
+                children: [
+                  new TableCell({
+                    width: { size: 33, type: WidthType.PERCENTAGE },
+                    children: [new Paragraph(e.setup_name)],
+                  }),
+                  new TableCell({
+                    width: { size: 33, type: WidthType.PERCENTAGE },
+                    children: [
+                      new Paragraph(
+                        e.planted
+                          ? `Scene ${e.planted.scene_number}: ${e.planted.slugline}`
+                          : "— (orphaned - no [SETUP: ...] tag found)"
+                      ),
+                    ],
+                  }),
+                  new TableCell({
+                    width: { size: 33, type: WidthType.PERCENTAGE },
+                    children: [
+                      new Paragraph(
+                        e.paid_off
+                          ? `Scene ${e.paid_off.scene_number}: ${e.paid_off.slugline}`
+                          : "— (dangling - not yet paid off)"
+                      ),
+                    ],
+                  }),
+                ],
+              })
+          ),
+        ],
+      })
+    );
+  }
 
   const outstandingSection = doc["7_outstanding_decisions_version_history"];
   children.push(sectionHeading("7. Outstanding Decisions & Version History"));
