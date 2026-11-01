@@ -939,9 +939,73 @@ export async function getLatestWorldBibleVersion(storyId: string): Promise<Store
   return snap.empty ? null : (snap.docs[0].data() as StoredWorldBibleVersion);
 }
 
-/** Persists a new World Bible version. Never overwrites a prior version - `stored.version` must already be `(latest?.version ?? 0) + 1`, computed by the caller (worldEngine/worldBibleCompiler.ts's generateWorldBibleDocument), same division of responsibility as FoundationDocument's own generateFoundationDocument/versionsCollection split. */
+/** Persists a new World Bible version. Never overwrites a prior version - `stored.version` must already be `(latest?.version ?? 0) + 1`, computed by the caller (worldEngine/worldBibleCompiler.ts's generateWorldBibleDocument), same division of responsibility as FoundationDocument's own generateFoundationDocument/versionsCollection split.
+ *
+ * Issue #129: do NOT use this for the next-version write path - computing
+ * `stored.version` from a separate, untransacted read (as the caller used
+ * to) lets two concurrent compiles both read the same prior version, both
+ * compute the same next version, and have the second `.set()` here
+ * silently clobber the first, discarding a paid Anthropic call with no
+ * error to either author. Use saveNextWorldBibleVersion instead, which
+ * reads the prior version and writes the next one atomically. Kept here
+ * only for any caller that already holds a fully-formed, pre-numbered
+ * version it knows is safe to write directly (none currently do). */
 export async function saveWorldBibleVersion(storyId: string, stored: StoredWorldBibleVersion): Promise<void> {
   await worldBibleVersionsCollection(storyId).doc(String(stored.version)).set(stored);
+}
+
+/** Note: `version` here is the rendered "v1"-style string used in
+ * 15_version_history rows, not StoredWorldBibleVersion's numeric `version`. */
+interface WorldBibleVersionHistoryRow {
+  version: string;
+  date: string;
+  summary_of_changes: string;
+}
+
+/**
+ * Atomically assigns and persists the next World Bible version - issue
+ * #129's fix. Reads the latest version (and, only if one exists, the full
+ * version-history rows) and writes the new version inside a single
+ * Firestore transaction, so two concurrent compiles can no longer both
+ * read the same prior version and race to clobber each other: the Admin
+ * SDK retries a transaction whose reads were invalidated by a concurrent
+ * commit, and `tx.create` (not `.set`) makes a same-version collision
+ * throw ALREADY_EXISTS rather than silently overwrite, as a second line
+ * of defense if two transactions ever still computed the same version
+ * number.
+ *
+ * `buildVersion` must be pure and synchronous - any slow or external work
+ * (the Anthropic synthesis call, cross-project reads) belongs in the
+ * caller, before this function is invoked, not inside the transaction
+ * body.
+ */
+export async function saveNextWorldBibleVersion(
+  storyId: string,
+  buildVersion: (
+    prior: StoredWorldBibleVersion | null,
+    priorHistory: WorldBibleVersionHistoryRow[]
+  ) => StoredWorldBibleVersion
+): Promise<StoredWorldBibleVersion> {
+  const db = getDb();
+  const collection = worldBibleVersionsCollection(storyId);
+
+  return db.runTransaction(async (tx) => {
+    const latestSnap = await tx.get(collection.orderBy("version", "desc").limit(1));
+    const prior = latestSnap.empty ? null : (latestSnap.docs[0].data() as StoredWorldBibleVersion);
+
+    let priorHistory: WorldBibleVersionHistoryRow[] = [];
+    if (prior) {
+      const historySnap = await tx.get(collection.orderBy("version", "asc"));
+      priorHistory = historySnap.docs.map((d) => {
+        const v = d.data() as StoredWorldBibleVersion;
+        return { version: `v${v.version}`, date: v.date, summary_of_changes: v.summary_of_changes };
+      });
+    }
+
+    const stored = buildVersion(prior, priorHistory);
+    tx.create(collection.doc(String(stored.version)), stored);
+    return stored;
+  });
 }
 
 /** Marks a specific World Bible version Confirmed (issue #51) - the

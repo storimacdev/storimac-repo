@@ -403,42 +403,68 @@ function diffSummary(prev: ElementSnapshot | null, current: ElementSnapshot): st
  * Generates the next document version for a Story: compiles Confirmed canon,
  * computes the diff summary vs the prior version's snapshot, and persists it
  * (prior versions are never overwritten — issue #19 AC).
+ *
+ * Issue #129: the version number used to be computed from a separate,
+ * untransacted read of the prior version taken alongside the other
+ * Promise.all fetches above — two concurrent compiles for the same story
+ * could both read the same prior version, both compute the same next
+ * version, and have the second `.set()` silently clobber the first with
+ * no error to either caller. This compiler has no LLM call (unlike
+ * worldBibleCompiler.ts's generateWorldBibleDocument, which shares this
+ * exact version-numbering shape and the same fix), but the race is
+ * identical. Fixed by reading the prior version, the prior
+ * version-history rows, and writing the new version all inside one
+ * Firestore transaction: the Admin SDK retries a transaction whose reads
+ * were invalidated by a concurrent commit, and `tx.create` (not `.set`)
+ * makes a same-version collision throw ALREADY_EXISTS instead of
+ * overwriting, as a second line of defense if two transactions still
+ * somehow computed the same version number.
  */
 export async function generateFoundationDocument(storyId: string): Promise<StoredDocumentVersion> {
   const story = await getStory(storyId);
   if (!story) throw new Error(`Story "${storyId}" not found.`);
 
-  const [elements, outstanding, priorVersions] = await Promise.all([
+  const [elements, outstanding] = await Promise.all([
     listElements(storyId),
     listOutstandingQuestions(storyId),
-    versionsCollection(storyId).orderBy("version", "desc").limit(1).get(),
   ]);
-
-  const prior = priorVersions.empty ? null : (priorVersions.docs[0].data() as StoredDocumentVersion);
-  const version = (prior?.version ?? 0) + 1;
 
   const snapshot: ElementSnapshot = {};
   for (const e of elements) snapshot[e.element_id] = { status: e.status, value: e.value };
-
   const date = new Date().toISOString().slice(0, 10);
-  const summary = diffSummary(prior?.elementsSnapshot ?? null, snapshot);
 
-  const historyRows = [
-    ...(prior ? (await listDocumentVersions(storyId)).map((v) => ({ version: `v${v.version}`, date: v.date, summary_of_changes: v.summary_of_changes })) : []),
-    { version: `v${version}`, date, summary_of_changes: summary },
-  ];
+  const db = getDb();
+  const collection = versionsCollection(storyId);
 
-  const json = compileFoundationDocument(story, elements, outstanding, version, historyRows);
-  const markdown = renderMarkdown(json);
+  return db.runTransaction(async (tx) => {
+    const latestSnap = await tx.get(collection.orderBy("version", "desc").limit(1));
+    const prior = latestSnap.empty ? null : (latestSnap.docs[0].data() as StoredDocumentVersion);
+    const version = (prior?.version ?? 0) + 1;
 
-  const stored: StoredDocumentVersion = {
-    version,
-    date,
-    summary_of_changes: summary,
-    json,
-    markdown,
-    elementsSnapshot: snapshot,
-  };
-  await versionsCollection(storyId).doc(String(version)).set(stored);
-  return stored;
+    let priorHistory: { version: string; date: string; summary_of_changes: string }[] = [];
+    if (prior) {
+      const historySnap = await tx.get(collection.orderBy("version", "asc"));
+      priorHistory = historySnap.docs.map((d) => {
+        const v = d.data() as StoredDocumentVersion;
+        return { version: `v${v.version}`, date: v.date, summary_of_changes: v.summary_of_changes };
+      });
+    }
+
+    const summary = diffSummary(prior?.elementsSnapshot ?? null, snapshot);
+    const historyRows = [...priorHistory, { version: `v${version}`, date, summary_of_changes: summary }];
+
+    const json = compileFoundationDocument(story, elements, outstanding, version, historyRows);
+    const markdown = renderMarkdown(json);
+
+    const stored: StoredDocumentVersion = {
+      version,
+      date,
+      summary_of_changes: summary,
+      json,
+      markdown,
+      elementsSnapshot: snapshot,
+    };
+    tx.create(collection.doc(String(version)), stored);
+    return stored;
+  });
 }
