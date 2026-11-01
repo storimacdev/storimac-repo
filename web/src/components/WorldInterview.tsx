@@ -65,6 +65,11 @@ export default function WorldInterview() {
   const [characterBibleGate, setCharacterBibleGate] = useState<CharacterBibleGateResult | null>(null);
   const [pendingConflict, setPendingConflictState] = useState<P3PendingConflict | null>(null);
   const [cascadeReview, setCascadeReview] = useState<{ entryId: string; name: string }[] | null>(null);
+  // Issue #119: the entry the Dependency Review above is about, so its
+  // copy can name it explicitly instead of a generic "the canon you just
+  // revised" - ambiguous whenever a brand-new, unrelated pendingConflict
+  // also lands in the same response.
+  const [cascadeReviewEntryName, setCascadeReviewEntryName] = useState<string | null>(null);
   const [stage4Audit, setStage4Audit] = useState<P3Stage4Audit | null>(null);
   const [worldBibleDoc, setWorldBibleDoc] = useState<{
     version: number;
@@ -220,6 +225,7 @@ export default function WorldInterview() {
     p3?: P3State;
     pendingConflict?: P3PendingConflict | null;
     cascadeReview?: { entryId: string; name: string }[] | null;
+    cascadeReviewEntryName?: string | null;
     stage4Audit?: P3Stage4Audit | null;
   }) {
     setMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
@@ -237,6 +243,7 @@ export default function WorldInterview() {
     }
     setPendingConflictState(data.pendingConflict ?? null);
     setCascadeReview(data.cascadeReview ?? null);
+    setCascadeReviewEntryName(data.cascadeReviewEntryName ?? null);
     setStage4Audit(data.stage4Audit ?? null);
   }
 
@@ -668,7 +675,13 @@ export default function WorldInterview() {
                     className="mt-3 rounded-xl border border-red-900/40 bg-neutral-900/60 px-4 py-3 text-sm text-neutral-100"
                   >
                     <p className="mb-1 text-[11px] uppercase tracking-widest text-neutral-500">Dependency Review</p>
-                    <p className="mb-2 text-xs text-neutral-400">These entries depend on the canon you just revised:</p>
+                    <p className="mb-2 text-xs text-neutral-400">
+                      {cascadeReviewEntryName ? (
+                        <>These entries depend on <strong className="text-neutral-200">{cascadeReviewEntryName}</strong>, which you just revised:</>
+                      ) : (
+                        "These entries depend on the canon you just revised:"
+                      )}
+                    </p>
                     <ul className="space-y-1 text-xs text-neutral-300">
                       {cascadeReview.map((e) => (
                         <li key={e.entryId}>{e.name}</li>
