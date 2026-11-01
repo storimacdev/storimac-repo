@@ -5,6 +5,8 @@ import { getWorkspace, TierLimitError } from "@/lib/workspace/workspaceStore";
 import { TIER_LIMITS } from "@/lib/workspace/types";
 import type { RoutingState } from "@/lib/storyArchitectureEngine/developmentLoop";
 import type { StructuralUnit, StructuralUnitType } from "@/lib/storyArchitectureEngine/stateLedger";
+import type { ContinuityMatrix } from "@/lib/screenplayEngine/continuityMatrix";
+import { createEmptyContinuityMatrix } from "@/lib/screenplayEngine/continuityMatrix";
 
 /**
  * Story persistence — GitHub issue #12, reference implementation of the
@@ -326,6 +328,25 @@ export interface Story {
    * sceneDensity.ts's own DEFAULT_SCENE_DENSITY_DISMISSAL.
    */
   p4SceneDensityDismissal?: { under: boolean; over: boolean } | null;
+  /**
+   * Project 5's Continuity Matrix & Tracking Roster (issue #97) - the
+   * Knowledge/Secrets Ledger, Physical/Timeline Tracking, and Open
+   * Loops state that Phase 2 (Scene Drafting, issue #94) checks before
+   * a scene drafts and Phase 4 (Revision & Canonization, issue #96)
+   * updates when a scene is Confirmed. Whole-object replace, same
+   * convention as p4SceneDensityDismissal above - this app has no
+   * concurrent-multi-writer case per story. Optional/nullable since
+   * Stories created before this field existed won't have it in
+   * Firestore; absent/null is treated identically to
+   * `createEmptyContinuityMatrix()` by `normalizeP5ContinuityMatrix`.
+   */
+  p5ContinuityMatrix?: ContinuityMatrix | null;
+}
+
+/** Fills in defaults for a Story doc written before p5ContinuityMatrix
+ * existed - same reasoning as normalizeP3/normalizeP4. */
+export function normalizeP5ContinuityMatrix(matrix: ContinuityMatrix | null | undefined): ContinuityMatrix {
+  return matrix ?? createEmptyContinuityMatrix();
 }
 
 export interface StoryMessage {
@@ -622,6 +643,14 @@ export async function setP4SceneDensityDismissal(
   await storiesCollection()
     .doc(storyId)
     .update({ p4SceneDensityDismissal: dismissal, updatedAt: new Date().toISOString() });
+}
+
+/** Records Project 5's Continuity Matrix & Tracking Roster (issue #97) -
+ * whole-object replace, same convention as setP4SceneDensityDismissal. */
+export async function setP5ContinuityMatrix(storyId: string, matrix: ContinuityMatrix): Promise<void> {
+  await storiesCollection()
+    .doc(storyId)
+    .update({ p5ContinuityMatrix: matrix, updatedAt: new Date().toISOString() });
 }
 
 /** Records or clears Project 2's pending Story Foundation conflict (issue #30); pass null to clear once resolved. */
