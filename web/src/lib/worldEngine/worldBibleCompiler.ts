@@ -112,6 +112,28 @@ export const WorldBibleSynthesisSchema = z.object({
 
 export type WorldBibleSynthesisResult = z.infer<typeof WorldBibleSynthesisSchema>;
 
+/**
+ * Issue #131 - `master_world_pillars` is a bare array with no `.min(1)` in
+ * the base schema above, so a synthesis call that returns zero pillar
+ * entries passes validation cleanly even when pillars were adopted. The
+ * grounding prompt below always lists the adopted pillars (Decision 2), so
+ * when `pillarCount > 0`, a zero-length result is a sign the call went
+ * wrong, not a legitimate answer - adding `.min(1)` here makes
+ * `extractTurn`'s retry loop re-attempt it. Deliberately NOT applied when
+ * `pillarCount === 0`: an empty array is the only correct response for a
+ * story with no adopted pillars yet (`p3.pillars` is `null` or `[]`, both
+ * normalized to `[]` by `normalizeP3` - see storyStore.ts), and an
+ * unconditional `.min(1)` would retry-loop that legitimate case to a hard
+ * `TurnValidationError` on every zero-pillar compile.
+ */
+export function buildWorldBibleSynthesisSchema(pillarCount: number): z.ZodType<WorldBibleSynthesisResult> {
+  return pillarCount > 0
+    ? WorldBibleSynthesisSchema.extend({
+        master_world_pillars: z.array(WorldBiblePillarSummarySchema).min(1),
+      })
+    : WorldBibleSynthesisSchema;
+}
+
 const EMIT_WORLD_BIBLE_SYNTHESIS_TOOL: Anthropic.Tool = {
   name: "emit_world_bible_synthesis",
   description:
@@ -258,7 +280,7 @@ export async function runWorldBibleSynthesis(
       },
     ],
     tool: EMIT_WORLD_BIBLE_SYNTHESIS_TOOL,
-    schema: WorldBibleSynthesisSchema,
+    schema: buildWorldBibleSynthesisSchema(pillars.length),
     maxTokens: 24000,
   });
 }

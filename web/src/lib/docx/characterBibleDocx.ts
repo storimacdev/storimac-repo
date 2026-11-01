@@ -1,5 +1,6 @@
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType } from "docx";
 import type { CharacterBibleEntry } from "@/lib/canonEngine/storyStore";
+import { stripXmlIllegalChars } from "./xmlSanitize";
 
 /**
  * Client-side .docx rendering of the compiled Character Bible - GitHub
@@ -12,7 +13,8 @@ import type { CharacterBibleEntry } from "@/lib/canonEngine/storyStore";
  */
 
 function docxValue(v: string): string {
-  return v === "" ? "—" : v;
+  const safe = stripXmlIllegalChars(v);
+  return safe === "" ? "—" : safe;
 }
 
 function fieldParagraph(label: string, value: string): Paragraph {
@@ -38,7 +40,15 @@ function relationshipsSection(rows: CharacterBibleEntry["ensemble_interconnectio
     children: ["With", "Dynamic", "Trust Trajectory", "Power Dynamic"].map((h) => cell(h, true)),
   });
   const dataRows = rows.map(
-    (r) => new TableRow({ children: [cell(r.with), cell(docxValue(r.dynamic)), cell(docxValue(r.trust_trajectory)), cell(docxValue(r.power_dynamic))] })
+    (r) =>
+      new TableRow({
+        children: [
+          cell(docxValue(r.with)),
+          cell(docxValue(r.dynamic)),
+          cell(docxValue(r.trust_trajectory)),
+          cell(docxValue(r.power_dynamic)),
+        ],
+      })
   );
   return [new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: [headerRow, ...dataRows] })];
 }
@@ -46,11 +56,15 @@ function relationshipsSection(rows: CharacterBibleEntry["ensemble_interconnectio
 function renderEntry(entry: CharacterBibleEntry): (Paragraph | Table)[] {
   const m = entry.metadata;
   return [
-    new Paragraph({ text: m.character_name, heading: HeadingLevel.HEADING_1 }),
+    new Paragraph({ text: docxValue(m.character_name), heading: HeadingLevel.HEADING_1 }),
     new Paragraph({
       children: [
         new TextRun({
-          text: `${m.story_role || "role not set"} · ${m.narrative_importance || "tier not set"} tier · ${m.development_depth || "depth not set"} depth · ${m.arc_type || "arc type not set"} · ${m.canon_status}`,
+          text: `${stripXmlIllegalChars(m.story_role) || "role not set"} · ${
+            stripXmlIllegalChars(m.narrative_importance) || "tier not set"
+          } tier · ${stripXmlIllegalChars(m.development_depth) || "depth not set"} depth · ${
+            stripXmlIllegalChars(m.arc_type) || "arc type not set"
+          } · ${docxValue(m.canon_status)}`,
           italics: true,
         }),
       ],
@@ -95,7 +109,12 @@ function renderEntry(entry: CharacterBibleEntry): (Paragraph | Table)[] {
     sectionHeading("Outstanding Character Questions"),
     ...(entry.outstanding_questions.length
       ? entry.outstanding_questions.map(
-          (q) => new Paragraph(`${q.item} (defer to: ${q.defer_to ?? "TBD"})${q.notes ? ` — ${q.notes}` : ""}`)
+          (q) =>
+            new Paragraph(
+              `${docxValue(q.item)} (defer to: ${q.defer_to ? docxValue(q.defer_to) : "TBD"})${
+                q.notes ? ` — ${docxValue(q.notes)}` : ""
+              }`
+            )
         )
       : [new Paragraph("None — everything resolved.")]),
   ];

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/session";
 import { errorResponse } from "@/lib/apiErrors";
 import { getMembership } from "@/lib/workspace/workspaceStore";
-import { getStory, getWorldBibleVersion, confirmWorldBibleVersion } from "@/lib/canonEngine/storyStore";
+import { getStory, getWorldBibleVersion, confirmWorldBibleVersion, normalizeP3 } from "@/lib/canonEngine/storyStore";
 import { lintWorldBibleDocument, lintWorldBibleMarkdown } from "@/lib/worldEngine/worldBibleLint";
 
 export const runtime = "nodejs";
@@ -41,6 +41,24 @@ export async function POST(
     const jsonLint = lintWorldBibleDocument(stored.json);
     const markdownLint = lintWorldBibleMarkdown(stored.markdown);
     const errors = [...jsonLint.errors, ...markdownLint.errors];
+
+    // Issue #131 - the structure-lint above only sees the document itself,
+    // not the story's live adopted-pillar count, so it can't catch a
+    // synthesis call that returned zero pillar entries despite pillars
+    // having been adopted. Cross-check the two counts here as a semantic
+    // (not purely structural) gate. Narrowly scoped to the exact failure
+    // described in #131 (stored count is 0 while adopted pillars exist)
+    // rather than any count mismatch, since the stored document is a
+    // point-in-time snapshot (issue #50 Decision 5) and the author may have
+    // legitimately adopted more pillars after this version was compiled.
+    const adoptedPillarCount = normalizeP3(story.p3).pillars?.length ?? 0;
+    const storedPillarCount = stored.json["4_master_world_pillars"].length;
+    if (adoptedPillarCount > 0 && storedPillarCount === 0) {
+      errors.push(
+        `Master World Pillars: this version lists 0 pillars, but the story has ${adoptedPillarCount} adopted pillar(s). Recompile the World Bible before confirming.`
+      );
+    }
+
     if (errors.length > 0) {
       return NextResponse.json({ errors }, { status: 422 });
     }

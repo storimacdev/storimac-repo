@@ -1,5 +1,6 @@
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType } from "docx";
 import type { WorldBibleDocument } from "@/lib/canonEngine/storyStore";
+import { stripXmlIllegalChars } from "./xmlSanitize";
 
 /**
  * Client-side .docx rendering of the compiled World Bible (issue #52).
@@ -10,7 +11,8 @@ import type { WorldBibleDocument } from "@/lib/canonEngine/storyStore";
  */
 
 function docxValue(v: string): string {
-  return v && v.trim() ? v : "—";
+  const safe = stripXmlIllegalChars(v);
+  return safe && safe.trim() ? safe : "—";
 }
 
 function fieldParagraph(label: string, value: string): Paragraph {
@@ -29,7 +31,7 @@ function pillarsSection(pillars: WorldBibleDocument["4_master_world_pillars"]): 
   }
   const result: Paragraph[] = [];
   for (const p of pillars) {
-    result.push(new Paragraph({ text: p.pillar, heading: HeadingLevel.HEADING_2 }));
+    result.push(new Paragraph({ text: docxValue(p.pillar), heading: HeadingLevel.HEADING_2 }));
     result.push(new Paragraph(docxValue(p.summary)));
   }
   return result;
@@ -41,7 +43,7 @@ function outstandingQuestionsSection(groups: WorldBibleDocument["13_outstanding_
   }
   const result: Paragraph[] = [];
   for (const g of groups) {
-    result.push(new Paragraph({ children: [new TextRun({ text: `${g.defer_to}:`, bold: true })] }));
+    result.push(new Paragraph({ children: [new TextRun({ text: `${docxValue(g.defer_to)}:`, bold: true })] }));
     for (const q of g.items) {
       result.push(new Paragraph(`${docxValue(q.item)}${q.notes ? ` — ${docxValue(q.notes)}` : ""}`));
     }
@@ -61,7 +63,9 @@ function referenceLogSection(refLog: WorldBibleDocument["14_cross_project_refere
     result.push(new Paragraph("Not yet available."));
   } else {
     for (const c of refLog.project_2) {
-      result.push(new Paragraph(`${docxValue(c.character_name)} — ${c.story_role} (${c.canon_status})`));
+      result.push(
+        new Paragraph(`${docxValue(c.character_name)} — ${docxValue(c.story_role)} (${docxValue(c.canon_status)})`)
+      );
     }
   }
   return result;
@@ -75,7 +79,10 @@ function versionHistoryTable(rows: WorldBibleDocument["15_version_history"]): Ta
     });
   const headerRow = new TableRow({ children: ["Version", "Date", "Summary of Changes"].map((h) => cell(h, true)) });
   const dataRows = rows.map(
-    (v) => new TableRow({ children: [cell(v.version), cell(v.date), cell(docxValue(v.summary_of_changes))] })
+    (v) =>
+      new TableRow({
+        children: [cell(docxValue(v.version)), cell(docxValue(v.date)), cell(docxValue(v.summary_of_changes))],
+      })
   );
   return new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: [headerRow, ...dataRows] });
 }
@@ -83,7 +90,7 @@ function versionHistoryTable(rows: WorldBibleDocument["15_version_history"]): Ta
 export async function generateWorldBibleDocxBlob(doc: WorldBibleDocument): Promise<Blob> {
   const m = doc["1_document_metadata"];
   const children: (Paragraph | Table)[] = [
-    new Paragraph({ text: `World Bible — ${m.working_title}`, heading: HeadingLevel.TITLE }),
+    new Paragraph({ text: `World Bible — ${docxValue(m.working_title)}`, heading: HeadingLevel.TITLE }),
 
     sectionHeading("1. Document Metadata"),
     fieldParagraph("Story ID", m.story_id),
