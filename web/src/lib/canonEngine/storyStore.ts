@@ -147,6 +147,17 @@ export interface P4State {
    * 4->5 transition. Never set back to false once true. */
   onboardingComplete: boolean;
   routing: RoutingState | null;
+  /** The turn-scoped "which of the 10 structural steps is the current
+   * focus of discussion" field (sp04 Section 8), persisted so a page
+   * reload mid-conversation doesn't lose it (issue #142 - previously
+   * tracked only in ArchitectureInterview.tsx's own React state, which
+   * reset to null on every reload even with an active, ongoing
+   * discussion). Mirrors the model's self-report verbatim, including
+   * back to null - unlike a `StructuralUnit`'s own `stepNumber`
+   * (stateLedger.ts), this is NOT "sticky"; it genuinely reflects
+   * whatever the most recent turn reported, since the author's focus
+   * can legitimately move away from any step entirely. */
+  activeStepNumber: number | null;
 }
 
 /** Fills in defaults for a Story doc written before P4 state existed -
@@ -155,6 +166,7 @@ export function normalizeP4(p4: P4State | null | undefined): P4State {
   return {
     onboardingComplete: false,
     routing: null,
+    activeStepNumber: null,
     ...p4,
   };
 }
@@ -572,6 +584,14 @@ export async function setP4Routing(storyId: string, routing: RoutingState | null
     .update({ "p4.routing": routing, updatedAt: new Date().toISOString() });
 }
 
+/** Persists the turn-scoped `active_step_number` (issue #142), written
+ * the same dotted-field-path way setP4Routing is. */
+export async function setP4ActiveStepNumber(storyId: string, activeStepNumber: number | null): Promise<void> {
+  await storiesCollection()
+    .doc(storyId)
+    .update({ "p4.activeStepNumber": activeStepNumber, updatedAt: new Date().toISOString() });
+}
+
 /** Whole-array-replace, matching setP3Pillars's exact precedent - the
  * live agent reports the full current state of the unit it touched
  * this turn; the route (Task 4) merges it into the existing array via
@@ -754,6 +774,22 @@ export interface P4CanonRevisionLogEntry {
   /** Present only for kind "canon_contradiction". */
   sourceProject?: "Project 1" | "Project 2" | "Project 3";
   contradictedRef?: string;
+  /** The model's own rationale for raising this conflict (issue #156 -
+   * the closest thing to a "resolution choice AND rationale" record the
+   * issue's own AC asks for; previously dropped entirely). Present only
+   * for kind "canon_contradiction" - "unit_regression" has no model
+   * explanation to carry, since the app itself (not the model) is what
+   * detects a status regression. */
+  explanation?: string;
+  /** The status the triggering turn requested (issue #156) - kept
+   * alongside `resolution` so a future reader can tell "Working was
+   * requested and accepted" apart from "Confirmed was requested but
+   * clamped," not just what the author ultimately chose. */
+  requestedStatus: CanonStatus;
+  /** A short excerpt of the triggering turn's proposed content (issue
+   * #156) - truncated, not the full text, so this log entry stays a
+   * lightweight record rather than a second copy of the unit ledger. */
+  contentExcerpt: string;
   resolution: "revert" | "accept_and_update" | "park";
   resolvedBy: string;
   ts: string;
@@ -767,6 +803,15 @@ function p4CanonRevisionLogCollection(storyId: string) {
 /** Appends a resolved conflict to Project 4's Canon Revision log (issue #64). */
 export async function appendP4CanonRevisionLog(storyId: string, entry: P4CanonRevisionLogEntry): Promise<void> {
   await p4CanonRevisionLogCollection(storyId).add(entry);
+}
+
+/** Reads back Project 4's Canon Revision log (issue #159) - mirrors
+ * listP3ConflictLog's exact shape. Previously write-only: nothing in
+ * the app ever called this, so an author/admin had no way to see the
+ * history of Canon Revision Path decisions for a story. */
+export async function listP4CanonRevisionLog(storyId: string): Promise<P4CanonRevisionLogEntry[]> {
+  const snap = await p4CanonRevisionLogCollection(storyId).orderBy("ts", "asc").get();
+  return snap.docs.map((d) => d.data() as P4CanonRevisionLogEntry);
 }
 
 /** Project 2's compiled, permanent Character Bible entries (issue #34,

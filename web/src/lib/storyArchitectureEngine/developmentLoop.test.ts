@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { checkSceneRegisterFormat, parseSceneRegisterEntry } from "./developmentLoop";
+import { checkSceneRegisterFormat, parseSceneRegisterEntry, checkStepNumberRequirement } from "./developmentLoop";
 
 /**
  * Coverage for issue #66 (Scene Register format checking) and issue #70
@@ -121,5 +121,30 @@ describe("parseSceneRegisterEntry", () => {
     expect(result.criticalBeatTags).toEqual([]);
     expect(result.criticalBeatTag).toBeNull();
     expect(result.paragraph).toBe("");
+  });
+});
+
+/**
+ * Coverage for issue #169 gap 1 ("never-set"): before checkStepNumberRequirement
+ * existed, nothing on the road to Confirmed required a non-null
+ * active_step_number, so a unit could reach Confirmed with
+ * stepNumber: null forever. Gates Confirmed only, mirroring
+ * evaluateCausalGate's own scope.
+ */
+describe("checkStepNumberRequirement", () => {
+  it("passes for non-Confirmed targets regardless of stepNumber", () => {
+    expect(checkStepNumberRequirement("Exploring", null)).toEqual({ ok: true });
+    expect(checkStepNumberRequirement("Working", null)).toEqual({ ok: true });
+    expect(checkStepNumberRequirement("Parked", null)).toEqual({ ok: true });
+  });
+
+  it("rejects Confirmed with a null stepNumber", () => {
+    const result = checkStepNumberRequirement("Confirmed", null);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("no structural step attached yet");
+  });
+
+  it("passes Confirmed when stepNumber is a real number", () => {
+    expect(checkStepNumberRequirement("Confirmed", 3)).toEqual({ ok: true });
   });
 });

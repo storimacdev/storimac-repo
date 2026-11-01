@@ -324,9 +324,18 @@ export interface IngestedCanon {
  * structured object plus every gap found (FR-1.5 - canon is never
  * silently invented). Read-only: never writes to any Story field or any
  * project's own canon collections.
+ *
+ * `knownStory` (issue #140 final whole-branch review finding) - lets a
+ * caller that already fetched the Story this same request (e.g.
+ * architecture-chat/route.ts, which needs it for membership checks
+ * before ingestCanon is ever called) hand it in directly instead of
+ * paying for a second, redundant Firestore read of the exact same
+ * document a few lines later. Still fetches it here when omitted, so
+ * every other existing caller (screenplayArchitectureCompiler.ts) keeps
+ * working unchanged.
  */
-export async function ingestCanon(storyId: string): Promise<IngestedCanon> {
-  const story = await getStory(storyId);
+export async function ingestCanon(storyId: string, knownStory?: Story): Promise<IngestedCanon> {
+  const story = knownStory ?? (await getStory(storyId));
   if (!story) {
     throw new StoryAccessError(`Story "${storyId}" not found.`);
   }
