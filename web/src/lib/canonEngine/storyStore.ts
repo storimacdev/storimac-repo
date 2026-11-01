@@ -1175,7 +1175,11 @@ export interface ScreenplayArchitectureDocument {
     screenplay_architecture_version: string;
     working_title: string;
     date: string;
-    status: "Compiled";
+    status: "Compiled" | "Draft";
+    /** Issue #71 - null for every full compile; a human-readable Act
+     * label ("Act 1 (THE THESIS) - partial compile, draft only, not
+     * final canon") for a partial-compile draft. */
+    scope: string | null;
     author: string;
     diagnosed_complexity: string;
     projected_scene_count: number;
@@ -1278,6 +1282,75 @@ export async function saveScreenplayArchitectureVersion(
   stored: StoredScreenplayArchitectureVersion
 ): Promise<void> {
   await p4ArchitectureVersionsCollection(storyId).doc(String(stored.version)).set(stored);
+}
+
+/**
+ * Issue #71's partial/incremental compilation - a DRAFT of one named
+ * Act, fully separate from `p4ArchitectureVersions`/its version
+ * counter above ("versioned as drafts, not final canon" is read
+ * literally - see docs/superpowers/specs/2026-10-16-p4-partial-
+ * compile-design.md §3). Only one scope kind exists today (a single
+ * framework Act), but `scope` is already a discriminated union so a
+ * future kind can be added without a breaking change.
+ */
+export interface ScreenplayArchitectureDraftScope {
+  type: "act";
+  act_id: string;
+}
+
+export interface StoredScreenplayArchitectureDraft {
+  draftId: string;
+  /** `act-${act_id}` - also the Firestore path segment below, so a
+   * draft's own history query needs no composite index. */
+  scopeKey: string;
+  scope: ScreenplayArchitectureDraftScope;
+  /** Increments independently PER SCOPE - drafting Act 1 five times
+   * never advances Act 2A's own counter. Never shared with, and never
+   * read by, the full document's `version` counter above. */
+  draftVersion: number;
+  date: string;
+  summaryOfChanges: string;
+  json: ScreenplayArchitectureDocument;
+  markdown: string;
+  unitsSnapshot: Record<string, { status: string; content: unknown }>;
+  createdAt: string;
+}
+
+/** `stories/{storyId}/p4ArchitectureDrafts/{scopeKey}/items/{draftVersion}` -
+ * a nested subcollection per scope, not a flat collection filtered by
+ * a `scopeKey` field, so listing/getting one scope's own draft history
+ * is a plain single-field `orderBy` query needing no composite
+ * Firestore index. */
+function p4ArchitectureDraftItemsCollection(storyId: string, scopeKey: string) {
+  return storiesCollection().doc(storyId).collection("p4ArchitectureDrafts").doc(scopeKey).collection("items");
+}
+
+export async function listScreenplayArchitectureDrafts(
+  storyId: string,
+  scopeKey: string
+): Promise<StoredScreenplayArchitectureDraft[]> {
+  const snap = await p4ArchitectureDraftItemsCollection(storyId, scopeKey).orderBy("draftVersion", "asc").get();
+  return snap.docs.map((d) => d.data() as StoredScreenplayArchitectureDraft);
+}
+
+export async function getLatestScreenplayArchitectureDraft(
+  storyId: string,
+  scopeKey: string
+): Promise<StoredScreenplayArchitectureDraft | null> {
+  const snap = await p4ArchitectureDraftItemsCollection(storyId, scopeKey).orderBy("draftVersion", "desc").limit(1).get();
+  return snap.empty ? null : (snap.docs[0].data() as StoredScreenplayArchitectureDraft);
+}
+
+/** Never overwrites a prior draft - `stored.draftVersion` must already
+ * be `(latest?.draftVersion ?? 0) + 1` for this SAME scopeKey, computed
+ * by the caller (screenplayArchitectureCompiler.ts's
+ * generatePartialScreenplayArchitectureDraft), same division of
+ * responsibility as saveScreenplayArchitectureVersion's own. */
+export async function saveScreenplayArchitectureDraft(
+  storyId: string,
+  stored: StoredScreenplayArchitectureDraft
+): Promise<void> {
+  await p4ArchitectureDraftItemsCollection(storyId, stored.scopeKey).doc(String(stored.draftVersion)).set(stored);
 }
 
 /** Appends an author-type re-assessment (issue #8 calls this) without clobbering prior history. */

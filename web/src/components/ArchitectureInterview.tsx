@@ -31,6 +31,24 @@ type ThematicAnchorFinding = { id: string; status: "pass" | "flag"; detail: stri
 type ThematicAnchorAudit = { findings: ThematicAnchorFinding[]; gapFound: boolean };
 type PreCompilationAudit = { findings: ThematicAnchorFinding[]; failed: boolean };
 
+// Issue #71 - the partial-compile draft route's response shape.
+type DraftCompiled = {
+  draftId: string;
+  scopeKey: string;
+  scope: { type: "act"; act_id: string };
+  draftVersion: number;
+  date: string;
+  markdown: string;
+  outstandingCount: number;
+};
+
+const DRAFT_ACTS: { id: "1" | "2A" | "2B" | "3"; label: string }[] = [
+  { id: "1", label: "Act 1 - THE THESIS" },
+  { id: "2A", label: "Act 2A - THE INVERSION" },
+  { id: "2B", label: "Act 2B - THE DESCENT" },
+  { id: "3", label: "Act 3 - THE SYNTHESIS" },
+];
+
 type StructuralVectorOption = {
   content: string;
   pacing_impact: string;
@@ -99,6 +117,13 @@ export default function ArchitectureInterview() {
   const [docxGenerating, setDocxGenerating] = useState(false);
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const [preCompilationAudit, setPreCompilationAudit] = useState<PreCompilationAudit | null>(null);
+  // Issue #71 - partial/incremental compilation. Fully independent of
+  // the full-compile state above: a draft never touches `compiled`,
+  // `thematicAnchorAudit`, or `preCompilationAudit`.
+  const [draftActId, setDraftActId] = useState<"1" | "2A" | "2B" | "3">("1");
+  const [draftCompiling, setDraftCompiling] = useState(false);
+  const [draftCompiled, setDraftCompiled] = useState<DraftCompiled | null>(null);
+  const [draftError, setDraftError] = useState<string | null>(null);
 
   // Resume/hydration on mount (issue #111, final whole-branch review
   // finding I4/R1) - mirrors WorldInterview.tsx's own resume effect
@@ -367,6 +392,30 @@ export default function ArchitectureInterview() {
     }
   }
 
+  async function compileDraft() {
+    if (!canvasId || draftCompiling) return;
+    setDraftCompiling(true);
+    setDraftError(null);
+    try {
+      const res = await fetch("/api/architecture-chat/document/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storyId: canvasId, actId: draftActId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setDraftError(data.error ?? "Draft compile failed.");
+        setDraftCompiled(null);
+        return;
+      }
+      setDraftCompiled(data);
+    } catch {
+      setDraftError("Couldn't reach the server.");
+    } finally {
+      setDraftCompiling(false);
+    }
+  }
+
   if (!workspaceId || !canvasId) {
     return (
       <div className="flex min-h-dvh items-center justify-center p-4 bg-neutral-950 text-neutral-100">
@@ -420,6 +469,27 @@ export default function ArchitectureInterview() {
             className="rounded-lg border border-purple-500/50 bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-purple-200 hover:bg-purple-900/40 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {compiling ? "Compiling…" : "Compile"}
+          </button>
+          {/* Issue #71 - partial/incremental compilation: a fully
+              separate action from "Compile" above, producing a
+              versioned DRAFT of one named Act, never final canon. */}
+          <select
+            value={draftActId}
+            onChange={(e) => setDraftActId(e.target.value as "1" | "2A" | "2B" | "3")}
+            className="rounded-lg border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-200"
+          >
+            {DRAFT_ACTS.map((act) => (
+              <option key={act.id} value={act.id}>
+                {act.label}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={() => compileDraft()}
+            disabled={draftCompiling}
+            className="rounded-lg border border-cyan-500/50 bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:bg-cyan-900/40 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {draftCompiling ? "Compiling Draft…" : "Compile Draft"}
           </button>
           <UserMenu />
         </div>
@@ -594,6 +664,28 @@ export default function ArchitectureInterview() {
         </div>
       )}
       {compileError && <p className="border-b border-red-500/30 px-6 py-2 text-xs text-red-400">{compileError}</p>}
+
+      {draftCompiled && (
+        <div className="border-b border-cyan-500/30 bg-cyan-950/20 px-6 py-3 text-xs text-cyan-200">
+          <p className="mb-2 font-semibold">
+            Draft - Act {draftCompiled.scope.act_id} (draft-v{draftCompiled.draftVersion}) - not final canon.{" "}
+            {draftCompiled.outstandingCount} outstanding item{draftCompiled.outstandingCount === 1 ? "" : "s"} in scope.
+          </p>
+          <button
+            onClick={() =>
+              downloadText(
+                `screenplay-architecture-draft-${draftCompiled.scopeKey}-v${draftCompiled.draftVersion}.md`,
+                draftCompiled.markdown,
+                "text/markdown"
+              )
+            }
+            className="rounded-lg border border-cyan-500/50 bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:bg-cyan-900/40"
+          >
+            Download draft .md
+          </button>
+        </div>
+      )}
+      {draftError && <p className="border-b border-red-500/30 px-6 py-2 text-xs text-red-400">{draftError}</p>}
 
       <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-6 py-6">
         {!resuming && <ArchitectureLedgerPanel storyId={canvasId} refreshToken={messages.length} />}
