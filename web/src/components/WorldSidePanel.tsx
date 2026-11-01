@@ -1,10 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { CANON_STATUS_BADGE_STYLES, type CanonBadgeStatus } from "@/lib/canonEngine/statusBadge";
 import { WORLD_STAGE_NAMES } from "@/lib/worldEngine/worldTurnSchema";
-import DependencyGraphView from "./DependencyGraphView";
 import type { DependencyGraphNode, DependencyGraphEdge } from "@/lib/worldEngine/dependencyGraphLayout";
+
+// issue #136 finding 1: the @xyflow/react chunk (~494 KB) was loading
+// eagerly on every /world-bible visit via a static import, even though
+// "Graph" isn't the default view and this is the lowest-priority stretch
+// feature in the P3 backlog. Lazy-load it so the cost is deferred to the
+// first "Graph" toggle click. ssr:false since react-flow measures the
+// DOM and has no meaningful server-rendered output anyway.
+const DependencyGraphView = dynamic(() => import("./DependencyGraphView"), { ssr: false });
 
 interface ApiWorldEntryValue {
   name: string;
@@ -24,6 +32,19 @@ interface ApiWorldEntry {
   dependsOn: string[];
 }
 
+/** A pillar-to-pillar dependency (issue #122) - read from
+ * GET /api/world-chat/canon-status, which lists every pillar
+ * CanonElement (WORLD_ELEMENTS_COLLECTION) and resolves both its own id
+ * and its `depends_on` ids back to display names server-side (mirroring
+ * the reverse-lookup pattern that route's PATCH handler already uses for
+ * the Dependency Review gate). */
+interface ApiPillarDependency {
+  elementId: string;
+  name: string;
+  status: CanonBadgeStatus;
+  dependsOn: { elementId: string; name: string }[];
+}
+
 export interface WorldSidePanelProps {
   storyId: string | null;
   currentStage: number | null;
@@ -31,13 +52,32 @@ export interface WorldSidePanelProps {
   refreshToken: number;
 }
 
+/** Dedupes a list by `elementId` (issue #136 finding 2, pillar side) -
+ * `Array.from(new Set(...))` works for the plain-string `dependsOn` ids
+ * entries use, but pillar dependencies carry `{elementId, name}` objects,
+ * so this does the equivalent keyed on `elementId`. */
+function dedupeByElementId<T extends { elementId: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  const result: T[] = [];
+  for (const item of items) {
+    if (seen.has(item.elementId)) continue;
+    seen.add(item.elementId);
+    result.push(item);
+  }
+  return result;
+}
+
 export default function WorldSidePanel({ storyId, currentStage, activePillar, refreshToken }: WorldSidePanelProps) {
   const [entries, setEntries] = useState<ApiWorldEntry[]>([]);
+  const [pillars, setPillars] = useState<ApiPillarDependency[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [graphView, setGraphView] = useState(false);
+  const [pillarGraphView, setPillarGraphView] = useState(false);
   const [highlightedEntryId, setHighlightedEntryId] = useState<string | null>(null);
+  const [highlightedPillarId, setHighlightedPillarId] = useState<string | null>(null);
   const entryRefs = useRef<Map<string, HTMLLIElement>>(new Map());
+  const pillarRefs = useRef<Map<string, HTMLLIElement>>(new Map());
   // Tracks the most recently *started* request, so that whichever call
   // began last always wins regardless of network resolve order or which
   // caller (the mount/refreshToken effect, or the Refresh button) started
@@ -63,6 +103,20 @@ export default function WorldSidePanel({ storyId, currentStage, activePillar, re
     } finally {
       if (requestId === requestIdRef.current) setLoading(false);
     }
+
+    // Pillar-to-pillar dependencies (issue #122) - a separate read path
+    // against WORLD_ELEMENTS_COLLECTION. Kept in its own try/catch so a
+    // failure here never blocks the Canon Registry/entries above from
+    // loading; it just leaves the Pillar Dependencies section empty,
+    // same as "no dependencies recorded yet."
+    try {
+      const pRes = await fetch(`/api/world-chat/canon-status?storyId=${encodeURIComponent(storyId)}`);
+      const pData = await pRes.json();
+      if (requestId !== requestIdRef.current) return;
+      setPillars(pRes.ok && Array.isArray(pData.pillars) ? pData.pillars : []);
+    } catch {
+      if (requestId === requestIdRef.current) setPillars([]);
+    }
   }
 
   useEffect(() => {
@@ -79,24 +133,97 @@ export default function WorldSidePanel({ storyId, currentStage, activePillar, re
     }, 1500);
   }
 
-  const entriesById = new Map(entries.map((e) => [e.entryId, e]));
+  function handlePillarNodeClick(elementId: string) {
+    pillarRefs.current.get(elementId)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    setHighlightedPillarId(elementId);
+    setTimeout(() => {
+      setHighlightedPillarId((cur) => (cur === elementId ? null : cur));
+    }, 1500);
+  }
+
+  const entriesById = useMemo(() => new Map(entries.map((e) => [e.entryId, e])), [entries]);
   const outstandingQuestions = entries.flatMap((e) =>
     (e.value.outstandingQuestions ?? []).map((q) => ({ entryName: e.value.name, item: q.item, notes: q.notes }))
   );
-  const entriesWithDeps = entries.filter((e) => (e.dependsOn ?? []).length > 0);
 
-  const graphNodeIds = new Set<string>();
-  for (const e of entriesWithDeps) {
-    graphNodeIds.add(e.entryId);
-    for (const depId of e.dependsOn ?? []) graphNodeIds.add(depId);
-  }
-  const graphNodes: DependencyGraphNode[] = Array.from(graphNodeIds)
-    .map((id) => entriesById.get(id))
-    .filter((e): e is ApiWorldEntry => e !== undefined)
-    .map((e) => ({ id: e.entryId, name: e.value.name, status: e.status }));
-  const graphEdges: DependencyGraphEdge[] = entriesWithDeps.flatMap((e) =>
-    (e.dependsOn ?? []).map((depId) => ({ from: e.entryId, to: depId }))
+  // issue #136 finding 2: dedupe each entry's dependsOn before building
+  // edges, so a duplicated id doesn't produce colliding React keys
+  // (`${from}->${to}`) or a redundant "depends on: Y, Y" in the List view.
+  const entriesWithDeps = useMemo(
+    () =>
+      entries
+        .map((e) => ({ ...e, dependsOn: Array.from(new Set(e.dependsOn ?? [])) }))
+        .filter((e) => e.dependsOn.length > 0),
+    [entries]
   );
+
+  // issue #136 finding 5: wrap graphNodes/graphEdges construction in
+  // useMemo([entries]) so DependencyGraphView's own internal
+  // useMemo([nodes, edges]) sees stable array identities across
+  // unrelated WorldSidePanel re-renders (e.g. the highlight-on/off timer)
+  // instead of recomputing React Flow's layout and store every time.
+  const { graphNodes, graphEdges } = useMemo(() => {
+    const byId = new Map(entries.map((e) => [e.entryId, e]));
+    const nodeIds = new Set<string>();
+    for (const e of entriesWithDeps) {
+      nodeIds.add(e.entryId);
+      for (const depId of e.dependsOn) nodeIds.add(depId);
+    }
+    const nodes: DependencyGraphNode[] = Array.from(nodeIds)
+      .map((id) => byId.get(id))
+      .filter((e): e is ApiWorldEntry => e !== undefined)
+      .map((e) => {
+        const deduped = Array.from(new Set(e.dependsOn ?? []));
+        return {
+          id: e.entryId,
+          name: e.value.name,
+          status: e.status,
+          // issue #136 finding 8: flag an entry whose dependsOn targets
+          // were all filtered out as stale/missing, so it doesn't render
+          // as an unexplained orphan in the graph.
+          hasMissingDependency: deduped.some((depId) => !byId.has(depId)),
+        };
+      });
+    const edges: DependencyGraphEdge[] = entriesWithDeps.flatMap((e) =>
+      e.dependsOn.map((depId) => ({ from: e.entryId, to: depId }))
+    );
+    return { graphNodes: nodes, graphEdges: edges };
+  }, [entries, entriesWithDeps]);
+
+  // Same dedupe/orphan-flagging treatment for pillar-to-pillar
+  // dependencies (issue #122 + #136 findings 2/8, pillar side).
+  const pillarsWithDeps = useMemo(
+    () =>
+      pillars
+        .map((p) => ({ ...p, dependsOn: dedupeByElementId(p.dependsOn ?? []) }))
+        .filter((p) => p.dependsOn.length > 0),
+    [pillars]
+  );
+
+  const { pillarGraphNodes, pillarGraphEdges } = useMemo(() => {
+    const byId = new Map(pillars.map((p) => [p.elementId, p]));
+    const nodeIds = new Set<string>();
+    for (const p of pillarsWithDeps) {
+      nodeIds.add(p.elementId);
+      for (const dep of p.dependsOn) nodeIds.add(dep.elementId);
+    }
+    const nodes: DependencyGraphNode[] = Array.from(nodeIds)
+      .map((id) => byId.get(id))
+      .filter((p): p is ApiPillarDependency => p !== undefined)
+      .map((p) => {
+        const deduped = dedupeByElementId(p.dependsOn ?? []);
+        return {
+          id: p.elementId,
+          name: p.name,
+          status: p.status,
+          hasMissingDependency: deduped.some((dep) => !byId.has(dep.elementId)),
+        };
+      });
+    const edges: DependencyGraphEdge[] = pillarsWithDeps.flatMap((p) =>
+      p.dependsOn.map((dep) => ({ from: p.elementId, to: dep.elementId }))
+    );
+    return { pillarGraphNodes: nodes, pillarGraphEdges: edges };
+  }, [pillars, pillarsWithDeps]);
 
   return (
     <div
@@ -177,13 +304,14 @@ export default function WorldSidePanel({ storyId, currentStage, activePillar, re
         )}
       </div>
 
-      <div>
+      <div className="mb-4">
         <div className="mb-2 flex items-center justify-between">
           <p className="text-[11px] uppercase tracking-widest text-neutral-500">Dependency Graph</p>
           {entriesWithDeps.length > 0 && (
             <div className="flex gap-1">
               <button
                 onClick={() => setGraphView(false)}
+                aria-pressed={!graphView}
                 className={`rounded px-2 py-0.5 text-[10px] font-semibold ${
                   !graphView ? "bg-red-500/20 text-red-200" : "text-neutral-500 hover:text-neutral-300"
                 }`}
@@ -192,6 +320,7 @@ export default function WorldSidePanel({ storyId, currentStage, activePillar, re
               </button>
               <button
                 onClick={() => setGraphView(true)}
+                aria-pressed={graphView}
                 className={`rounded px-2 py-0.5 text-[10px] font-semibold ${
                   graphView ? "bg-red-500/20 text-red-200" : "text-neutral-500 hover:text-neutral-300"
                 }`}
@@ -210,7 +339,62 @@ export default function WorldSidePanel({ storyId, currentStage, activePillar, re
             {entriesWithDeps.map((e) => (
               <li key={e.entryId} className="text-xs text-neutral-300">
                 <span className="font-semibold text-neutral-200">{e.value.name}</span> depends on:{" "}
-                {(e.dependsOn ?? []).map((depId) => entriesById.get(depId)?.value.name ?? depId).join(", ")}
+                {e.dependsOn.map((depId) => entriesById.get(depId)?.value.name ?? depId).join(", ")}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          {/* Pillar-to-pillar dependencies (issue #48) were previously
+              never surfaced here - this panel is titled "Dependency
+              Graph" but, until issue #122, only ever showed entry-to-entry
+              cross-references. This section closes that gap. */}
+          <p className="text-[11px] uppercase tracking-widest text-neutral-500">Pillar Dependencies</p>
+          {pillarsWithDeps.length > 0 && (
+            <div className="flex gap-1">
+              <button
+                onClick={() => setPillarGraphView(false)}
+                aria-pressed={!pillarGraphView}
+                className={`rounded px-2 py-0.5 text-[10px] font-semibold ${
+                  !pillarGraphView ? "bg-red-500/20 text-red-200" : "text-neutral-500 hover:text-neutral-300"
+                }`}
+              >
+                List
+              </button>
+              <button
+                onClick={() => setPillarGraphView(true)}
+                aria-pressed={pillarGraphView}
+                className={`rounded px-2 py-0.5 text-[10px] font-semibold ${
+                  pillarGraphView ? "bg-red-500/20 text-red-200" : "text-neutral-500 hover:text-neutral-300"
+                }`}
+              >
+                Graph
+              </button>
+            </div>
+          )}
+        </div>
+        {pillarsWithDeps.length === 0 ? (
+          <p className="text-xs text-neutral-500">No pillar dependencies recorded yet.</p>
+        ) : pillarGraphView ? (
+          <DependencyGraphView nodes={pillarGraphNodes} edges={pillarGraphEdges} onNodeClick={handlePillarNodeClick} />
+        ) : (
+          <ul className="space-y-1.5">
+            {pillarsWithDeps.map((p) => (
+              <li
+                key={p.elementId}
+                ref={(el) => {
+                  if (el) pillarRefs.current.set(p.elementId, el);
+                  else pillarRefs.current.delete(p.elementId);
+                }}
+                className={`rounded px-1 text-xs text-neutral-300 transition-colors duration-500 ${
+                  highlightedPillarId === p.elementId ? "bg-red-500/20" : ""
+                }`}
+              >
+                <span className="font-semibold text-neutral-200">{p.name}</span> depends on:{" "}
+                {p.dependsOn.map((dep) => dep.name).join(", ")}
               </li>
             ))}
           </ul>
