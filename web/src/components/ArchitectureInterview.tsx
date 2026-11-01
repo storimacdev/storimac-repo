@@ -9,6 +9,7 @@ import type { P4CascadeReviewEntry } from "@/lib/storyArchitectureEngine/canonRe
 import Link from "next/link";
 import UserMenu from "@/components/UserMenu";
 import { useScrollToLatest } from "@/lib/useScrollToLatest";
+import ArchitectureLedgerPanel from "@/components/ArchitectureLedgerPanel";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 
@@ -573,6 +574,7 @@ export default function ArchitectureInterview() {
       {compileError && <p className="border-b border-red-500/30 px-6 py-2 text-xs text-red-400">{compileError}</p>}
 
       <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-6 py-6">
+        {!resuming && <ArchitectureLedgerPanel storyId={canvasId} refreshToken={messages.length} />}
         {resuming && (
           <div className="mb-4 text-left">
             <p className="inline-block max-w-2xl rounded-xl bg-neutral-900 px-4 py-2 text-sm text-neutral-400">

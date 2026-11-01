@@ -1,5 +1,10 @@
 import { listDependents, WORLD_ELEMENTS_COLLECTION } from "@/lib/canonEngine/canonStore";
-import { appendP4CanonRevisionLog, appendOutstandingQuestions, type P4PendingConflict } from "@/lib/canonEngine/storyStore";
+import {
+  appendP4CanonRevisionLog,
+  appendP4ContinuityLedgerEntry,
+  appendOutstandingQuestions,
+  type P4PendingConflict,
+} from "@/lib/canonEngine/storyStore";
 import {
   createUnit,
   findUnit,
@@ -98,6 +103,46 @@ export interface ResolveP4ConflictResult {
 }
 
 /**
+ * Structural-downstream cascade (issue #72) - every OTHER unit whose
+ * stepNumber is strictly later than the affected unit's own stepNumber.
+ * A screenplay is sequential: a scene built at a later step was very
+ * plausibly written assuming whatever was true at an earlier step still
+ * holds, so this applies identically to both Canon Revision Path
+ * trigger kinds (unlike the same-canon-ref scan below, which only makes
+ * sense for canon_contradiction). One-hop only (direct "later step"
+ * units, not a transitive walk) - see the design spec's "Decision:
+ * cascade-tracing scope" section for why. Returns [] (not null) when
+ * the affected unit's own stepNumber is null - nothing to compare
+ * against, never treated as "no downstream units exist."
+ */
+export function computeStructuralDownstream(units: StructuralUnit[], affectedUnitId: string): P4CascadeReviewEntry[] {
+  const affected = findUnit(units, affectedUnitId);
+  if (!affected || affected.stepNumber === null) return [];
+  const affectedStepNumber = affected.stepNumber;
+  return units
+    .filter((u) => u.unitId !== affectedUnitId && u.stepNumber !== null && u.stepNumber > affectedStepNumber)
+    .map((u) => ({
+      id: u.unitId,
+      description: `Built at a later structural step (Step ${u.stepNumber}) than the unit that just changed - review for continuity.`,
+    }));
+}
+
+/** Merges two or more cascade-review lists, de-duplicating by id (a unit
+ * can legitimately appear in both the same-ref-citer scan and the
+ * structural-downstream scan) - the first occurrence's description
+ * wins, matching Array.from(new Set(...))'s own existing "first write
+ * wins" convention this file already uses for canonRefs. */
+function mergeCascadeReview(...lists: P4CascadeReviewEntry[][]): P4CascadeReviewEntry[] {
+  const byId = new Map<string, P4CascadeReviewEntry>();
+  for (const list of lists) {
+    for (const entry of list) {
+      if (!byId.has(entry.id)) byId.set(entry.id, entry);
+    }
+  }
+  return Array.from(byId.values());
+}
+
+/**
  * Applies the author's resolution choice. "accept_and_update" bypasses
  * attemptStatusTransition/evaluateCausalGate entirely and writes the
  * unit directly via stateLedger.ts's plain updaters - the author has
@@ -109,8 +154,15 @@ export interface ResolveP4ConflictResult {
  * dependents list via canonStore.ts's existing listDependents, whose
  * own comment already names this exact future use. Also scans P4's
  * OWN units for any other unit citing the same contradicted
- * reference - a cheap, P4-internal cascade check; a full cross-project
- * cascade is issue #72's scope, not this one's.
+ * reference, and (issue #72) every other unit built at a later
+ * structural step than the affected one (computeStructuralDownstream) -
+ * see docs/superpowers/specs/2026-10-16-p4-canon-revision-cascade-ledger-design.md
+ * for why a cross-project dependency graph for Project 1/2 specifically
+ * was investigated and rejected rather than built here. Every
+ * resolution, plus any Confirmed transition it produces, is also
+ * recorded in the Dependency & Continuity Ledger
+ * (appendP4ContinuityLedgerEntry) - issue #72's "queryable/viewable by
+ * the author" requirement.
  */
 export async function resolveP4Conflict(params: ResolveP4ConflictParams): Promise<ResolveP4ConflictResult> {
   const { storyId, conflict, resolution, turnId, resolvedBy, units, activeStepNumber } = params;
@@ -179,6 +231,11 @@ export async function resolveP4Conflict(params: ResolveP4ConflictParams): Promis
     const finalUnit = setUnitStatus(withContent, finalStatus);
     updatedUnits = upsertUnit(units, finalUnit);
 
+    // Structural-downstream cascade (issue #72) - applies to BOTH
+    // trigger kinds, computed unconditionally here rather than only
+    // inside the canon_contradiction branch below.
+    const structuralDownstream = computeStructuralDownstream(updatedUnits, conflict.unitId);
+
     if (conflict.kind === "canon_contradiction") {
       const p4Entries: P4CascadeReviewEntry[] = updatedUnits
         .filter((u) => u.unitId !== conflict.unitId && u.canonRefs.includes(conflict.contradictedRef))
@@ -192,7 +249,13 @@ export async function resolveP4Conflict(params: ResolveP4ConflictParams): Promis
           .map((e) => ({ id: e.element_id, description: "Confirmed World Bible element that currently depends on this pillar." }));
       }
 
-      cascadeReview = [...p3Entries, ...p4Entries];
+      cascadeReview = mergeCascadeReview(p3Entries, p4Entries, structuralDownstream);
+    } else {
+      // unit_regression (issue #72 - previously always null here): no
+      // contradictedRef exists to scan canonRefs/listDependents by, but
+      // the structural-downstream axis applies identically regardless
+      // of trigger kind.
+      cascadeReview = structuralDownstream;
     }
   }
   // "revert" needs no unit write beyond the log below - it keeps existing state untouched by definition.
@@ -260,6 +323,48 @@ export async function resolveP4Conflict(params: ResolveP4ConflictParams): Promis
     ts: new Date().toISOString(),
     turnId,
   });
+
+  // Dependency & Continuity Ledger (issue #72) - a durable, author-
+  // queryable record of this decision, additive to the log above (see
+  // the design spec for why these are two separate collections).
+  await appendP4ContinuityLedgerEntry(storyId, {
+    kind: "canon_revision",
+    unitId: conflict.unitId,
+    description:
+      conflict.kind === "unit_regression"
+        ? `Unit "${conflict.unitId}" attempted regression to ${conflict.requestedStatus}`
+        : `Unit "${conflict.unitId}" contradicted ${conflict.sourceProject} canon "${conflict.contradictedRef}"`,
+    resolution,
+    ...(conflict.kind === "canon_contradiction"
+      ? { sourceProject: conflict.sourceProject, contradictedRef: conflict.contradictedRef }
+      : {}),
+    ...(cascadeReview !== null ? { downstreamUnits: cascadeReview } : {}),
+    resolvedBy,
+    ts: new Date().toISOString(),
+    turnId,
+  });
+
+  // A separate, independently-true fact: this resolution may ALSO have
+  // just landed the unit on Confirmed (accept_and_update only - revert
+  // keeps prior state, park always lands on Parked). Logged as its own
+  // confirmed_transition entry rather than folded into the entry above,
+  // matching the design spec's "both facts get their own entry" call -
+  // only a genuine NEW arrival at Confirmed (the unit's status
+  // immediately before this resolution was not already Confirmed) is
+  // logged here.
+  if (resolution === "accept_and_update" && existing?.status !== "Confirmed") {
+    const resolvedUnit = findUnit(updatedUnits, conflict.unitId);
+    if (resolvedUnit?.status === "Confirmed") {
+      await appendP4ContinuityLedgerEntry(storyId, {
+        kind: "confirmed_transition",
+        unitId: conflict.unitId,
+        description: `Unit "${conflict.unitId}" confirmed via the Canon Revision Path (accept_and_update)`,
+        resolvedBy,
+        ts: new Date().toISOString(),
+        turnId,
+      });
+    }
+  }
 
   return { units: updatedUnits, cascadeReview };
 }
