@@ -55,21 +55,59 @@ function sharedWordCount(a: unknown, b: unknown): number {
  * itself Confirmed - this is the AC's "unresolved Dependency Review
  * items" line, made concrete as a live graph check (see this file's
  * header comment for why).
+ *
+ * `allEntries` (issue #125) - every World Entry regardless of status,
+ * the same list `route.ts` already fetches for the "World Entries So
+ * Far" grounding block - is used only to resolve display names and to
+ * tell apart two distinct situations `depends_on` can describe:
+ *   - the id names a real entry that just isn't Confirmed yet (a
+ *     genuine, resolvable Dependency Review item), vs.
+ *   - the id doesn't match any entry at all, which `depends_on` being
+ *     unvalidated model-authored free text (unlike the nearby
+ *     pillar-dependency write, which is checked against
+ *     `knownPillarSet`) means is likely a hallucinated or stale
+ *     reference rather than a real dependency.
+ * Reporting both identically, as raw ids, is what the issue flagged:
+ * the author can't tell "fix by confirming X" apart from "this
+ * reference may not even point at anything real."
  */
-export function checkDependencyCompleteness(confirmedEntries: CanonElement[]): Stage4AuditFinding[] {
+export function checkDependencyCompleteness(
+  confirmedEntries: CanonElement[],
+  allEntries: CanonElement[]
+): Stage4AuditFinding[] {
   const confirmedIds = new Set(confirmedEntries.map((e) => e.element_id));
+  const nameById = new Map<string, string>();
+  for (const entry of allEntries) {
+    const value = entry.value as WorldEntryValue | undefined;
+    nameById.set(entry.element_id, value?.name ?? entry.element_id);
+  }
+
   const findings: Stage4AuditFinding[] = [];
   for (const entry of confirmedEntries) {
     const value = entry.value as WorldEntryValue | undefined;
-    const unresolvedDeps = (entry.depends_on ?? []).filter((depId) => !confirmedIds.has(depId));
-    if (unresolvedDeps.length > 0) {
+    const deps = entry.depends_on ?? [];
+    const unconfirmed = deps.filter((depId) => nameById.has(depId) && !confirmedIds.has(depId));
+    const unknown = deps.filter((depId) => !nameById.has(depId));
+
+    if (unconfirmed.length > 0) {
+      const names = unconfirmed.map((depId) => nameById.get(depId) ?? depId);
       findings.push({
         id: `dependency-${entry.element_id}`,
         category: "dependency",
         status: "flag",
-        detail: `"${value?.name ?? entry.element_id}" depends on ${unresolvedDeps.length} entr${
-          unresolvedDeps.length > 1 ? "ies" : "y"
-        } that aren't Confirmed yet: ${unresolvedDeps.join(", ")}.`,
+        detail: `"${value?.name ?? entry.element_id}" depends on ${unconfirmed.length} entr${
+          unconfirmed.length > 1 ? "ies" : "y"
+        } that aren't Confirmed yet: ${names.join(", ")}.`,
+      });
+    }
+    if (unknown.length > 0) {
+      findings.push({
+        id: `dependency-unknown-${entry.element_id}`,
+        category: "dependency",
+        status: "flag",
+        detail: `"${value?.name ?? entry.element_id}" depends on ${unknown.length} id${
+          unknown.length > 1 ? "s" : ""
+        } that don't match any existing World Entry - this may be a hallucinated or stale dependency reference worth double-checking: ${unknown.join(", ")}.`,
       });
     }
   }
@@ -95,8 +133,25 @@ export function checkDependencyCompleteness(confirmedEntries: CanonElement[]): S
  */
 const REDUNDANCY_OVERLAP_THRESHOLD = 4;
 
+/**
+ * Caps how many individual redundancy findings this check ever returns
+ * (issue #123). The scan itself stays O(n^2) in same-category pairs
+ * (realistic per-story entry counts keep that cheap enough - see the
+ * comment above), but its *output* doesn't: without a cap, a dense
+ * same-category entry set (e.g. 50 entries sharing vocabulary) produces
+ * up to 1225 findings, all of which get re-injected into the system
+ * prompt's grounding block every turn until approval AND persisted on
+ * the Story document against Firestore's 1 MiB limit - unlike every
+ * other grounding block in `world-chat/route.ts`, which is linear and
+ * bounded by construction. Findings are ranked by overlap strength
+ * (strongest signal first) before truncating, so a cap never silently
+ * drops the most meaningful overlaps in favor of weaker ones that
+ * happened to be found earlier in iteration order.
+ */
+const MAX_REDUNDANCY_FINDINGS = 20;
+
 export function checkRedundancy(confirmedEntries: CanonElement[]): Stage4AuditFinding[] {
-  const findings: Stage4AuditFinding[] = [];
+  const scored: { finding: Stage4AuditFinding; overlap: number }[] = [];
   const byCategory = new Map<string, CanonElement[]>();
   for (const entry of confirmedEntries) {
     const value = entry.value as WorldEntryValue | undefined;
@@ -112,25 +167,45 @@ export function checkRedundancy(confirmedEntries: CanonElement[]): Stage4AuditFi
         const b = entries[j].value as WorldEntryValue | undefined;
         const overlap = sharedWordCount(a?.functionalDescription, b?.functionalDescription);
         if (overlap >= REDUNDANCY_OVERLAP_THRESHOLD) {
-          findings.push({
-            id: `redundancy-${entries[i].element_id}-${entries[j].element_id}`,
-            category: "redundancy",
-            status: "flag",
-            detail: `"${a?.name ?? entries[i].element_id}" and "${b?.name ?? entries[j].element_id}" (both ${category}) share ${overlap} concepts in their descriptions - consider whether they should be merged or more clearly differentiated.`,
+          scored.push({
+            overlap,
+            finding: {
+              id: `redundancy-${entries[i].element_id}-${entries[j].element_id}`,
+              category: "redundancy",
+              status: "flag",
+              detail: `"${a?.name ?? entries[i].element_id}" and "${b?.name ?? entries[j].element_id}" (both ${category}) share ${overlap} concepts in their descriptions - consider whether they should be merged or more clearly differentiated.`,
+            },
           });
         }
       }
     }
   }
-  if (findings.length === 0) {
-    findings.push({
-      id: "redundancy-none",
+
+  if (scored.length === 0) {
+    return [
+      {
+        id: "redundancy-none",
+        category: "redundancy",
+        status: "pass",
+        detail: "No significant overlap found between same-category Confirmed entries.",
+      },
+    ];
+  }
+
+  scored.sort((a, b) => b.overlap - a.overlap);
+  const kept = scored.slice(0, MAX_REDUNDANCY_FINDINGS).map((s) => s.finding);
+  const omitted = scored.length - kept.length;
+  if (omitted > 0) {
+    kept.push({
+      id: "redundancy-more",
       category: "redundancy",
-      status: "pass",
-      detail: "No significant overlap found between same-category Confirmed entries.",
+      status: "flag",
+      detail: `...and ${omitted} more overlapping pair${
+        omitted > 1 ? "s" : ""
+      } not shown above (showing the ${MAX_REDUNDANCY_FINDINGS} strongest overlaps).`,
     });
   }
-  return findings;
+  return kept;
 }
 
 const Stage4ConsistencyFindingSchema = z.object({
@@ -231,13 +306,36 @@ export async function runConsistencyCheck(
   }));
 }
 
-/** Renders the audit as the author-facing summary text (mirrors Stage
- * 7's formatAuditSummary rendering convention). */
-export function formatStage4AuditSummary(audit: P3Stage4Audit): string {
+/**
+ * Renders the audit as the author-facing summary text (mirrors Stage
+ * 7's formatAuditSummary rendering convention).
+ *
+ * `mode: "full"` (default) renders every finding - pass, flag, and
+ * skipped alike - and is what the UI's author-facing card needs to show
+ * the complete picture. `mode: "flagsOnly"` renders only flag-status
+ * findings (issue #123): used for the system prompt's grounding block,
+ * which gets re-injected on every turn until the author approves, so
+ * routinely restating pass lines the model doesn't need to act on only
+ * dilutes that budget without adding anything actionable.
+ *
+ * Defensively tolerates a non-array `findings` (issue #126) - no writer
+ * in this codebase produces that today (`setP3Stage4Audit` is the only
+ * one), but a future migration or a manual Firestore repair could leave
+ * a legacy/malformed shape behind, and this is reached from the
+ * grounding-block call site in `world-chat/route.ts` with no local
+ * try/catch around it.
+ */
+export function formatStage4AuditSummary(audit: P3Stage4Audit, mode: "full" | "flagsOnly" = "full"): string {
+  const allFindings = Array.isArray(audit.findings) ? audit.findings : [];
+  const toRender = mode === "flagsOnly" ? allFindings.filter((f) => f.status === "flag") : allFindings;
   const lines: string[] = ["System Integration Audit complete. Here's what I found:", ""];
-  for (const f of audit.findings) {
-    const mark = f.status === "pass" ? "✅" : f.status === "flag" ? "⚠️" : "⏭️";
-    lines.push(`${mark} ${f.detail}`);
+  if (toRender.length === 0) {
+    lines.push("✅ No outstanding flags - every check passed or had nothing to check yet.");
+  } else {
+    for (const f of toRender) {
+      const mark = f.status === "pass" ? "✅" : f.status === "flag" ? "⚠️" : "⏭️";
+      lines.push(`${mark} ${f.detail}`);
+    }
   }
   lines.push(
     "",

@@ -5,19 +5,49 @@ import { useSearchParams } from "next/navigation";
 import { useUser } from "@/components/UserProvider";
 import { downloadText, downloadBlob } from "@/lib/download";
 import type { ScreenplayArchitectureDocument } from "@/lib/canonEngine/storyStore";
+import type { P4CascadeReviewEntry } from "@/lib/storyArchitectureEngine/canonRevision";
 import Link from "next/link";
 import UserMenu from "@/components/UserMenu";
 import { useScrollToLatest } from "@/lib/useScrollToLatest";
+import ArchitectureLedgerPanel from "@/components/ArchitectureLedgerPanel";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 
-type UnitSummary = { unitId: string; type: string; status: string };
+// Issue #151: the server response's `unit` field already returns the
+// full StructuralUnit object (causalTag included) - UnitSummary just
+// never carried it through to the UI. Surfacing it is the only way an
+// author could currently see that a Step-1-exempt Confirmed unit is
+// still causalTag "UNVALIDATED" without running a full compile.
+type UnitSummary = { unitId: string; type: string; status: string; causalTag?: "Therefore" | "But" | "UNVALIDATED" };
 
 type SceneDensity = { count: number; projectedTotal: number | null; alert: "under" | "over" | null };
+
+// Issue #173 - strictly advisory, mirrors SceneDensity's own shape but
+// with no dismissal state: a dangling setup is normal mid-development
+// state, re-shown every turn/resume rather than acknowledged once.
+type SetupPayoffAdvisory = { danglingSetups: string[]; orphanedPayoffs: string[] };
 
 type ThematicAnchorFinding = { id: string; status: "pass" | "flag"; detail: string };
 type ThematicAnchorAudit = { findings: ThematicAnchorFinding[]; gapFound: boolean };
 type PreCompilationAudit = { findings: ThematicAnchorFinding[]; failed: boolean };
+
+// Issue #71 - the partial-compile draft route's response shape.
+type DraftCompiled = {
+  draftId: string;
+  scopeKey: string;
+  scope: { type: "act"; act_id: string };
+  draftVersion: number;
+  date: string;
+  markdown: string;
+  outstandingCount: number;
+};
+
+const DRAFT_ACTS: { id: "1" | "2A" | "2B" | "3"; label: string }[] = [
+  { id: "1", label: "Act 1 - THE THESIS" },
+  { id: "2A", label: "Act 2A - THE INVERSION" },
+  { id: "2B", label: "Act 2B - THE DESCENT" },
+  { id: "3", label: "Act 3 - THE SYNTHESIS" },
+];
 
 type StructuralVectorOption = {
   content: string;
@@ -39,8 +69,9 @@ interface TurnResponse {
   validationReason: string;
   statusAccepted: boolean | null;
   pendingConflict: { kind: "unit_regression" | "canon_contradiction"; unitId: string } | null;
-  cascadeReview: { id: string; description: string }[] | null;
+  cascadeReview: P4CascadeReviewEntry[] | null;
   sceneDensity: SceneDensity;
+  setupPayoffAdvisory: SetupPayoffAdvisory;
   structuralVectorOptions: StructuralVectorOptions | null;
 }
 
@@ -69,8 +100,9 @@ export default function ArchitectureInterview() {
   const [validationReason, setValidationReason] = useState<string | null>(null);
   const [statusAccepted, setStatusAccepted] = useState<boolean | null>(null);
   const [pendingConflict, setPendingConflict] = useState<{ kind: string; unitId: string } | null>(null);
-  const [cascadeReview, setCascadeReview] = useState<{ id: string; description: string }[] | null>(null);
+  const [cascadeReview, setCascadeReview] = useState<P4CascadeReviewEntry[] | null>(null);
   const [sceneDensity, setSceneDensity] = useState<SceneDensity | null>(null);
+  const [setupPayoffAdvisory, setSetupPayoffAdvisory] = useState<SetupPayoffAdvisory | null>(null);
   const [structuralVectorOptions, setStructuralVectorOptions] = useState<StructuralVectorOptions | null>(null);
   const [compiling, setCompiling] = useState(false);
   const [compiled, setCompiled] = useState<{
@@ -85,6 +117,13 @@ export default function ArchitectureInterview() {
   const [docxGenerating, setDocxGenerating] = useState(false);
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const [preCompilationAudit, setPreCompilationAudit] = useState<PreCompilationAudit | null>(null);
+  // Issue #71 - partial/incremental compilation. Fully independent of
+  // the full-compile state above: a draft never touches `compiled`,
+  // `thematicAnchorAudit`, or `preCompilationAudit`.
+  const [draftActId, setDraftActId] = useState<"1" | "2A" | "2B" | "3">("1");
+  const [draftCompiling, setDraftCompiling] = useState(false);
+  const [draftCompiled, setDraftCompiled] = useState<DraftCompiled | null>(null);
+  const [draftError, setDraftError] = useState<string | null>(null);
 
   // Resume/hydration on mount (issue #111, final whole-branch review
   // finding I4/R1) - mirrors WorldInterview.tsx's own resume effect
@@ -112,6 +151,10 @@ export default function ArchitectureInterview() {
         }[];
         setMessages(rawMessages.map((m) => ({ role: m.role, content: m.content })));
         setRoutingChoice((data.story?.p4?.routing?.routingChoice as "A" | "B" | "C" | undefined) ?? null);
+        // Issue #142: activeStepNumber is now persisted on Story.p4 -
+        // previously nothing here ever read it, so it always reset to
+        // null on reload even mid-conversation.
+        setActiveStep((data.story?.p4?.activeStepNumber as number | null | undefined) ?? null);
         setUnits((data.story?.p4Units as UnitSummary[] | undefined) ?? []);
         // Final whole-branch review finding M4 - the canvas GET route
         // already spreads the whole story into its response, so this
@@ -129,6 +172,9 @@ export default function ArchitectureInterview() {
         // `story`, not nested under it (matching guardrailFlags/
         // characterBibleGate's own shape).
         setSceneDensity((data.sceneDensity as SceneDensity | undefined) ?? null);
+        // Same "compute fresh on resume" precedent sceneDensity directly
+        // above already established (issue #173).
+        setSetupPayoffAdvisory((data.setupPayoffAdvisory as SetupPayoffAdvisory | undefined) ?? null);
         requestAnimationFrame(() => scrollToLatest("auto"));
       } catch {
         if (!cancelled) setError("Couldn't reach the server. Is the dev server running?");
@@ -140,6 +186,32 @@ export default function ArchitectureInterview() {
       cancelled = true;
     };
   }, [workspaceId, canvasId, scrollToLatest]);
+
+  // Shared by sendMessage and retryLastTurn's success path (issue #138)
+  // so both apply the exact same state updates from a TurnResponse.
+  function applyTurnResponse(data: TurnResponse) {
+    setMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
+    requestAnimationFrame(() => scrollToLatest("smooth"));
+    setRoutingChoice(data.routing_choice);
+    setActiveStep(data.active_step_number);
+    setPlacementFlag(data.placementFlag.flagged ? data.placementFlag : null);
+    setValidationResult(data.validationResult);
+    setValidationReason(data.validationReason);
+    setStatusAccepted(data.statusAccepted);
+    setPendingConflict(data.pendingConflict);
+    setCascadeReview(data.cascadeReview);
+    setSceneDensity(data.sceneDensity);
+    setSetupPayoffAdvisory(data.setupPayoffAdvisory);
+    setStructuralVectorOptions(data.structuralVectorOptions);
+    const turnUnit = data.unit;
+    if (turnUnit) {
+      setUnits((prev) => {
+        const index = prev.findIndex((u) => u.unitId === turnUnit.unitId);
+        if (index === -1) return [...prev, turnUnit];
+        return prev.map((u, i) => (i === index ? turnUnit : u));
+      });
+    }
+  }
 
   async function sendMessage() {
     if (!canvasId || !input.trim() || loading) return;
@@ -157,34 +229,76 @@ export default function ArchitectureInterview() {
       const data: TurnResponse & { error?: string } = await res.json();
       if (!res.ok) {
         setError(data.error ?? "Couldn't reach the server.");
+        // Issue #150: a stale rejection banner (statusAccepted: false,
+        // or a failed validationResult) from an EARLIER successful-but-
+        // rejected turn previously stayed visible after a later turn's
+        // request failed outright (network error, 502, etc.) - clear
+        // both here so the banner never outlives the turn that produced it.
+        setStatusAccepted(null);
+        setValidationReason(null);
         return;
       }
-      setMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
-      requestAnimationFrame(() => scrollToLatest("smooth"));
-      setRoutingChoice(data.routing_choice);
-      setActiveStep(data.active_step_number);
-      setPlacementFlag(data.placementFlag.flagged ? data.placementFlag : null);
-      setValidationResult(data.validationResult);
-      setValidationReason(data.validationReason);
-      setStatusAccepted(data.statusAccepted);
-      setPendingConflict(data.pendingConflict);
-      setCascadeReview(data.cascadeReview);
-      setSceneDensity(data.sceneDensity);
-      setStructuralVectorOptions(data.structuralVectorOptions);
-      const turnUnit = data.unit;
-      if (turnUnit) {
-        setUnits((prev) => {
-          const index = prev.findIndex((u) => u.unitId === turnUnit.unitId);
-          if (index === -1) return [...prev, turnUnit];
-          return prev.map((u, i) => (i === index ? turnUnit : u));
-        });
-      }
+      applyTurnResponse(data);
     } catch {
       setError("Couldn't reach the server.");
     } finally {
       setLoading(false);
     }
   }
+
+  // Recovers a "dangling" turn (issue #138, mirroring world-chat's own
+  // issue #108 fix): if a prior turn's model call failed after the
+  // user's message was already persisted, the resumed history ends in a
+  // user message with no reply. Unlike sendMessage, this does not
+  // optimistically append a user bubble (it's already in `messages`
+  // from the resume fetch) and sends no `message` field - the server
+  // re-runs the turn against the already-persisted history.
+  async function retryLastTurn() {
+    if (loading || !canvasId) return;
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await fetch("/api/architecture-chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storyId: canvasId, retry: true }),
+      });
+      const data: TurnResponse & { error?: string } = await res.json();
+      if (res.status === 409) return; // benign: someone else already resolved this dangling turn
+      if (!res.ok) {
+        setError(data.error ?? "Something went wrong.");
+        setStatusAccepted(null);
+        setValidationReason(null);
+        return;
+      }
+      applyTurnResponse(data);
+    } catch {
+      setError("Couldn't reach the server. Is the dev server running?");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Issue #138: recovers a "dangling" turn on load - if the model call
+  // for the last turn failed after the user's message was already
+  // persisted, the resumed history ends in a user message with no
+  // reply. Mirrors WorldInterview.tsx's own equivalent effect exactly.
+  useEffect(() => {
+    if (resuming || !canvasId || error) return;
+    if (messages.length > 0 && messages[messages.length - 1].role === "user") {
+      // retryLastTurn's setError(null)/setLoading(true) only ever run
+      // once, guarded by the conditions above (never on every render) -
+      // functionally identical, already-accepted pattern as
+      // WorldInterview.tsx's/CharacterInterview.tsx's own
+      // dangling-turn-recovery effects, which call the exact same shape
+      // of function from an effect without tripping this rule; the
+      // react-compiler-based linter's static analysis appears not to
+      // inline-trace a named function reference consistently here.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      retryLastTurn();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resuming, canvasId, error]);
 
   async function dismissSceneDensityAlert(direction: "under" | "over") {
     if (!canvasId) return;
@@ -278,6 +392,30 @@ export default function ArchitectureInterview() {
     }
   }
 
+  async function compileDraft() {
+    if (!canvasId || draftCompiling) return;
+    setDraftCompiling(true);
+    setDraftError(null);
+    try {
+      const res = await fetch("/api/architecture-chat/document/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storyId: canvasId, actId: draftActId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setDraftError(data.error ?? "Draft compile failed.");
+        setDraftCompiled(null);
+        return;
+      }
+      setDraftCompiled(data);
+    } catch {
+      setDraftError("Couldn't reach the server.");
+    } finally {
+      setDraftCompiling(false);
+    }
+  }
+
   if (!workspaceId || !canvasId) {
     return (
       <div className="flex min-h-dvh items-center justify-center p-4 bg-neutral-950 text-neutral-100">
@@ -300,7 +438,30 @@ export default function ArchitectureInterview() {
         <div className="flex items-center gap-3 text-xs text-neutral-400">
           <span>Routing: {routingChoice ?? "not chosen yet"}</span>
           <span>Active Step: {activeStep ?? "—"}</span>
-          <span>Units: {units.length}</span>
+          {/* Issue #151: causalTag is already on the wire (the server's
+              `unit` field returns the full StructuralUnit), but nothing
+              rendered it - a Step-1-exempt Confirmed unit's causalTag
+              "UNVALIDATED" was otherwise invisible without a full
+              compile. A plain <details> disclosure, since no per-unit
+              list view exists yet elsewhere in this UI. */}
+          <details className="relative">
+            <summary className="cursor-pointer list-none">Units: {units.length}</summary>
+            {units.length > 0 && (
+              <ul className="absolute right-0 top-full z-20 mt-1 max-h-64 w-72 overflow-y-auto rounded-lg border border-neutral-800 bg-neutral-900 p-2 text-left text-xs text-neutral-300 shadow-lg">
+                {units.map((u) => (
+                  <li key={u.unitId} className="border-b border-neutral-800 py-1 last:border-0">
+                    <span className="font-semibold text-neutral-200">{u.unitId}</span> · {u.type} · {u.status}
+                    {u.causalTag && (
+                      <span className={u.causalTag === "UNVALIDATED" ? "ml-1 text-amber-400" : "ml-1 text-emerald-400"}>
+                        {" "}
+                        · {u.causalTag}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </details>
           {validationResult && <span>Validation: {validationResult}</span>}
           <button
             onClick={() => compileDocument(false)}
@@ -308,6 +469,27 @@ export default function ArchitectureInterview() {
             className="rounded-lg border border-purple-500/50 bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-purple-200 hover:bg-purple-900/40 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {compiling ? "Compiling…" : "Compile"}
+          </button>
+          {/* Issue #71 - partial/incremental compilation: a fully
+              separate action from "Compile" above, producing a
+              versioned DRAFT of one named Act, never final canon. */}
+          <select
+            value={draftActId}
+            onChange={(e) => setDraftActId(e.target.value as "1" | "2A" | "2B" | "3")}
+            className="rounded-lg border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-200"
+          >
+            {DRAFT_ACTS.map((act) => (
+              <option key={act.id} value={act.id}>
+                {act.label}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={() => compileDraft()}
+            disabled={draftCompiling}
+            className="rounded-lg border border-cyan-500/50 bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:bg-cyan-900/40 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {draftCompiling ? "Compiling Draft…" : "Compile Draft"}
           </button>
           <UserMenu />
         </div>
@@ -327,23 +509,46 @@ export default function ArchitectureInterview() {
 
       {pendingConflict && (
         <div className="border-b border-orange-500/30 bg-orange-950/30 px-6 py-2 text-xs text-orange-200">
-          Canon Revision Path open for unit &quot;{pendingConflict.unitId}&quot;
-          {pendingConflict.kind === "unit_regression" ? " (status regression)" : " (canon contradiction)"} -
-          present the three choices and wait for the author&apos;s pick.
+          {/* Issue #155: previously leaked the internal "Canon Revision
+              Path" name and read as an instruction TO THE MODEL ("present
+              the three choices and wait for the author's pick"), which
+              sp04 Section 8 explicitly forbids narrating. Plain,
+              author-facing language instead - the conflict itself is
+              described to the model separately via its own grounding, so
+              this banner only needs to tell the author something is
+              waiting on them. */}
+          {pendingConflict.kind === "unit_regression"
+            ? "A previously confirmed choice is in question - reply to see your three options."
+            : "Something you've already confirmed may conflict with a new idea - reply to see your three options."}
         </div>
       )}
       {cascadeReview && cascadeReview.length > 0 && (
         <div className="border-b border-orange-500/30 bg-orange-950/20 px-6 py-2 text-xs text-orange-200">
           <p className="mb-1">Also worth reviewing:</p>
           <ul className="list-disc pl-4">
-            {cascadeReview.map((entry) => (
-              <li key={entry.id}>
+            {cascadeReview.map((entry, i) => (
+              // Issue #160: entry.id alone could collide (a Project 3
+              // element_id and a P4 unitId are separate id spaces that
+              // could coincidentally match) - the index namespaces it
+              // cheaply without needing a real cross-space-safe id.
+              <li key={`${i}-${entry.id}`}>
                 {entry.id} - {entry.description}
               </li>
             ))}
           </ul>
         </div>
       )}
+      {setupPayoffAdvisory &&
+        (setupPayoffAdvisory.danglingSetups.length > 0 || setupPayoffAdvisory.orphanedPayoffs.length > 0) && (
+          <div className="border-b border-sky-500/30 bg-sky-950/20 px-6 py-2 text-xs text-sky-200">
+            {setupPayoffAdvisory.danglingSetups.length > 0 && (
+              <p>Planted, not yet paid off: {setupPayoffAdvisory.danglingSetups.join(", ")}</p>
+            )}
+            {setupPayoffAdvisory.orphanedPayoffs.length > 0 && (
+              <p>Paid off, but no matching [SETUP: ...] tag found: {setupPayoffAdvisory.orphanedPayoffs.join(", ")}</p>
+            )}
+          </div>
+        )}
       {structuralVectorOptions && structuralVectorOptions.options.length > 0 && (
         <div className="border-b border-teal-500/30 bg-teal-950/20 px-6 py-3 text-xs text-teal-200">
           <p className="mb-2 font-semibold">
@@ -460,7 +665,30 @@ export default function ArchitectureInterview() {
       )}
       {compileError && <p className="border-b border-red-500/30 px-6 py-2 text-xs text-red-400">{compileError}</p>}
 
+      {draftCompiled && (
+        <div className="border-b border-cyan-500/30 bg-cyan-950/20 px-6 py-3 text-xs text-cyan-200">
+          <p className="mb-2 font-semibold">
+            Draft - Act {draftCompiled.scope.act_id} (draft-v{draftCompiled.draftVersion}) - not final canon.{" "}
+            {draftCompiled.outstandingCount} outstanding item{draftCompiled.outstandingCount === 1 ? "" : "s"} in scope.
+          </p>
+          <button
+            onClick={() =>
+              downloadText(
+                `screenplay-architecture-draft-${draftCompiled.scopeKey}-v${draftCompiled.draftVersion}.md`,
+                draftCompiled.markdown,
+                "text/markdown"
+              )
+            }
+            className="rounded-lg border border-cyan-500/50 bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:bg-cyan-900/40"
+          >
+            Download draft .md
+          </button>
+        </div>
+      )}
+      {draftError && <p className="border-b border-red-500/30 px-6 py-2 text-xs text-red-400">{draftError}</p>}
+
       <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-6 py-6">
+        {!resuming && <ArchitectureLedgerPanel storyId={canvasId} refreshToken={messages.length} />}
         {resuming && (
           <div className="mb-4 text-left">
             <p className="inline-block max-w-2xl rounded-xl bg-neutral-900 px-4 py-2 text-sm text-neutral-400">

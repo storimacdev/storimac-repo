@@ -5,6 +5,10 @@ import { getWorkspace, TierLimitError } from "@/lib/workspace/workspaceStore";
 import { TIER_LIMITS } from "@/lib/workspace/types";
 import type { RoutingState } from "@/lib/storyArchitectureEngine/developmentLoop";
 import type { StructuralUnit, StructuralUnitType } from "@/lib/storyArchitectureEngine/stateLedger";
+import type { ContinuityMatrix } from "@/lib/screenplayEngine/continuityMatrix";
+import { createEmptyContinuityMatrix } from "@/lib/screenplayEngine/continuityMatrix";
+import type { SceneRecord } from "@/lib/screenplayEngine/sceneLedger";
+import type { ContinuityViolation, ContinuityMatrixUpdate } from "@/lib/screenplayEngine/continuityMatrix";
 
 /**
  * Story persistence — GitHub issue #12, reference implementation of the
@@ -147,6 +151,17 @@ export interface P4State {
    * 4->5 transition. Never set back to false once true. */
   onboardingComplete: boolean;
   routing: RoutingState | null;
+  /** The turn-scoped "which of the 10 structural steps is the current
+   * focus of discussion" field (sp04 Section 8), persisted so a page
+   * reload mid-conversation doesn't lose it (issue #142 - previously
+   * tracked only in ArchitectureInterview.tsx's own React state, which
+   * reset to null on every reload even with an active, ongoing
+   * discussion). Mirrors the model's self-report verbatim, including
+   * back to null - unlike a `StructuralUnit`'s own `stepNumber`
+   * (stateLedger.ts), this is NOT "sticky"; it genuinely reflects
+   * whatever the most recent turn reported, since the author's focus
+   * can legitimately move away from any step entirely. */
+  activeStepNumber: number | null;
 }
 
 /** Fills in defaults for a Story doc written before P4 state existed -
@@ -155,6 +170,7 @@ export function normalizeP4(p4: P4State | null | undefined): P4State {
   return {
     onboardingComplete: false,
     routing: null,
+    activeStepNumber: null,
     ...p4,
   };
 }
@@ -314,6 +330,65 @@ export interface Story {
    * sceneDensity.ts's own DEFAULT_SCENE_DENSITY_DISMISSAL.
    */
   p4SceneDensityDismissal?: { under: boolean; over: boolean } | null;
+  /**
+   * Project 5's Continuity Matrix & Tracking Roster (issue #97) - the
+   * Knowledge/Secrets Ledger, Physical/Timeline Tracking, and Open
+   * Loops state that Phase 2 (Scene Drafting, issue #94) checks before
+   * a scene drafts and Phase 4 (Revision & Canonization, issue #96)
+   * updates when a scene is Confirmed. Whole-object replace, same
+   * convention as p4SceneDensityDismissal above - this app has no
+   * concurrent-multi-writer case per story. Optional/nullable since
+   * Stories created before this field existed won't have it in
+   * Firestore; absent/null is treated identically to
+   * `createEmptyContinuityMatrix()` by `normalizeP5ContinuityMatrix`.
+   */
+  p5ContinuityMatrix?: ContinuityMatrix | null;
+  /**
+   * Project 5's per-scene session ledger (issue #93) - the author's
+   * screenplay-chat session is the sole owner of this array each turn
+   * (the live agent reports the full current scene it's working on;
+   * the route upserts into the existing array and writes the whole
+   * thing back), matching setP4Units's own "no concurrent-multi-writer
+   * case" reasoning. Optional/nullable since Stories created before
+   * this field existed won't have it in Firestore.
+   */
+  p5Scenes?: SceneRecord[] | null;
+  /**
+   * Project 5's pending Conflict Intercept conflict (issue #98),
+   * cleared once the author picks one of the three resolution choices.
+   * Mirrors P4PendingConflict's shape - either a structural deviation
+   * from the Project 4 blueprint (detected via model self-report, same
+   * as P4's canon_contradiction) or a deterministic continuity
+   * contradiction against already-Confirmed scenes (detected via
+   * continuityMatrix.ts's checkContinuityBeforeDraft). Optional/
+   * nullable since Stories created before this field existed won't
+   * have it in Firestore.
+   */
+  p5PendingConflict?: P5PendingConflict | null;
+}
+
+export type P5PendingConflict =
+  | {
+      kind: "structural_deviation";
+      sceneNumber: number;
+      explanation: string;
+      requestedDraftText: string;
+      requestedMatrixUpdate: Omit<ContinuityMatrixUpdate, "sceneNumber">;
+      ts: string;
+    }
+  | {
+      kind: "continuity_contradiction";
+      sceneNumber: number;
+      violations: ContinuityViolation[];
+      requestedDraftText: string;
+      requestedMatrixUpdate: Omit<ContinuityMatrixUpdate, "sceneNumber">;
+      ts: string;
+    };
+
+/** Fills in defaults for a Story doc written before p5ContinuityMatrix
+ * existed - same reasoning as normalizeP3/normalizeP4. */
+export function normalizeP5ContinuityMatrix(matrix: ContinuityMatrix | null | undefined): ContinuityMatrix {
+  return matrix ?? createEmptyContinuityMatrix();
 }
 
 export interface StoryMessage {
@@ -351,6 +426,10 @@ export const WORLD_MESSAGES_COLLECTION = "worldMessages";
 /** Project 4's message subcollection name (issue #111) - same reasoning
  * as WORLD_MESSAGES_COLLECTION/CHARACTER_MESSAGES_COLLECTION. */
 export const ARCHITECTURE_MESSAGES_COLLECTION = "architectureMessages";
+
+/** Project 5's message subcollection name (issue #93) - same reasoning
+ * as ARCHITECTURE_MESSAGES_COLLECTION. */
+export const SCREENPLAY_MESSAGES_COLLECTION = "screenplayMessages";
 
 export class StoryAccessError extends Error {
   constructor(message: string) {
@@ -572,6 +651,14 @@ export async function setP4Routing(storyId: string, routing: RoutingState | null
     .update({ "p4.routing": routing, updatedAt: new Date().toISOString() });
 }
 
+/** Persists the turn-scoped `active_step_number` (issue #142), written
+ * the same dotted-field-path way setP4Routing is. */
+export async function setP4ActiveStepNumber(storyId: string, activeStepNumber: number | null): Promise<void> {
+  await storiesCollection()
+    .doc(storyId)
+    .update({ "p4.activeStepNumber": activeStepNumber, updatedAt: new Date().toISOString() });
+}
+
 /** Whole-array-replace, matching setP3Pillars's exact precedent - the
  * live agent reports the full current state of the unit it touched
  * this turn; the route (Task 4) merges it into the existing array via
@@ -602,6 +689,29 @@ export async function setP4SceneDensityDismissal(
   await storiesCollection()
     .doc(storyId)
     .update({ p4SceneDensityDismissal: dismissal, updatedAt: new Date().toISOString() });
+}
+
+/** Records Project 5's Continuity Matrix & Tracking Roster (issue #97) -
+ * whole-object replace, same convention as setP4SceneDensityDismissal. */
+export async function setP5ContinuityMatrix(storyId: string, matrix: ContinuityMatrix): Promise<void> {
+  await storiesCollection()
+    .doc(storyId)
+    .update({ p5ContinuityMatrix: matrix, updatedAt: new Date().toISOString() });
+}
+
+/** Whole-array-replace, matching setP4Units's exact precedent (issue
+ * #93). */
+export async function setP5Scenes(storyId: string, scenes: SceneRecord[]): Promise<void> {
+  await storiesCollection()
+    .doc(storyId)
+    .update({ p5Scenes: scenes, updatedAt: new Date().toISOString() });
+}
+
+/** Records or clears Project 5's pending Conflict Intercept conflict (issue #98); pass null to clear once resolved. */
+export async function setP5PendingConflict(storyId: string, conflict: P5PendingConflict | null): Promise<void> {
+  await storiesCollection()
+    .doc(storyId)
+    .update({ p5PendingConflict: conflict, updatedAt: new Date().toISOString() });
 }
 
 /** Records or clears Project 2's pending Story Foundation conflict (issue #30); pass null to clear once resolved. */
@@ -636,7 +746,11 @@ export async function setP3Stage4Audit(
 
 export interface StoredOutstandingQuestion {
   item: string;
-  defer_to: "Project 2" | "Project 3" | "Project 4" | "Project 5" | null;
+  /** "Project 1" added for issue #93 - Project 5 is the first project
+   * able to defer something back to Story Foundation (every earlier
+   * project's own deferred_items schema only ever targets a strictly
+   * downstream project). */
+  defer_to: "Project 1" | "Project 2" | "Project 3" | "Project 4" | "Project 5" | null;
   notes: string;
   ts: string;
   /** The P2 character this item was deferred from, if any (issue #34's
@@ -754,6 +868,22 @@ export interface P4CanonRevisionLogEntry {
   /** Present only for kind "canon_contradiction". */
   sourceProject?: "Project 1" | "Project 2" | "Project 3";
   contradictedRef?: string;
+  /** The model's own rationale for raising this conflict (issue #156 -
+   * the closest thing to a "resolution choice AND rationale" record the
+   * issue's own AC asks for; previously dropped entirely). Present only
+   * for kind "canon_contradiction" - "unit_regression" has no model
+   * explanation to carry, since the app itself (not the model) is what
+   * detects a status regression. */
+  explanation?: string;
+  /** The status the triggering turn requested (issue #156) - kept
+   * alongside `resolution` so a future reader can tell "Working was
+   * requested and accepted" apart from "Confirmed was requested but
+   * clamped," not just what the author ultimately chose. */
+  requestedStatus: CanonStatus;
+  /** A short excerpt of the triggering turn's proposed content (issue
+   * #156) - truncated, not the full text, so this log entry stays a
+   * lightweight record rather than a second copy of the unit ledger. */
+  contentExcerpt: string;
   resolution: "revert" | "accept_and_update" | "park";
   resolvedBy: string;
   ts: string;
@@ -767,6 +897,95 @@ function p4CanonRevisionLogCollection(storyId: string) {
 /** Appends a resolved conflict to Project 4's Canon Revision log (issue #64). */
 export async function appendP4CanonRevisionLog(storyId: string, entry: P4CanonRevisionLogEntry): Promise<void> {
   await p4CanonRevisionLogCollection(storyId).add(entry);
+}
+
+/** Reads back Project 4's Canon Revision log (issue #159) - mirrors
+ * listP3ConflictLog's exact shape. Previously write-only: nothing in
+ * the app ever called this, so an author/admin had no way to see the
+ * history of Canon Revision Path decisions for a story. */
+export async function listP4CanonRevisionLog(storyId: string): Promise<P4CanonRevisionLogEntry[]> {
+  const snap = await p4CanonRevisionLogCollection(storyId).orderBy("ts", "asc").get();
+  return snap.docs.map((d) => d.data() as P4CanonRevisionLogEntry);
+}
+
+/** Project 4's Dependency & Continuity Ledger (issue #72) - a durable,
+ * author-queryable record distinct from p4CanonRevisionLog above:
+ * p4CanonRevisionLog only ever captures a Canon-Revision-Path
+ * *resolution*; this ledger additionally captures every ordinary
+ * Confirmed transition reached through everyday turn processing (the
+ * common case - most units become Confirmed without ever triggering a
+ * conflict), which had no durable record anywhere before this issue.
+ * See docs/superpowers/specs/2026-10-16-p4-canon-revision-cascade-ledger-design.md
+ * for why this is additive rather than a reshape of p4CanonRevisionLog. */
+export type P4ContinuityLedgerEntry =
+  | {
+      kind: "confirmed_transition";
+      unitId: string;
+      description: string;
+      resolvedBy: string;
+      ts: string;
+      turnId: string;
+    }
+  | {
+      kind: "canon_revision";
+      unitId: string;
+      description: string;
+      resolution: "revert" | "accept_and_update" | "park";
+      /** Present only when this resolution's trigger was a canon_contradiction. */
+      sourceProject?: "Project 1" | "Project 2" | "Project 3";
+      contradictedRef?: string;
+      /** The merged, de-duplicated cascade-review result computed at
+       * resolution time (canonRevision.ts) - present (possibly empty)
+       * whenever cascade tracing ran for this resolution, absent when it
+       * didn't apply (e.g. "revert"/"park", which trigger no cascade
+       * computation at all). */
+      downstreamUnits?: { id: string; description: string }[];
+      resolvedBy: string;
+      ts: string;
+      turnId: string;
+    };
+
+function p4ContinuityLedgerCollection(storyId: string) {
+  return storiesCollection().doc(storyId).collection("p4ContinuityLedger");
+}
+
+/** Appends one entry to Project 4's Dependency & Continuity Ledger (issue #72). */
+export async function appendP4ContinuityLedgerEntry(
+  storyId: string,
+  entry: P4ContinuityLedgerEntry
+): Promise<void> {
+  await p4ContinuityLedgerCollection(storyId).add(entry);
+}
+
+/** Reads the full ledger, oldest first - mirrors listP3ConflictLog's own
+ * shape exactly (issue #159 is the separate, narrower effort to add an
+ * equivalent reader for p4CanonRevisionLog specifically; this is this
+ * issue's own, broader ledger). */
+export async function listP4ContinuityLedger(storyId: string): Promise<P4ContinuityLedgerEntry[]> {
+  const snap = await p4ContinuityLedgerCollection(storyId).orderBy("ts", "asc").get();
+  return snap.docs.map((d) => d.data() as P4ContinuityLedgerEntry);
+}
+
+/** Project 5's Conflict Intercept log (issue #98) - one entry per
+ * resolved conflict, mirroring P4CanonRevisionLogEntry's exact shape
+ * (same shared ConflictResolution pattern, ARCHITECTURE.md §2). */
+export interface P5ConflictLogEntry {
+  kind: "structural_deviation" | "continuity_contradiction";
+  sceneNumber: number;
+  description: string;
+  resolution: "revert" | "accept_and_update" | "park";
+  resolvedBy: string;
+  ts: string;
+  turnId: string;
+}
+
+function p5ConflictLogCollection(storyId: string) {
+  return storiesCollection().doc(storyId).collection("p5ConflictLog");
+}
+
+/** Appends a resolved conflict to Project 5's Conflict Intercept log (issue #98). */
+export async function appendP5ConflictLog(storyId: string, entry: P5ConflictLogEntry): Promise<void> {
+  await p5ConflictLogCollection(storyId).add(entry);
 }
 
 /** Project 2's compiled, permanent Character Bible entries (issue #34,
@@ -872,7 +1091,12 @@ export interface WorldBibleDocument {
     world_bible_version: string; // "v{n}", matches FoundationDocument's own version string format
     working_title: string;
     date: string;
-    status: "Compiled";
+    // Issue #134 - widened from the frozen literal "Compiled" so
+    // confirmWorldBibleVersion can persist the real post-confirm status;
+    // every export format (.md/.json/.docx/.pdf) reads this field, so
+    // updating it here (rather than deriving it separately in each of the
+    // four renderers) fixes all four export formats at once.
+    status: "Compiled" | "Confirmed";
     related_project_1_version: string;
     related_project_2_status: string;
   };
@@ -939,9 +1163,73 @@ export async function getLatestWorldBibleVersion(storyId: string): Promise<Store
   return snap.empty ? null : (snap.docs[0].data() as StoredWorldBibleVersion);
 }
 
-/** Persists a new World Bible version. Never overwrites a prior version - `stored.version` must already be `(latest?.version ?? 0) + 1`, computed by the caller (worldEngine/worldBibleCompiler.ts's generateWorldBibleDocument), same division of responsibility as FoundationDocument's own generateFoundationDocument/versionsCollection split. */
+/** Persists a new World Bible version. Never overwrites a prior version - `stored.version` must already be `(latest?.version ?? 0) + 1`, computed by the caller (worldEngine/worldBibleCompiler.ts's generateWorldBibleDocument), same division of responsibility as FoundationDocument's own generateFoundationDocument/versionsCollection split.
+ *
+ * Issue #129: do NOT use this for the next-version write path - computing
+ * `stored.version` from a separate, untransacted read (as the caller used
+ * to) lets two concurrent compiles both read the same prior version, both
+ * compute the same next version, and have the second `.set()` here
+ * silently clobber the first, discarding a paid Anthropic call with no
+ * error to either author. Use saveNextWorldBibleVersion instead, which
+ * reads the prior version and writes the next one atomically. Kept here
+ * only for any caller that already holds a fully-formed, pre-numbered
+ * version it knows is safe to write directly (none currently do). */
 export async function saveWorldBibleVersion(storyId: string, stored: StoredWorldBibleVersion): Promise<void> {
   await worldBibleVersionsCollection(storyId).doc(String(stored.version)).set(stored);
+}
+
+/** Note: `version` here is the rendered "v1"-style string used in
+ * 15_version_history rows, not StoredWorldBibleVersion's numeric `version`. */
+interface WorldBibleVersionHistoryRow {
+  version: string;
+  date: string;
+  summary_of_changes: string;
+}
+
+/**
+ * Atomically assigns and persists the next World Bible version - issue
+ * #129's fix. Reads the latest version (and, only if one exists, the full
+ * version-history rows) and writes the new version inside a single
+ * Firestore transaction, so two concurrent compiles can no longer both
+ * read the same prior version and race to clobber each other: the Admin
+ * SDK retries a transaction whose reads were invalidated by a concurrent
+ * commit, and `tx.create` (not `.set`) makes a same-version collision
+ * throw ALREADY_EXISTS rather than silently overwrite, as a second line
+ * of defense if two transactions ever still computed the same version
+ * number.
+ *
+ * `buildVersion` must be pure and synchronous - any slow or external work
+ * (the Anthropic synthesis call, cross-project reads) belongs in the
+ * caller, before this function is invoked, not inside the transaction
+ * body.
+ */
+export async function saveNextWorldBibleVersion(
+  storyId: string,
+  buildVersion: (
+    prior: StoredWorldBibleVersion | null,
+    priorHistory: WorldBibleVersionHistoryRow[]
+  ) => StoredWorldBibleVersion
+): Promise<StoredWorldBibleVersion> {
+  const db = getDb();
+  const collection = worldBibleVersionsCollection(storyId);
+
+  return db.runTransaction(async (tx) => {
+    const latestSnap = await tx.get(collection.orderBy("version", "desc").limit(1));
+    const prior = latestSnap.empty ? null : (latestSnap.docs[0].data() as StoredWorldBibleVersion);
+
+    let priorHistory: WorldBibleVersionHistoryRow[] = [];
+    if (prior) {
+      const historySnap = await tx.get(collection.orderBy("version", "asc"));
+      priorHistory = historySnap.docs.map((d) => {
+        const v = d.data() as StoredWorldBibleVersion;
+        return { version: `v${v.version}`, date: v.date, summary_of_changes: v.summary_of_changes };
+      });
+    }
+
+    const stored = buildVersion(prior, priorHistory);
+    tx.create(collection.doc(String(stored.version)), stored);
+    return stored;
+  });
 }
 
 /** Marks a specific World Bible version Confirmed (issue #51) - the
@@ -960,8 +1248,25 @@ export async function confirmWorldBibleVersion(
     throw new Error(`World Bible version ${version} not found for story "${storyId}".`);
   }
   const stored = snap.data() as StoredWorldBibleVersion;
+  // Issue #134 - confirming a version previously only set the top-level
+  // confirmed/confirmedAt fields, never updating json["1_document_metadata"]
+  // .status away from the frozen "Compiled" literal set at compile time
+  // (worldBibleCompiler.ts's compileWorldBibleDocument). So a Confirmed
+  // version still reported "Status: Compiled" in all four of its own
+  // export formats. The .docx/.pdf exporters render `m.status` fresh from
+  // `json` on every export, so updating it here fixes those two formats
+  // automatically; the pre-rendered `markdown` string (and the raw `.json`
+  // download, which serializes this same object) need the literal value
+  // patched directly, since markdown is cached at compile time rather than
+  // re-rendered per export.
+  const confirmedJson: WorldBibleDocument = {
+    ...stored.json,
+    "1_document_metadata": { ...stored.json["1_document_metadata"], status: "Confirmed" },
+  };
   const updated: StoredWorldBibleVersion = {
     ...stored,
+    json: confirmedJson,
+    markdown: stored.markdown.replace("| Status | Compiled |", "| Status | Confirmed |"),
     confirmed: true,
     confirmedAt: new Date().toISOString(),
   };
@@ -986,7 +1291,11 @@ export interface ScreenplayArchitectureDocument {
     screenplay_architecture_version: string;
     working_title: string;
     date: string;
-    status: "Compiled";
+    status: "Compiled" | "Draft";
+    /** Issue #71 - null for every full compile; a human-readable Act
+     * label ("Act 1 (THE THESIS) - partial compile, draft only, not
+     * final canon") for a partial-compile draft. */
+    scope: string | null;
     author: string;
     diagnosed_complexity: string;
     projected_scene_count: number;
@@ -1020,7 +1329,19 @@ export interface ScreenplayArchitectureDocument {
     unit_id: string | null;
     slugline: string | null;
   }[];
-  "6_setup_payoff_ledger": string;
+  /** Issue #173 - real tracked data, no longer a disclosed-placeholder
+   * string. Each entry is keyed by a free-text, author-tagged name (no
+   * fixed catalog exists, unlike Section 5's 10 Critical Beats) -
+   * see setupPayoffLedger.ts. `planted`/`paid_off` are independently
+   * nullable: a setup with `paid_off: null` is dangling (normal
+   * mid-development state, not an error); a payoff with `planted:
+   * null` is orphaned (paid off something no [SETUP: ...] tag ever
+   * named - a real continuity slip worth the author's attention). */
+  "6_setup_payoff_ledger": {
+    setup_name: string;
+    planted: { unit_id: string; scene_number: number; slugline: string } | null;
+    paid_off: { unit_id: string; scene_number: number; slugline: string } | null;
+  }[];
   "7_outstanding_decisions_version_history": {
     outstanding: { unit_id: string; status: string }[];
     version_history: { version: string; date: string; summary_of_changes: string }[];
@@ -1077,6 +1398,75 @@ export async function saveScreenplayArchitectureVersion(
   stored: StoredScreenplayArchitectureVersion
 ): Promise<void> {
   await p4ArchitectureVersionsCollection(storyId).doc(String(stored.version)).set(stored);
+}
+
+/**
+ * Issue #71's partial/incremental compilation - a DRAFT of one named
+ * Act, fully separate from `p4ArchitectureVersions`/its version
+ * counter above ("versioned as drafts, not final canon" is read
+ * literally - see docs/superpowers/specs/2026-10-16-p4-partial-
+ * compile-design.md §3). Only one scope kind exists today (a single
+ * framework Act), but `scope` is already a discriminated union so a
+ * future kind can be added without a breaking change.
+ */
+export interface ScreenplayArchitectureDraftScope {
+  type: "act";
+  act_id: string;
+}
+
+export interface StoredScreenplayArchitectureDraft {
+  draftId: string;
+  /** `act-${act_id}` - also the Firestore path segment below, so a
+   * draft's own history query needs no composite index. */
+  scopeKey: string;
+  scope: ScreenplayArchitectureDraftScope;
+  /** Increments independently PER SCOPE - drafting Act 1 five times
+   * never advances Act 2A's own counter. Never shared with, and never
+   * read by, the full document's `version` counter above. */
+  draftVersion: number;
+  date: string;
+  summaryOfChanges: string;
+  json: ScreenplayArchitectureDocument;
+  markdown: string;
+  unitsSnapshot: Record<string, { status: string; content: unknown }>;
+  createdAt: string;
+}
+
+/** `stories/{storyId}/p4ArchitectureDrafts/{scopeKey}/items/{draftVersion}` -
+ * a nested subcollection per scope, not a flat collection filtered by
+ * a `scopeKey` field, so listing/getting one scope's own draft history
+ * is a plain single-field `orderBy` query needing no composite
+ * Firestore index. */
+function p4ArchitectureDraftItemsCollection(storyId: string, scopeKey: string) {
+  return storiesCollection().doc(storyId).collection("p4ArchitectureDrafts").doc(scopeKey).collection("items");
+}
+
+export async function listScreenplayArchitectureDrafts(
+  storyId: string,
+  scopeKey: string
+): Promise<StoredScreenplayArchitectureDraft[]> {
+  const snap = await p4ArchitectureDraftItemsCollection(storyId, scopeKey).orderBy("draftVersion", "asc").get();
+  return snap.docs.map((d) => d.data() as StoredScreenplayArchitectureDraft);
+}
+
+export async function getLatestScreenplayArchitectureDraft(
+  storyId: string,
+  scopeKey: string
+): Promise<StoredScreenplayArchitectureDraft | null> {
+  const snap = await p4ArchitectureDraftItemsCollection(storyId, scopeKey).orderBy("draftVersion", "desc").limit(1).get();
+  return snap.empty ? null : (snap.docs[0].data() as StoredScreenplayArchitectureDraft);
+}
+
+/** Never overwrites a prior draft - `stored.draftVersion` must already
+ * be `(latest?.draftVersion ?? 0) + 1` for this SAME scopeKey, computed
+ * by the caller (screenplayArchitectureCompiler.ts's
+ * generatePartialScreenplayArchitectureDraft), same division of
+ * responsibility as saveScreenplayArchitectureVersion's own. */
+export async function saveScreenplayArchitectureDraft(
+  storyId: string,
+  stored: StoredScreenplayArchitectureDraft
+): Promise<void> {
+  await p4ArchitectureDraftItemsCollection(storyId, stored.scopeKey).doc(String(stored.draftVersion)).set(stored);
 }
 
 /** Appends an author-type re-assessment (issue #8 calls this) without clobbering prior history. */

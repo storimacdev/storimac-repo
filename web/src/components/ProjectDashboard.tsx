@@ -289,6 +289,12 @@ export default function ProjectDashboard() {
                         >
                           Story Architecture
                         </Link>
+                        <Link
+                          href={`/screenplay?workspaceId=${p.workspaceId}&canvasId=${p.id}`}
+                          className="rounded-lg border border-red-500/50 px-3 py-1.5 text-xs font-semibold text-red-200 hover:bg-red-500/10"
+                        >
+                          Screenplay
+                        </Link>
 
                         <div className="relative">
                           <button

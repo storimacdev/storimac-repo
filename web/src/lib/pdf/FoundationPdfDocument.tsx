@@ -2,6 +2,7 @@
 
 import { Document, Page, Text, View, StyleSheet, pdf } from "@react-pdf/renderer";
 import type { FoundationDocument } from "@/lib/canonEngine/foundationDoc";
+import { PDF_FONT_FAMILY, registerPdfFonts } from "./fonts";
 
 /**
  * Client-side PDF rendering of the Story Foundation Document (issue #21).
@@ -10,8 +11,10 @@ import type { FoundationDocument } from "@/lib/canonEngine/foundationDoc";
  * is only ever read here, never modified.
  */
 
+registerPdfFonts();
+
 const styles = StyleSheet.create({
-  page: { padding: 40, fontSize: 10, fontFamily: "Helvetica", color: "#111827" },
+  page: { padding: 40, fontSize: 10, fontFamily: PDF_FONT_FAMILY, color: "#111827" },
   title: { fontSize: 16, fontWeight: 700, marginBottom: 14 },
   h2: { fontSize: 12, fontWeight: 700, marginTop: 16, marginBottom: 6 },
   label: { fontWeight: 700 },

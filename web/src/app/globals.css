@@ -25,19 +25,13 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
-/* @xyflow/react's Controls buttons render on a hardcoded near-white
-   background regardless of the app's own theme, but their icon fill
-   otherwise inherits --foreground - which flips to near-white under
-   prefers-color-scheme: dark, making the icons invisible against their
-   own button background. Pin the icon fill to a fixed dark color so the
-   pan/zoom controls stay visible in both color schemes (issue #53).
-   This rule is scoped through the .react-flow ancestor class (present on
-   the component's root node) to win the cascade over @xyflow/react/dist/style.css's
-   own .react-flow__controls-button svg { fill: currentColor; } rule. That
-   stylesheet is imported from DependencyGraphView.tsx - a component-level
-   import that Next bundles after this global stylesheet - so on equal
-   specificity it would otherwise win purely by loading order. The ancestor
-   scoping increases specificity to win the cascade without needing !important. */
-.react-flow .react-flow__controls-button svg {
-  fill: #171717;
-}
+/* Formerly: a .react-flow-scoped rule pinning the Controls pan/zoom icon
+   fill to a fixed dark color, because the icon inherited --foreground
+   (near-white under prefers-color-scheme: dark) against the library's
+   hardcoded near-white button background (issue #53). Removed in issue
+   #135: DependencyGraphView.tsx now sets colorMode="dark" on <ReactFlow>,
+   which switches the library to its own .react-flow.dark CSS-variable
+   set - a dark Controls button background paired with a light icon
+   color, already contrast-correct with no override needed. Re-adding
+   this rule would in fact break that pairing (dark icon on the
+   now-dark button). */

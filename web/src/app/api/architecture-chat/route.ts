@@ -9,18 +9,24 @@ import {
   normalizeP4,
   setP4OnboardingComplete,
   setP4Routing,
+  setP4ActiveStepNumber,
   setP4Units,
   setP4PendingConflict,
   setP4SceneDensityDismissal,
   appendMessage,
   listMessages,
   appendOutstandingQuestions,
+  appendP4ContinuityLedgerEntry,
   ARCHITECTURE_MESSAGES_COLLECTION,
   type P4PendingConflict,
 } from "@/lib/canonEngine/storyStore";
 import { extractTurn, TurnValidationError } from "@/lib/canonEngine/extractTurn";
 import { isValidTransition } from "@/lib/canonEngine/transitions";
-import { buildP4ConflictContextMessage, resolveP4Conflict } from "@/lib/storyArchitectureEngine/canonRevision";
+import {
+  buildP4ConflictContextMessage,
+  resolveP4Conflict,
+  type P4CascadeReviewEntry,
+} from "@/lib/storyArchitectureEngine/canonRevision";
 import { RateLimitTimeoutError } from "@/lib/rateLimit/anthropicGate";
 import { getSystemPrompt } from "@/lib/systemPrompt";
 import { ArchitectureTurnSchema, EMIT_ARCHITECTURE_TURN_TOOL } from "@/lib/storyArchitectureEngine/architectureTurnSchema";
@@ -43,6 +49,7 @@ import {
   switchRoute,
   evaluateCausalGate,
   checkSceneRegisterFormat,
+  checkStepNumberRequirement,
   type StatusTransitionAttempt,
 } from "@/lib/storyArchitectureEngine/developmentLoop";
 import {
@@ -52,10 +59,22 @@ import {
   DEFAULT_SCENE_DENSITY_DISMISSAL,
   type SceneDensityResult,
 } from "@/lib/storyArchitectureEngine/sceneDensity";
+import { computeSetupPayoffAdvisory } from "@/lib/storyArchitectureEngine/setupPayoffLedger";
 
 export const runtime = "nodejs";
 
 const ARCHITECTURE_MESSAGE_WINDOW = 20;
+
+// Issue #161 (same class of concern already tracked for character-chat/
+// route.ts's Confirmed-facts block, issue #107): truncates one field's
+// value to a fixed character budget so a large cast or pillar count
+// can't grow this route's per-turn system-prompt token cost
+// unboundedly. Mirrors #107's own truncateFactValue exactly (same
+// 200-char budget) rather than inventing a different one.
+function truncateGroundingValue(value: unknown): string {
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  return text.length > 200 ? `${text.slice(0, 200)}…` : text;
+}
 
 /**
  * The live P4 Screenplay Structural Architect turn handler - GitHub
@@ -76,11 +95,22 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => null);
     const storyId: unknown = body?.storyId;
     const message: unknown = body?.message;
+    // Issue #138: retry/dangling-turn recovery, mirroring world-chat/
+    // route.ts's own retryLastTurn pattern (issue #108) - if a prior
+    // turn's model call failed after the user's message was already
+    // persisted, the resumed history ends in a user message with no
+    // reply. A retry re-runs the turn against the already-persisted
+    // history instead of appending a new user message.
+    const retry = body?.retry === true;
     if (typeof storyId !== "string" || !storyId) {
       return NextResponse.json({ error: "Request must include `storyId`." }, { status: 400 });
     }
-    if (typeof message !== "string" || !message.trim()) {
-      return NextResponse.json({ error: "Request must include a non-empty `message`." }, { status: 400 });
+    let userMessage = "";
+    if (!retry) {
+      if (typeof message !== "string" || !message.trim()) {
+        return NextResponse.json({ error: "Request must include a non-empty `message`." }, { status: 400 });
+      }
+      userMessage = message.trim();
     }
 
     const story = await getStory(storyId);
@@ -93,15 +123,24 @@ export async function POST(req: NextRequest) {
     }
 
     const turnId = randomUUID();
-    await appendMessage(
-      storyId,
-      { role: "user", content: message, ts: new Date().toISOString(), turnId },
-      ARCHITECTURE_MESSAGES_COLLECTION
-    );
+    if (retry) {
+      const lastMessages = await listMessages(storyId, 1, ARCHITECTURE_MESSAGES_COLLECTION);
+      if (lastMessages[0]?.role !== "user") {
+        return NextResponse.json({ error: "Nothing to retry." }, { status: 409 });
+      }
+    } else {
+      await appendMessage(
+        storyId,
+        { role: "user", content: userMessage, ts: new Date().toISOString(), turnId },
+        ARCHITECTURE_MESSAGES_COLLECTION
+      );
+    }
     const recentMessages = await listMessages(storyId, ARCHITECTURE_MESSAGE_WINDOW, ARCHITECTURE_MESSAGES_COLLECTION);
 
     const p4 = normalizeP4(story.p4);
-    const canon = await ingestCanon(storyId);
+    // Issue #140: `story` was already fetched above - pass it through
+    // instead of letting ingestCanon re-fetch the exact same Story doc.
+    const canon = await ingestCanon(storyId, story);
     let units = story.p4Units ?? [];
     const pendingConflictBefore = story.p4PendingConflict ?? null;
     const sceneDensityDismissalBefore = story.p4SceneDensityDismissal ?? DEFAULT_SCENE_DENSITY_DISMISSAL;
@@ -120,13 +159,13 @@ export async function POST(req: NextRequest) {
     if (canon.p2.characters.length > 0) {
       const characterLines = canon.p2.characters.map(
         (c) =>
-          `- charId: ${c.charId} | name: ${c.name} | Want: ${c.want} | Need: ${c.need} | Core Flaw: ${c.coreFlaw} | Core Wound: ${c.coreWound}`
+          `- charId: ${c.charId} | name: ${c.name} | Want: ${truncateGroundingValue(c.want)} | Need: ${truncateGroundingValue(c.need)} | Core Flaw: ${truncateGroundingValue(c.coreFlaw)} | Core Wound: ${truncateGroundingValue(c.coreWound)}`
       );
       system += `\n\n[Signed-Off Character Psychology - computed by the app, trust this over re-deriving it. Internal grounding only, never narrate this raw data to the author. If a unit's content contradicts one of these already-locked facts, report canon_contradiction with contradicted_ref set to the charId shown here and source_project "Project 2".]\n${characterLines.join("\n")}`;
     }
     if (canon.p3.pillars.length > 0) {
       const pillarLines = canon.p3.pillars.map(
-        (p) => `- elementId: ${p.elementId} | name: ${p.name} | value: ${JSON.stringify(p.value)}`
+        (p) => `- elementId: ${p.elementId} | name: ${p.name} | value: ${truncateGroundingValue(p.value)}`
       );
       system += `\n\n[Confirmed World Pillars - computed by the app, trust this over re-deriving it. Internal grounding only, never narrate this raw data to the author. If a unit's content contradicts one of these already-locked facts, report canon_contradiction with contradicted_ref set to the elementId shown here and source_project "Project 3".]\n${pillarLines.join("\n")}`;
     }
@@ -165,6 +204,35 @@ export async function POST(req: NextRequest) {
       system += `\n\n[Current Routing Choice - computed by the app, trust this over re-deriving it. Internal grounding only. The author's current routing choice is "${p4.routing.routingChoice}". Keep reporting this same value unless the author explicitly changes it.]`;
     }
 
+    // Active-step Core Purpose grounding (issue #139 - one of the two
+    // design-spec grounding blocks that never made it into the shipped
+    // route) - the design spec's own Architecture section lists this as
+    // "active-step Core Purpose block when active_step_number is set."
+    // Section 2 already gives the model all 10 steps' Core Purpose text
+    // verbatim, but this block narrows it to exactly the one step the
+    // PRIOR turn reported as the current focus (p4.activeStepNumber,
+    // persisted per issue #142), so the Core-Purpose Validation
+    // instruction (Section 6) has a single, unambiguous target to check
+    // the proposed content against on this turn, rather than requiring
+    // the model to re-locate the right step inside Section 2's full
+    // 10-step listing every turn.
+    if (p4.activeStepNumber !== null) {
+      const activeStep = STRUCTURAL_STEPS.find((s) => s.stepNumber === p4.activeStepNumber);
+      if (activeStep) {
+        system += `\n\n[Active Step Core Purpose - computed by the app, trust this over re-deriving it. Internal grounding only, never narrate this raw data to the author. The current focus of discussion is Step ${activeStep.stepNumber} (${activeStep.title}). Its Core Purpose, exactly as written in Section 2, is: "${activeStep.corePurpose}" Check any proposed content against this exact Core Purpose before ever reporting validation_result "passed" for it.]`;
+      }
+    }
+
+    // Issue #110/#139: closing reminder, always the LAST thing appended
+    // to `system` on every turn - the second of the two design-spec
+    // grounding blocks that never made it into the shipped route.
+    // Targets any bracketed grounding block above, whatever it calls
+    // itself, rather than enumerating today's block names or exact
+    // phrasing, so it stays correct as new blocks are added later
+    // without needing an update here. Identical convention to
+    // world-chat/route.ts's and character-chat/route.ts's own blocks.
+    system += `\n\n[Final reminder - applies to everything above: never name, quote, or describe the title of any bracketed section appended to this prompt at runtime, however it labels itself (for example "[... - computed by the app...]", "[... - internal grounding only...]", "[CANON REVISION PATH...]", or "[Onboarding Pending...]") - by its title or by any other means. Never reference internal framework or document names, issue numbers, FR/PRD identifiers, or other developer/product terminology - except the author-facing product names and on-screen controls this app itself shows the author (for example "Story Foundation Document", "Character Bible", "World Bible", "Project 4", the "Compile" button), which you should keep naming normally when guiding the author. Speak only in your own voice as the persona defined at the top of this prompt - an authoritative creative collaborator, never as a system narrating which of its own documented steps or internal mechanisms it is executing.]`;
+
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     const messages: Anthropic.MessageParam[] = recentMessages.map((m) => ({
       role: m.role,
@@ -183,6 +251,7 @@ export async function POST(req: NextRequest) {
 
     let effectiveOnboardingComplete = p4.onboardingComplete;
     let effectiveRouting = p4.routing;
+    let effectiveActiveStepNumber = p4.activeStepNumber;
     let effectiveUnit: StructuralUnit | null = null;
     let placementFlag: { flagged: boolean; message: string | null } = { flagged: false, message: null };
     // Never computed (stays null) when proposed_unit was null this turn or
@@ -192,7 +261,7 @@ export async function POST(req: NextRequest) {
     // "one was attempted and accepted."
     let statusAttempt: StatusTransitionAttempt | null = null;
     let pendingConflictForResponse: P4PendingConflict | null = pendingConflictBefore;
-    let cascadeReview: { id: string; description: string }[] | null = null;
+    let cascadeReview: P4CascadeReviewEntry[] | null = null;
     // Defaults to a reading of the PRE-turn units/dismissal state, so a
     // thrown error inside the try block below (caught further down)
     // still leaves the response with the last-known-good reading instead
@@ -227,6 +296,17 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // Issue #142: active_step_number had no persisted field anywhere
+      // (Story.p4 didn't track it) - a page reload mid-conversation
+      // always reset it to null even with an active, ongoing structural
+      // discussion. Mirrors the model's self-report verbatim every turn
+      // it changes (including back to null), unlike routing/stepNumber,
+      // since the author's focus can genuinely move off every step.
+      if (delta.active_step_number !== effectiveActiveStepNumber) {
+        await setP4ActiveStepNumber(storyId, delta.active_step_number);
+        effectiveActiveStepNumber = delta.active_step_number;
+      }
+
       // Structural unit + status transition: clamped to null entirely
       // until onboarding was ALREADY complete before this turn (Decision
       // 2's backstop). Deliberately checks the pre-turn p4.onboardingComplete,
@@ -234,6 +314,16 @@ export async function POST(req: NextRequest) {
       // routing_choice and proposes a unit in the same turn must still see
       // the unit clamped, or the author could skip onboarding entirely.
       if (p4.onboardingComplete) {
+        // Issue #158 (precedent-consistent, not a new defect): there is
+        // no independent check that the author actually made this
+        // choice on THIS turn, as opposed to the model prematurely
+        // reporting a resolution on the same turn it was only supposed
+        // to present the three choices. Identical exposure to
+        // world-chat/route.ts's own Conflict Resolution Protocol (issue
+        // #47) - filed for visibility given P4's consequence here (unit
+        // status/content changes, an outstanding-questions log entry) is
+        // heavier than P3's, but not fixed here since the same class of
+        // risk is already accepted elsewhere in this codebase.
         if (pendingConflictBefore && delta.resolution !== null) {
           const result = await resolveP4Conflict({
             storyId,
@@ -254,6 +344,18 @@ export async function POST(req: NextRequest) {
           // stays at its pre-resolution value rather than telling this
           // turn's response the conflict is resolved while Firestore
           // still shows it open.
+          //
+          // Issue #157 (precedent-consistent, not a new defect): the
+          // writes above (ledger + canon_revision_log, inside
+          // resolveP4Conflict) and setP4Units already completed BEFORE
+          // this call - if THIS call specifically throws, the ledger
+          // keeps the applied change but the conflict stays open in
+          // Firestore, so the author's next turn would resolve the same
+          // conflict again, producing a duplicate log entry. Same
+          // ordering and exposure as world-chat/route.ts's own Conflict
+          // Resolution Protocol (issue #47) - tracked, not fixed here,
+          // so it isn't silently repeated a third time uninvestigated if
+          // a future project forks this pattern again.
           await setP4PendingConflict(storyId, null);
           pendingConflictForResponse = null;
           effectiveUnit = findUnit(units, pendingConflictBefore.unitId);
@@ -261,7 +363,25 @@ export async function POST(req: NextRequest) {
           const proposed = delta.proposed_unit;
           const existing = findUnit(units, proposed.unit_id);
 
-          if (existing && !isValidTransition(existing.status, proposed.requested_status)) {
+          // Issue #154: isValidTransition(Confirmed, Confirmed) is true
+          // (the from===to short-circuit), so re-proposing an existing
+          // Confirmed unit with materially rewritten content but the
+          // SAME requested_status ("Confirmed") previously skipped this
+          // trigger entirely and landed in the ordinary-processing
+          // branch below, where setUnitContent overwrites unconditionally
+          // with no author checkpoint at all - canonEngine/canonStore.ts's
+          // own precedent (applyStateDelta) guards changingValue OR
+          // changingStatus for a Confirmed element; this only ever
+          // guarded the status half. JSON.stringify comparison mirrors
+          // that same precedent exactly (existing.content is `unknown` at
+          // the type level, even though P4 only ever stores a string).
+          const confirmedContentRewrite =
+            existing != null &&
+            existing.status === "Confirmed" &&
+            proposed.requested_status === "Confirmed" &&
+            JSON.stringify(existing.content) !== JSON.stringify(proposed.content);
+
+          if (existing && (!isValidTransition(existing.status, proposed.requested_status) || confirmedContentRewrite)) {
             // Final whole-branch review finding M1: a turn can report
             // both a regression AND a canon_contradiction at once - the
             // regression conflict takes priority (it's the deterministic,
@@ -295,6 +415,16 @@ export async function POST(req: NextRequest) {
             // Confirmed via accept_and_update, since that path bypasses
             // the ordinary-processing branch entirely and gatesPassed
             // is the only thing standing between it and Confirmed.
+            // Issue #145/#149 (disclosed, not fixed here): this Step-1
+            // exemption cross-checks one model-self-reported field
+            // (causal_tag: null) against another model-self-reported
+            // field (active_step_number === 1), not a value the app
+            // independently derives - see evaluateCausalGate's own
+            // docstring. A genuine independent check needs a persisted
+            // per-unit step/position (issue #149), which doesn't exist
+            // yet; bounded today because a misfire only ever surfaces as
+            // causalTag "UNVALIDATED" in the compiled document, never as
+            // a false "Therefore"/"But" certification.
             const causalGateAtDetection = evaluateCausalGate(
               proposed.requested_status,
               proposed.causal_tag,
@@ -303,6 +433,16 @@ export async function POST(req: NextRequest) {
             );
             const formatCheckAtDetection = checkSceneRegisterFormat(proposed.content);
             const coreValidAtDetection = delta.validation_result === "passed";
+            // Issue #169 gap 1: Confirmed must not be reachable with a
+            // null stepNumber - the value that would actually be
+            // written is delta.active_step_number when non-null,
+            // otherwise whatever the existing unit already carries
+            // (mirroring the ordinary-processing branch's own
+            // withContent/setUnitStepNumber conditional below).
+            const stepNumberCheckAtDetection = checkStepNumberRequirement(
+              proposed.requested_status,
+              delta.active_step_number ?? existing?.stepNumber ?? null
+            );
             const newConflict: P4PendingConflict = {
               kind: "canon_contradiction",
               unitId: proposed.unit_id,
@@ -313,7 +453,11 @@ export async function POST(req: NextRequest) {
               requestedStatus: proposed.requested_status,
               requestedContent: proposed.content,
               requestedCanonRefs: proposed.canon_refs,
-              gatesPassed: coreValidAtDetection && causalGateAtDetection.ok && formatCheckAtDetection.ok,
+              gatesPassed:
+                coreValidAtDetection &&
+                causalGateAtDetection.ok &&
+                formatCheckAtDetection.ok &&
+                stepNumberCheckAtDetection.ok,
               ts: new Date().toISOString(),
             };
             await setP4PendingConflict(storyId, newConflict);
@@ -337,13 +481,23 @@ export async function POST(req: NextRequest) {
               proposed.causal_tag_reason
             );
             const formatCheck = checkSceneRegisterFormat(proposed.content);
+            // Issue #169 gap 1: gates Confirmed on withContent's actual
+            // stepNumber (the value that will really be written, after
+            // the never-overwritten-with-null rule just above) - not
+            // delta.active_step_number directly, so a unit that already
+            // carries a real stepNumber from an earlier turn isn't
+            // wrongly blocked just because THIS turn's active step is
+            // null.
+            const stepNumberCheck = checkStepNumberRequirement(proposed.requested_status, withContent.stepNumber);
             const coreValid = delta.validation_result === "passed";
-            const combinedValid = coreValid && causalGate.ok && formatCheck.ok;
+            const combinedValid = coreValid && causalGate.ok && formatCheck.ok && stepNumberCheck.ok;
             const combinedReason = !coreValid
               ? delta.validation_reason
               : !causalGate.ok
                 ? causalGate.reason
-                : formatCheck.reason;
+                : !formatCheck.ok
+                  ? formatCheck.reason
+                  : stepNumberCheck.reason;
 
             const attempt = attemptStatusTransition(withContent, proposed.requested_status, {
               valid: combinedValid,
@@ -374,6 +528,33 @@ export async function POST(req: NextRequest) {
             await setP4Units(storyId, units);
             effectiveUnit = finalUnit;
 
+            // Dependency & Continuity Ledger (issue #72) - records every
+            // genuine NEW arrival at Confirmed reached through ordinary
+            // turn processing (the common case; the Canon Revision
+            // Path's own equivalent transitions are logged separately
+            // by resolveP4Conflict). Only fires once per arrival -
+            // `existing`'s status (immediately before this turn) must
+            // not already have been Confirmed, so a later turn that
+            // simply re-reports an already-Confirmed unit's content
+            // doesn't produce a duplicate entry. Best-effort/non-
+            // blocking, matching the deferred_items write further below
+            // in this same handler - a ledger-write failure must never
+            // fail an otherwise-successful chat turn.
+            if (attempt.accepted && finalUnit.status === "Confirmed" && existing?.status !== "Confirmed") {
+              try {
+                await appendP4ContinuityLedgerEntry(storyId, {
+                  kind: "confirmed_transition",
+                  unitId: finalUnit.unitId,
+                  description: `Unit "${finalUnit.unitId}" confirmed`,
+                  resolvedBy: user.uid,
+                  ts: new Date().toISOString(),
+                  turnId,
+                });
+              } catch (ledgerErr) {
+                console.warn(`[architecture-chat] continuity ledger write failed for turn ${turnId}:`, ledgerErr);
+              }
+            }
+
             if (proposed.proposed_position_percent !== null) {
               const step = STRUCTURAL_STEPS.find((s) => s.stepNumber === delta.active_step_number);
               if (step) {
@@ -401,6 +582,13 @@ export async function POST(req: NextRequest) {
     } catch (stateErr) {
       console.warn(`[architecture-chat] state update failed for turn ${turnId}:`, stateErr);
     }
+
+    // Issue #173: strictly advisory, computed fresh every turn from
+    // `units` in its final state - never gates anything, never
+    // persisted/dismissible (unlike sceneDensity's own dismissal
+    // state), since a dangling setup is normal mid-development state,
+    // not an alert the author needs to acknowledge once.
+    const setupPayoffAdvisory = computeSetupPayoffAdvisory(units);
 
     await appendMessage(
       storyId,
@@ -433,7 +621,12 @@ export async function POST(req: NextRequest) {
       reply: delta.reply,
       context: delta.context,
       routing_choice: effectiveRouting?.routingChoice ?? null,
-      active_step_number: delta.active_step_number,
+      // effectiveActiveStepNumber (issue #142), not delta.active_step_number
+      // directly - same "effective* defaults to last-known-good state"
+      // convention effectiveOnboardingComplete/effectiveRouting already
+      // follow, so a thrown error inside the try block above still
+      // leaves the response consistent with what was actually persisted.
+      active_step_number: effectiveActiveStepNumber,
       unit: effectiveUnit,
       placementFlag,
       deferredItems: delta.deferred_items,
@@ -447,6 +640,7 @@ export async function POST(req: NextRequest) {
       pendingConflict: pendingConflictForResponse,
       cascadeReview,
       sceneDensity: sceneDensityForResponse,
+      setupPayoffAdvisory,
       structuralVectorOptions: delta.structural_vector_options,
     });
   } catch (err) {

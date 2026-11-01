@@ -10,9 +10,11 @@ import {
   listGuardrailFlags,
   normalizeP3,
   normalizeP4,
+  normalizeP5ContinuityMatrix,
   CHARACTER_MESSAGES_COLLECTION,
   WORLD_MESSAGES_COLLECTION,
   ARCHITECTURE_MESSAGES_COLLECTION,
+  SCREENPLAY_MESSAGES_COLLECTION,
 } from "@/lib/canonEngine/storyStore";
 import { listElements, WORLD_ELEMENTS_COLLECTION } from "@/lib/canonEngine/canonStore";
 import { setLastVisited } from "@/lib/userStore";
@@ -25,6 +27,7 @@ import {
   applySceneDensityDismissal,
   DEFAULT_SCENE_DENSITY_DISMISSAL,
 } from "@/lib/storyArchitectureEngine/sceneDensity";
+import { computeSetupPayoffAdvisory } from "@/lib/storyArchitectureEngine/setupPayoffLedger";
 
 export const runtime = "nodejs";
 
@@ -72,6 +75,11 @@ export async function GET(
     // whole-branch review finding I4/R1) - without this flag, a page
     // reload never fetches the architecture transcript at all.
     const includeArchitectureMessages = req.nextUrl.searchParams.get("architectureMessages") === "1";
+    // Same reasoning, for the Screenplay Edition client (issue #100) -
+    // without this flag, a page reload never fetches the screenplay
+    // transcript, losing the "resume restores full state with no data
+    // loss" guarantee the issue requires.
+    const includeScreenplayMessages = req.nextUrl.searchParams.get("screenplayMessages") === "1";
 
     const membership = await getMembership(workspaceId, user.uid);
     if (!membership) {
@@ -90,6 +98,7 @@ export async function GET(
       worldMessages,
       worldElements,
       architectureMessages,
+      screenplayMessages,
       guardrailFlags,
       characterBibleGate,
     ] = await Promise.all([
@@ -99,6 +108,7 @@ export async function GET(
       includeWorldMessages ? listMessages(canvasId, undefined, WORLD_MESSAGES_COLLECTION) : Promise.resolve([]),
       includeWorldElements ? listElements(canvasId, WORLD_ELEMENTS_COLLECTION) : Promise.resolve([]),
       includeArchitectureMessages ? listMessages(canvasId, undefined, ARCHITECTURE_MESSAGES_COLLECTION) : Promise.resolve([]),
+      includeScreenplayMessages ? listMessages(canvasId, undefined, SCREENPLAY_MESSAGES_COLLECTION) : Promise.resolve([]),
       listGuardrailFlags(canvasId),
       includeWorldMessages || includeWorldElements
         ? computeCharacterBibleGate(canvasId, story.p2)
@@ -118,25 +128,43 @@ export async function GET(
           : "world-bible"
         : includeArchitectureMessages
           ? "story-architecture"
-          : "interview";
+          : includeScreenplayMessages
+            ? "screenplay"
+            : "interview";
     await setLastVisited(user.uid, workspaceId, canvasId, lastProject);
 
     const sceneDensity = applySceneDensityDismissal(
       computeSceneDensity(story.p4Units ?? []),
       story.p4SceneDensityDismissal ?? DEFAULT_SCENE_DENSITY_DISMISSAL
     );
+    // Issue #173: same "compute fresh on resume" precedent as
+    // sceneDensity directly above - a page reload shows the current
+    // advisory without waiting for the next chat turn.
+    const setupPayoffAdvisory = computeSetupPayoffAdvisory(story.p4Units ?? []);
 
     return NextResponse.json({
-      story: { ...story, p3: normalizeP3(story.p3), p4: normalizeP4(story.p4) },
+      story: {
+        ...story,
+        p3: normalizeP3(story.p3),
+        p4: normalizeP4(story.p4),
+        // Issue #100: always normalized in the resume payload, same
+        // reasoning as p3/p4 above - a Story written before this field
+        // existed, or before any scene touched it, should resume with
+        // a real empty matrix object, not an absent field the client
+        // has to separately default.
+        p5ContinuityMatrix: normalizeP5ContinuityMatrix(story.p5ContinuityMatrix),
+      },
       elements,
       messages,
       characterMessages,
       worldMessages,
       worldElements,
       architectureMessages,
+      screenplayMessages,
       guardrailFlags,
       characterBibleGate,
       sceneDensity,
+      setupPayoffAdvisory,
     });
   } catch (err) {
     return errorResponse(err);

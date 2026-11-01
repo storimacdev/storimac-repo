@@ -669,6 +669,16 @@ export async function POST(req: NextRequest) {
         `[character-chat] Story Foundation conflict detected for ${conflictResult.nextPendingConflict.field} on turn ${turnId}: ${conflictResult.nextPendingConflict.conflictDescription}`
       );
       await setP2PendingConflict(storyId, conflictResult.nextPendingConflict);
+    } else if (conflictResult.suppressedConflictField) {
+      // Issue #117: this character's own fresh conflict_detected was
+      // suppressed because a DIFFERENT character's conflict already
+      // occupies the singular pending-conflict slot. nextPendingConflict
+      // is unchanged from pendingConflictBefore here, so there's nothing
+      // new to persist - just surface the suppression the same way #106
+      // does for the same-character chained case.
+      console.warn(
+        `[character-chat] conflict_detected set for ${conflictResult.suppressedConflictField} on turn ${turnId} for ${charId} while a different character's conflict (${pendingConflictBefore?.charId}) is pending - downgraded to Working instead of dropping it; a later turn's fresh detection will catch it once the pending conflict is resolved`
+      );
     }
 
     await setP2State(storyId, resolution.nextP2State);

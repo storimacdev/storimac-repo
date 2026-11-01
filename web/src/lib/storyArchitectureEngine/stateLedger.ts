@@ -11,6 +11,19 @@ import type { CanonStatus } from "@/lib/canonEngine/types";
  * developmentLoop.ts's `evaluateCausalGate` for the gating logic;
  * `setCausalTag` below only performs the update once a turn's report
  * has already passed that gate.
+ *
+ * Caveat (issue #146 final whole-branch review): "computed and
+ * validated" above is NOT the same claim as "always genuinely
+ * evaluated." A unit that reached `Confirmed` via the Step-1 causal
+ * exemption keeps `causalTag: "UNVALIDATED"` - the exemption never sets
+ * a real tag, it only lets the transition through. And any unit that
+ * reached `Confirmed` before issue #63 shipped has no backfill; it also
+ * sits at whatever value it already had (almost always `"UNVALIDATED"`,
+ * `createUnit`'s default). Downstream consumers (#64's lifecycle guard,
+ * #70's compiler) must not read `causalTag !== "UNVALIDATED"` as a
+ * proxy for "the causal gate passed for this unit" - `"UNVALIDATED"`
+ * can mean either "failed/exempt" or "never evaluated," and this module
+ * has no way to tell those two apart after the fact.
  */
 
 export type StructuralUnitType = "Scene" | "Sequence" | "SetPiece" | "PlotPoint";

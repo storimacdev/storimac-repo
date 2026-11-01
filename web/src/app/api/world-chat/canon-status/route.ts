@@ -4,7 +4,13 @@ import { requireUser } from "@/lib/session";
 import { errorResponse } from "@/lib/apiErrors";
 import { getMembership } from "@/lib/workspace/workspaceStore";
 import { getStory } from "@/lib/canonEngine/storyStore";
-import { getElement, upsertElement, listDependents, WORLD_ELEMENTS_COLLECTION } from "@/lib/canonEngine/canonStore";
+import {
+  getElement,
+  upsertElement,
+  listDependents,
+  listElements,
+  WORLD_ELEMENTS_COLLECTION,
+} from "@/lib/canonEngine/canonStore";
 import { isValidTransition } from "@/lib/canonEngine/transitions";
 import type { CanonStatus } from "@/lib/canonEngine/types";
 import { pillarElementId } from "@/lib/worldEngine/pillarElementId";
@@ -127,6 +133,53 @@ export async function PATCH(req: NextRequest) {
       elementId: element.element_id,
       status: element.status === "Parked" ? "Deferred" : element.status,
     });
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+/**
+ * Lists pillar-to-pillar dependencies - GitHub issue #122. Issue #48
+ * persists a real `depends_on` array on each pillar's CanonElement
+ * (WORLD_ELEMENTS_COLLECTION), but the only place it was ever surfaced to
+ * the author was transiently, in the Dependency Review confirm dialog
+ * above. This read path lists every pillar element and resolves its own
+ * id and its `depends_on` ids back to display names, reusing this file's
+ * own reverse-lookup pattern (element id -> name, reconstructed from
+ * story.p3's `pillars`/`proposedPillars` name lists, since no pillar
+ * CanonElement ever gets a `value` written).
+ */
+export async function GET(req: NextRequest) {
+  try {
+    const user = await requireUser();
+    const storyId = req.nextUrl.searchParams.get("storyId");
+
+    if (!storyId) {
+      return NextResponse.json({ error: "Request must include a `storyId` query parameter." }, { status: 400 });
+    }
+
+    const story = await getStory(storyId);
+    if (!story) {
+      return NextResponse.json({ error: "Story Canvas not found." }, { status: 404 });
+    }
+    const membership = await getMembership(story.workspaceId, user.uid);
+    if (!membership) {
+      return NextResponse.json({ error: "Not a member of this workspace." }, { status: 403 });
+    }
+
+    const elements = await listElements(storyId, WORLD_ELEMENTS_COLLECTION);
+    const knownPillarNames = [...(story.p3?.proposedPillars ?? []), ...(story.p3?.pillars ?? [])];
+    const pillarNameById = new Map(knownPillarNames.map((name) => [pillarElementId(name), name]));
+    const nameFor = (id: string) => pillarNameById.get(id) ?? id;
+
+    const pillars = elements.map((e) => ({
+      elementId: e.element_id,
+      name: nameFor(e.element_id),
+      status: e.status === "Parked" ? "Deferred" : e.status,
+      dependsOn: (e.depends_on ?? []).map((depId) => ({ elementId: depId, name: nameFor(depId) })),
+    }));
+
+    return NextResponse.json({ pillars });
   } catch (err) {
     return errorResponse(err);
   }

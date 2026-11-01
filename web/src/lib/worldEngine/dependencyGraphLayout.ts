@@ -7,14 +7,30 @@ import type { CanonBadgeStatus } from "@/lib/canonEngine/statusBadge";
  * whatever it depends on (0 if it depends on nothing, or nothing in the
  * graph's own node set), so later tiers visually read as "depends on
  * earlier tiers" - a stable, single-pass computation that always
- * produces the same layout for the same input, with no animation or
- * continuous re-layout needed.
+ * produces the same layout for the same input array, with no animation
+ * or continuous re-layout needed.
+ *
+ * Caveat (issue #136): "same input" means the same `nodes`/`edges` ARRAYS
+ * - specifically their iteration order - not just the same logical graph.
+ * Tier assignment for a genuine dependency cycle is order-dependent: the
+ * cycle guard in `tierOf` below breaks the recursion on whichever node it
+ * revisits first, and that's a function of which node in the cycle is
+ * visited first, which in turn follows `nodes`'/`depsOf`'s iteration
+ * order. The same 3-node cycle can therefore lay out differently if the
+ * API returns `entries` in a different order (e.g. after a Firestore
+ * re-read) even though the underlying dependency graph hasn't changed.
  */
 
 export interface DependencyGraphNode {
   id: string;
   name: string;
   status: CanonBadgeStatus;
+  /** True when at least one of this node's `dependsOn` targets was
+   * filtered out as stale/missing (not present in the graph's own node
+   * set) - issue #136 finding 8. Without this, such a node renders as an
+   * unconnected orphan with no indication the dependency is dangling,
+   * unlike the List view, which still prints the raw missing id as text. */
+  hasMissingDependency?: boolean;
 }
 
 export interface DependencyGraphEdge {
