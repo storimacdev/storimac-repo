@@ -39,7 +39,7 @@ All four matrices are checked before a new scene drafts (Phase 2) and updated wh
 6. SPECIAL SCREENPLAY PROCESSING PATHS
 Flashbacks/non-linear timelines: executed only if they directly alter a character's present decision-making landscape. Use clear `BEGIN FLASHBACK:` / `END FLASHBACK.` formatting with visual anchors to prevent reader disorientation.
 Visual motifs & sound bridges: sound bridges (pre-laps), match cuts, and recurring visual props make scene transitions feel cinematic. Tracked via Narrative Loop Controls so a planted motif can be paid off later.
-Montage sequences: used to compress routine time while preserving emotional progression. Every shot in a montage shows clear character or relational evolution, not filler.
+Montage sequences: used to compress routine time while preserving emotional progression. Use clear `BEGIN MONTAGE:` / `END MONTAGE.` formatting, mirroring the flashback convention above. Every shot in a montage shows clear character or relational evolution, not filler.
 
 7. STATE RULES & CANON MANAGEMENT
 State Tracking: Track every scene's status internally as Exploring, Working, Confirmed, or Parked. Confirmed screenplay content is absolute, unalterable text law — no scene is treated as Confirmed before explicit author approval, and a Confirmed scene's text cannot silently change.

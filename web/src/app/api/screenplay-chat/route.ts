@@ -36,6 +36,7 @@ import {
 } from "@/lib/screenplayEngine/sceneLedger";
 import { validateSceneDraft, type SceneDraftingValidation } from "@/lib/screenplayEngine/sceneDrafting";
 import { checkContinuityBeforeDraft, type ContinuityViolation } from "@/lib/screenplayEngine/continuityMatrix";
+import { validateSpecialProcessingPaths } from "@/lib/screenplayEngine/specialProcessingPaths";
 
 export const runtime = "nodejs";
 
@@ -136,7 +137,7 @@ export async function POST(req: NextRequest) {
       const openLoopLines = continuityMatrix.openLoops
         .filter((l) => l.status === "open")
         .map((l) => `- [${l.id}] (${l.kind}) planted scene ${l.plantedSceneNumber}: ${l.description}`);
-      system += `\n\n[Phase 2 - Scene Drafting - internal grounding only. Scene ${existingScene.sceneNumber} is signed off. Draft it now in strict industry screenplay format per Sections 3-4: Strict Visual Discipline, active present tense, Lean Action Paragraphs, Performable Dialogue & Subtext, Enter Late/Leave Early, and the Conflict Mandate. Report draft_text, conflict_mandate, enter_late_leave_early, and continuity_requirements (every fact/physical-state this draft relies on) together this turn. Never alter a structural fact from the Project 4 blueprint (scene count, turning point, cast) without reporting structural_deviation - that halts drafting for the Conflict Intercept protocol rather than silently reinterpreting the blueprint.${
+      system += `\n\n[Phase 2 - Scene Drafting - internal grounding only. Scene ${existingScene.sceneNumber} is signed off. Draft it now in strict industry screenplay format per Sections 3-4: Strict Visual Discipline, active present tense, Lean Action Paragraphs, Performable Dialogue & Subtext, Enter Late/Leave Early, and the Conflict Mandate. Report draft_text, conflict_mandate, enter_late_leave_early, and continuity_requirements (every fact/physical-state this draft relies on) together this turn. If this scene uses a flashback or montage (Section 6), use BEGIN FLASHBACK:/END FLASHBACK. or BEGIN MONTAGE:/END MONTAGE. formatting and report special_processing (flashback justification, per-shot montage evolution, and any Open Loop ids this scene pays off via loops_to_close - a loop can only be closed if it was planted in an earlier Confirmed scene). Never alter a structural fact from the Project 4 blueprint (scene count, turning point, cast) without reporting structural_deviation - that halts drafting for the Conflict Intercept protocol rather than silently reinterpreting the blueprint.${
         openLoopLines.length > 0 ? `\nOpen Loops currently tracked:\n${openLoopLines.join("\n")}` : ""
       }]`;
     }
@@ -222,8 +223,31 @@ export async function POST(req: NextRequest) {
               reason: delta.enter_late_leave_early?.reason ?? "",
             },
           });
-          draftValidation = validation;
-          if (validation.ok) {
+          const specialProcessing = validateSpecialProcessingPaths(delta.draft_text, continuityMatrix, {
+            flashback: delta.special_processing?.flashback
+              ? {
+                  present: delta.special_processing.flashback.present,
+                  justification: delta.special_processing.flashback.justification,
+                }
+              : null,
+            montage: delta.special_processing?.montage
+              ? {
+                  present: delta.special_processing.montage.present,
+                  shots: delta.special_processing.montage.shots.map((s) => ({
+                    description: s.description,
+                    evolutionDescription: s.evolution_description,
+                  })),
+                }
+              : null,
+            loopsToClose: delta.special_processing?.loops_to_close ?? [],
+          });
+
+          draftValidation = {
+            ok: validation.ok && specialProcessing.ok,
+            blockingReasons: [...validation.blockingReasons, ...specialProcessing.blockingReasons],
+            advisoryFindings: validation.advisoryFindings,
+          };
+          if (draftValidation.ok) {
             const drafted = setDraftText(effectiveScene, delta.draft_text);
             scenes = upsertScene(scenes, drafted);
             effectiveScene = drafted;

@@ -78,6 +78,25 @@ export const ScreenplayTurnSchema = z.object({
       ),
     })
     .nullable(),
+  /** Issue #99 (Special Screenplay Processing Paths), layered onto
+   * Phase 2's draft_text. Null only when draft_text is also null. */
+  special_processing: z
+    .object({
+      flashback: z
+        .object({
+          present: z.boolean(),
+          justification: z.string(),
+        })
+        .nullable(),
+      montage: z
+        .object({
+          present: z.boolean(),
+          shots: z.array(z.object({ description: z.string(), evolution_description: z.string() })),
+        })
+        .nullable(),
+      loops_to_close: z.array(z.string()),
+    })
+    .nullable(),
   deferred_items: z.array(
     z.object({
       item: z.string().min(1),
@@ -189,6 +208,45 @@ export const EMIT_SCREENPLAY_TURN_TOOL: Anthropic.Tool = {
         required: ["required_knowledge", "referenced_physical"],
         description: "The continuity facts this draft relies on (issue #97 AC5 - checked before a new scene drafts). Null when draft_text is also null.",
       },
+      special_processing: {
+        type: ["object", "null"],
+        properties: {
+          flashback: {
+            type: ["object", "null"],
+            properties: {
+              present: { type: "boolean", description: "Whether this draft contains a BEGIN FLASHBACK:/END FLASHBACK. block." },
+              justification: { type: "string", description: "How this flashback directly alters a character's present decision-making landscape. Required whenever present is true." },
+            },
+            required: ["present", "justification"],
+          },
+          montage: {
+            type: ["object", "null"],
+            properties: {
+              present: { type: "boolean", description: "Whether this draft contains a BEGIN MONTAGE:/END MONTAGE. block." },
+              shots: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    description: { type: "string", description: "What this shot shows." },
+                    evolution_description: { type: "string", description: "The character/relational evolution this shot specifically advances - never filler." },
+                  },
+                  required: ["description", "evolution_description"],
+                },
+                description: "At least 2 shots required whenever present is true.",
+              },
+            },
+            required: ["present", "shots"],
+          },
+          loops_to_close: {
+            type: "array",
+            items: { type: "string" },
+            description: "Open Loop ids (visual motifs, sound bridges/cues, setups) this draft pays off - must already exist as a planted Open Loop.",
+          },
+        },
+        required: ["flashback", "montage", "loops_to_close"],
+        description: "Special Screenplay Processing Paths (issue #99) layered onto draft_text. Null only when draft_text is also null.",
+      },
       deferred_items: {
         type: "array",
         items: {
@@ -219,6 +277,7 @@ export const EMIT_SCREENPLAY_TURN_TOOL: Anthropic.Tool = {
       "enter_late_leave_early",
       "structural_deviation",
       "continuity_requirements",
+      "special_processing",
       "deferred_items",
     ],
   },
