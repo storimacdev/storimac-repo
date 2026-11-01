@@ -11,8 +11,10 @@ import {
   appendOutstandingQuestions,
   setP5Scenes,
   setP5ContinuityMatrix,
+  setP5PendingConflict,
   normalizeP5ContinuityMatrix,
   SCREENPLAY_MESSAGES_COLLECTION,
+  type P5PendingConflict,
 } from "@/lib/canonEngine/storyStore";
 import { extractTurn, TurnValidationError } from "@/lib/canonEngine/extractTurn";
 import { RateLimitTimeoutError } from "@/lib/rateLimit/anthropicGate";
@@ -41,6 +43,11 @@ import { checkContinuityBeforeDraft, type ContinuityViolation } from "@/lib/scre
 import { validateSpecialProcessingPaths } from "@/lib/screenplayEngine/specialProcessingPaths";
 import { buildComplianceReport, formatScreenplayDelivery } from "@/lib/screenplayEngine/qaDelivery";
 import { validateRevisionClassification, canonizeScene } from "@/lib/screenplayEngine/revisionCanonization";
+import {
+  buildP5ConflictContextMessage,
+  computeDownstreamContinuityDamage,
+  resolveP5Conflict,
+} from "@/lib/screenplayEngine/conflictIntercept";
 
 export const runtime = "nodejs";
 
@@ -95,6 +102,7 @@ export async function POST(req: NextRequest) {
     const canon = await ingestScreenplayCanon(storyId);
     let scenes = story.p5Scenes ?? [];
     let continuityMatrix = normalizeP5ContinuityMatrix(story.p5ContinuityMatrix);
+    const pendingConflictBefore: P5PendingConflict | null = story.p5PendingConflict ?? null;
 
     let system = getSystemPrompt("sp05-se-systemprompt.md");
 
@@ -127,7 +135,23 @@ export async function POST(req: NextRequest) {
 
     system += `\n\n[Active Scene - computed by the app, trust this over re-deriving it. Internal grounding only. The scene currently in play is Scene ${activeSceneNumber}. Report scene_number as ${activeSceneNumber} this turn unless the author explicitly asks to revisit a different, already-resolved scene.]`;
 
-    if (!gateOpenCheck.ok) {
+    // Conflict Intercept grounding (issue #98) - shown whenever a
+    // conflict is genuinely open, regardless of which other grounding
+    // block below would otherwise apply. Matches architecture-chat/
+    // route.ts's own precedent: added unconditionally alongside
+    // whatever phase grounding follows, since a conflict can only ever
+    // open on a scene already past onboarding/gating.
+    if (pendingConflictBefore) {
+      system += buildP5ConflictContextMessage(
+        pendingConflictBefore,
+        computeDownstreamContinuityDamage(continuityMatrix, scenes, pendingConflictBefore.sceneNumber)
+      );
+    }
+
+    if (pendingConflictBefore) {
+      // Drafting is frozen for the conflicted scene until resolved -
+      // no Phase 2/4 grounding is shown for it this turn.
+    } else if (!gateOpenCheck.ok) {
       system += `\n\n[Gate Blocked - internal grounding only, never narrate this raw data verbatim, but convey its substance: ${gateOpenCheck.reason}]`;
     } else if (!readiness.ready) {
       system += `\n\n[Scene Register Gap - internal grounding only. ${readiness.reason} Tell the author this scene cannot be gated yet and ask how to proceed - never invent a Scene Register entry.]`;
@@ -172,11 +196,35 @@ export async function POST(req: NextRequest) {
     let draftValidation: SceneDraftingValidation | null = null;
     let structuralDeviation: { deviates: boolean; explanation: string } | null = null;
     let delivery: string | null = null;
+    // Defaults to the pre-turn value, same "effective* defaults to
+    // last-known-good state" convention architecture-chat/route.ts's
+    // own pendingConflictForResponse already follows.
+    let pendingConflictForResponse: P5PendingConflict | null = pendingConflictBefore;
 
     try {
       const sceneNumber = delta.scene_number ?? activeSceneNumber;
       const base = findScene(scenes, sceneNumber) ?? createSceneRecord(sceneNumber);
 
+      if (pendingConflictBefore && delta.resolution !== null) {
+        // Issue #98 AC3: apply the author's resolution choice, then
+        // clear the conflict. No other processing happens on this
+        // turn - resolving the conflict IS this turn's content.
+        const resolved = await resolveP5Conflict({
+          storyId,
+          conflict: pendingConflictBefore,
+          resolution: delta.resolution,
+          turnId,
+          resolvedBy: user.uid,
+          scenes,
+          matrix: continuityMatrix,
+        });
+        scenes = resolved.scenes;
+        continuityMatrix = resolved.matrix;
+        await setP5ContinuityMatrix(storyId, continuityMatrix);
+        await setP5PendingConflict(storyId, null);
+        pendingConflictForResponse = null;
+        effectiveScene = findScene(scenes, pendingConflictBefore.sceneNumber);
+      } else if (!pendingConflictBefore) {
       if (delta.proposed_assignment_summary) {
         const validation = validateAssignmentSummaryFormat(delta.proposed_assignment_summary);
         if (validation.ok) {
@@ -221,10 +269,59 @@ export async function POST(req: NextRequest) {
           })),
         });
 
+        // Issue #98: both a continuity contradiction and a reported
+        // structural deviation now open a formal Conflict Intercept
+        // conflict (AC1/AC2), rather than just withholding the draft -
+        // the author must be given the three-way choice, not just
+        // told "no."
         if (!continuityCheck.ok) {
           continuityViolations = continuityCheck.violations;
+          const newConflict: P5PendingConflict = {
+            kind: "continuity_contradiction",
+            sceneNumber: effectiveScene.sceneNumber,
+            violations: continuityCheck.violations,
+            requestedDraftText: delta.draft_text,
+            requestedMatrixUpdate: {
+              knowledgeGained: (delta.continuity_outcomes?.knowledge_gained ?? []).map((k) => ({
+                characterId: k.character_id,
+                characterName: k.character_name,
+                fact: k.fact,
+                state: k.state,
+              })),
+              physicalChanges: (delta.continuity_outcomes?.physical_changes ?? []).map((p) => ({
+                subject: p.subject,
+                kind: p.kind,
+                detail: p.detail,
+              })),
+            },
+            ts: new Date().toISOString(),
+          };
+          await setP5PendingConflict(storyId, newConflict);
+          pendingConflictForResponse = newConflict;
         } else if (delta.structural_deviation?.deviates) {
           structuralDeviation = delta.structural_deviation;
+          const newConflict: P5PendingConflict = {
+            kind: "structural_deviation",
+            sceneNumber: effectiveScene.sceneNumber,
+            explanation: delta.structural_deviation.explanation,
+            requestedDraftText: delta.draft_text,
+            requestedMatrixUpdate: {
+              knowledgeGained: (delta.continuity_outcomes?.knowledge_gained ?? []).map((k) => ({
+                characterId: k.character_id,
+                characterName: k.character_name,
+                fact: k.fact,
+                state: k.state,
+              })),
+              physicalChanges: (delta.continuity_outcomes?.physical_changes ?? []).map((p) => ({
+                subject: p.subject,
+                kind: p.kind,
+                detail: p.detail,
+              })),
+            },
+            ts: new Date().toISOString(),
+          };
+          await setP5PendingConflict(storyId, newConflict);
+          pendingConflictForResponse = newConflict;
         } else {
           const validation = validateSceneDraft(delta.draft_text, {
             conflictMandate: {
@@ -345,6 +442,7 @@ export async function POST(req: NextRequest) {
           await setP5ContinuityMatrix(storyId, continuityMatrix);
         }
       }
+      } // close `else if (!pendingConflictBefore)`
 
       await setP5Scenes(storyId, scenes);
     } catch (stateErr) {
@@ -379,6 +477,10 @@ export async function POST(req: NextRequest) {
       draftValidation,
       structuralDeviation,
       delivery,
+      pendingConflict: pendingConflictForResponse,
+      downstreamContinuityDamage: pendingConflictForResponse
+        ? computeDownstreamContinuityDamage(continuityMatrix, scenes, pendingConflictForResponse.sceneNumber)
+        : null,
       gaps: canon.gaps,
       deferredItems: delta.deferred_items,
     });

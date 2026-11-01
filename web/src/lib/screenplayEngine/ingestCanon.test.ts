@@ -15,6 +15,7 @@ function baseDoc(overrides: Partial<ScreenplayArchitectureDocument> = {}): Scree
       working_title: "Test Story",
       date: "2026-10-16",
       status: "Compiled",
+      scope: null,
       author: "(not tracked)",
       diagnosed_complexity: "N/A",
       projected_scene_count: 0,
@@ -33,7 +34,7 @@ function baseDoc(overrides: Partial<ScreenplayArchitectureDocument> = {}): Scree
       { tag: "THE FRAME", scene_number: 1, unit_id: "u1", slugline: "INT. HOUSE - DAY" },
       { tag: "THE SPARK", scene_number: null, unit_id: null, slugline: null },
     ],
-    "6_setup_payoff_ledger": "Not tracked",
+    "6_setup_payoff_ledger": [],
     "7_outstanding_decisions_version_history": { outstanding: [], version_history: [] },
     ...overrides,
   };

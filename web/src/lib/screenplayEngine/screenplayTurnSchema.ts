@@ -159,6 +159,10 @@ export const ScreenplayTurnSchema = z.object({
       notes: z.string(),
     })
     .nullable(),
+  /** Issue #98 (Conflict Intercept): set only on the turn immediately
+   * after the author picks one of the three choices for an open
+   * conflict - null on every other turn. */
+  resolution: z.enum(["revert", "accept_and_update", "park"]).nullable(),
   deferred_items: z.array(
     z.object({
       item: z.string().min(1),
@@ -375,6 +379,11 @@ export const EMIT_SCREENPLAY_TURN_TOOL: Anthropic.Tool = {
         type: "boolean",
         description: "True only on the turn where the author gives explicit approval to freeze scene_number's current text as immutable Confirmed canon.",
       },
+      resolution: {
+        type: ["string", "null"],
+        enum: ["revert", "accept_and_update", "park", null],
+        description: "Set only on the turn immediately after the author picks one of the three choices presented for an open Conflict Intercept conflict. Null on every other turn.",
+      },
       dialogue_voice_audit: {
         type: ["object", "null"],
         properties: {
@@ -419,6 +428,7 @@ export const EMIT_SCREENPLAY_TURN_TOOL: Anthropic.Tool = {
       "revision_classification",
       "full_rewrite_requested",
       "scene_approved",
+      "resolution",
       "dialogue_voice_audit",
       "deferred_items",
     ],
