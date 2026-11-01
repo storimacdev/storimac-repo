@@ -110,7 +110,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ needsAcknowledgment: true, thematicAnchorAudit, preCompilationAudit }, { status: 409 });
     }
 
-    const version = await generateScreenplayArchitectureDocument(storyId);
+    // Issue #174: pass the exact `units` snapshot already fetched and
+    // audited above - never let the compiler independently re-fetch
+    // `story.p4Units`, which would reopen the TOCTOU gap a concurrent
+    // edit could land in between the audit and the compile.
+    const version = await generateScreenplayArchitectureDocument(storyId, units);
     return NextResponse.json({
       version: version.version,
       date: version.date,

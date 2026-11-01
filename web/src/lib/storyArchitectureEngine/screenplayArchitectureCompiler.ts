@@ -44,13 +44,24 @@ function diffSummary(prev: UnitsSnapshot | null, current: UnitsSnapshot): string
   return changes.length ? changes.join("; ") : "No canon changes since previous version.";
 }
 
+/**
+ * Issue #174: `units` must be the exact same `StructuralUnit[]` snapshot
+ * the caller already fetched and ran the Pre-Compilation Audit and
+ * Thematic Anchor Audit against (architecture-chat/document/route.ts) -
+ * NOT independently re-fetched from `story.p4Units` here. Re-fetching
+ * would reopen a TOCTOU gap: a concurrent edit landing between the audit
+ * and this call could persist a `StoredScreenplayArchitectureVersion`
+ * reflecting content that never actually passed the audit that gated it.
+ * `getStory` below is still used, but only for existence-checking and for
+ * `ingestCanon`'s own independent P1-P3 read - never for `p4Units`.
+ */
 export async function generateScreenplayArchitectureDocument(
-  storyId: string
+  storyId: string,
+  units: StructuralUnit[]
 ): Promise<StoredScreenplayArchitectureVersion> {
   const story = await getStory(storyId);
   if (!story) throw new Error(`Story "${storyId}" not found.`);
 
-  const units: StructuralUnit[] = story.p4Units ?? [];
   const [canon, prior] = await Promise.all([
     ingestCanon(storyId),
     getLatestScreenplayArchitectureVersion(storyId),
