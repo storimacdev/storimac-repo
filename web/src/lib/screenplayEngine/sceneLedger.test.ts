@@ -137,6 +137,14 @@ describe("determineActiveSceneNumber", () => {
     const scenes = [confirmScene(createSceneRecord(1), "one"), parkScene(createSceneRecord(2))];
     expect(determineActiveSceneNumber(scenes, null)).toBe(3);
   });
+
+  it("works with just {sceneNumber, status} (issue #100 - shared with the resume UI, which only has that subset)", () => {
+    const minimal: { sceneNumber: number; status: "Exploring" | "Working" | "Confirmed" | "Parked" }[] = [
+      { sceneNumber: 1, status: "Confirmed" },
+      { sceneNumber: 2, status: "Working" },
+    ];
+    expect(determineActiveSceneNumber(minimal, null)).toBe(2);
+  });
 });
 
 describe("getConfirmedScenes", () => {

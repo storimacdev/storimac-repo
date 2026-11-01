@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { useUser } from "@/components/UserProvider";
 import UserMenu from "@/components/UserMenu";
 import Link from "next/link";
 import { useScrollToLatest } from "@/lib/useScrollToLatest";
+import { determineActiveSceneNumber } from "@/lib/screenplayEngine/sceneLedger";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 
@@ -42,11 +43,11 @@ interface TurnResponse {
 
 /**
  * Project 5 (Screenplay Edition) chat UI — GitHub issues #93-#96
- * (Phases 1-4). Deliberately smaller than ArchitectureInterview.tsx/
+ * (Phases 1-4), #98 (Conflict Intercept), and #100 (persisted session
+ * state & resume). Deliberately smaller than ArchitectureInterview.tsx/
  * WorldInterview.tsx: P5 has no compiled-document export concern
  * (issue #102 is explicitly out of scope for this build), so there is
- * no compile/.docx/.pdf panel to carry over. Extended by later issues
- * (#98 conflict banner, #100 resume-on-reload).
+ * no compile/.docx/.pdf panel to carry over.
  */
 export default function ScreenplayInterview() {
   const searchParams = useSearchParams();
@@ -58,6 +59,7 @@ export default function ScreenplayInterview() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [resuming, setResuming] = useState(() => Boolean(workspaceId && canvasId));
   const [error, setError] = useState<string | null>(null);
   const [scene, setScene] = useState<SceneSummary | null>(null);
   const [gaps, setGaps] = useState<{ project: string; field: string; reason: string }[]>([]);
@@ -73,6 +75,61 @@ export default function ScreenplayInterview() {
     sceneNumber: number;
   } | null>(null);
   const [downstreamDamage, setDownstreamDamage] = useState<string[]>([]);
+
+  // Resume/hydration on mount (issue #100) - mirrors
+  // ArchitectureInterview.tsx's own resume effect exactly in shape:
+  // without this, a page reload always started with empty messages/
+  // scene/pendingConflict state even though the server had been
+  // persisting everything all along (Story.p5Scenes,
+  // p5ContinuityMatrix, p5PendingConflict - all already written by
+  // screenplay-chat/route.ts since issues #93-#98). Restores the full
+  // transcript plus the active scene and any open Conflict Intercept
+  // conflict; the Continuity Matrix itself is never shown directly in
+  // this UI, but is already read fresh from Firestore by the route on
+  // every turn (no client-side caching), so a resumed session's next
+  // turn reflects its current state automatically - AC3's "not a
+  // stale snapshot."
+  useEffect(() => {
+    if (!workspaceId || !canvasId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/workspaces/${workspaceId}/canvases/${canvasId}?screenplayMessages=1`);
+        const data = await res.json();
+        if (cancelled) return;
+        if (!res.ok) {
+          setError(data.error ?? "Couldn't load this Story Canvas.");
+          return;
+        }
+        const rawMessages = (data.screenplayMessages ?? []) as { role: "user" | "assistant"; content: string }[];
+        setMessages(rawMessages.map((m) => ({ role: m.role, content: m.content })));
+
+        const sceneList = (data.story?.p5Scenes as SceneSummary[] | undefined) ?? [];
+        // Same determineActiveSceneNumber rule the server applies
+        // (sceneLedger.ts) - shared, not re-derived, so this UI's pick
+        // of "which scene to show" can never drift from the server's
+        // own "which scene is active" pointer.
+        const activeSceneNumber = sceneList.length > 0 ? determineActiveSceneNumber(sceneList, null) : null;
+        const activeScene = sceneList.find((s) => s.sceneNumber === activeSceneNumber) ?? null;
+        setScene(activeScene);
+
+        const pending = data.story?.p5PendingConflict as
+          | { kind: "structural_deviation" | "continuity_contradiction"; sceneNumber: number }
+          | null
+          | undefined;
+        setPendingConflict(pending ?? null);
+
+        requestAnimationFrame(() => scrollToLatest("auto"));
+      } catch {
+        if (!cancelled) setError("Couldn't reach the server. Is the dev server running?");
+      } finally {
+        if (!cancelled) setResuming(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, canvasId, scrollToLatest]);
 
   async function sendMessage(text: string) {
     if (!canvasId || !text.trim() || loading) return;
@@ -146,21 +203,21 @@ export default function ScreenplayInterview() {
           <div className="mt-2 flex gap-2">
             <button
               onClick={() => sendMessage("Revert the proposal and keep the scene as it was.")}
-              disabled={loading}
+              disabled={loading || resuming}
               className="rounded-lg border border-red-500/50 px-3 py-1.5 text-xs font-semibold text-red-200 hover:bg-red-500/10 disabled:opacity-50"
             >
               A: Revert
             </button>
             <button
               onClick={() => sendMessage("Accept the new idea as correct going forward, and log the change.")}
-              disabled={loading}
+              disabled={loading || resuming}
               className="rounded-lg border border-red-500/50 px-3 py-1.5 text-xs font-semibold text-red-200 hover:bg-red-500/10 disabled:opacity-50"
             >
               B: Accept &amp; update
             </button>
             <button
               onClick={() => sendMessage("Park this idea for later as an outstanding decision.")}
-              disabled={loading}
+              disabled={loading || resuming}
               className="rounded-lg border border-red-500/50 px-3 py-1.5 text-xs font-semibold text-red-200 hover:bg-red-500/10 disabled:opacity-50"
             >
               C: Park
@@ -209,7 +266,7 @@ export default function ScreenplayInterview() {
           <div className="mt-2 flex gap-2">
             <button
               onClick={() => sendMessage("I approve this scene exactly as drafted. Please confirm it.")}
-              disabled={loading}
+              disabled={loading || resuming}
               className="rounded-lg bg-gradient-to-r from-red-600 to-orange-500 px-3 py-1.5 text-xs font-semibold text-white hover:from-red-500 hover:to-orange-400 disabled:opacity-50"
             >
               Approve scene
@@ -227,7 +284,7 @@ export default function ScreenplayInterview() {
               <p className="whitespace-pre-wrap text-neutral-200">{scene.assignmentSummary}</p>
               <button
                 onClick={() => sendMessage("I sign off on this scene assignment. Please proceed.")}
-                disabled={loading}
+                disabled={loading || resuming}
                 className="mt-2 rounded-lg bg-gradient-to-r from-red-600 to-orange-500 px-3 py-1.5 text-xs font-semibold text-white hover:from-red-500 hover:to-orange-400 disabled:opacity-50"
               >
                 Sign off on this scene
@@ -240,6 +297,8 @@ export default function ScreenplayInterview() {
       <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-4 py-4">
         {!workspaceId || !canvasId ? (
           <p className="text-sm text-neutral-500">Open this screen from a Story Canvas on the dashboard.</p>
+        ) : resuming ? (
+          <p className="text-sm text-neutral-500">Resuming session…</p>
         ) : (
           <div className="space-y-3">
             {messages.map((m, i) => (
@@ -268,13 +327,13 @@ export default function ScreenplayInterview() {
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          disabled={!canvasId || loading}
+          disabled={!canvasId || loading || resuming}
           placeholder="Message the Screenwriter…"
           className="flex-1 rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm focus:outline-none"
         />
         <button
           type="submit"
-          disabled={!canvasId || loading || !input.trim()}
+          disabled={!canvasId || loading || resuming || !input.trim()}
           className="rounded-lg bg-gradient-to-r from-red-600 to-orange-500 px-4 py-2 text-sm font-semibold text-white hover:from-red-500 hover:to-orange-400 disabled:opacity-50"
         >
           Send
