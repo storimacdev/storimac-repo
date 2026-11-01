@@ -195,9 +195,20 @@ export async function POST(req: NextRequest) {
     // and hasn't been approved yet, so the model knows to present the
     // summary and get explicit approval rather than silently reporting
     // Stage 5 (which the app would clamp back to 4 anyway - see Step 4).
-    const stage4AuditBefore = story.p3Stage4Audit ?? null;
+    // `Array.isArray(stage4AuditBefore.findings)` (issue #126) guards
+    // against a present-but-malformed `p3Stage4Audit` shape - no writer
+    // in this codebase produces one today, but a future migration or
+    // manual Firestore repair could, and unlike the compute/approve/
+    // clamp block below, this read site has no local try/catch around
+    // it. Rendered with mode "flagsOnly" (issue #123) - this grounding
+    // block gets re-injected on every turn until approval, so restating
+    // pass lines every turn only dilutes it without the model needing
+    // to act on them; the full finding set (pass included) still goes
+    // to the author-facing StageAuditCard UI via the persisted story.
+    const stage4AuditBefore =
+      story.p3Stage4Audit && Array.isArray(story.p3Stage4Audit.findings) ? story.p3Stage4Audit : null;
     if (stage4AuditBefore && !stage4AuditBefore.authorApproved) {
-      system += `\n\n[STAGE 4 AUDIT PENDING - internal grounding only, never narrate this raw data to the author. ${formatStage4AuditSummary(stage4AuditBefore)} Present this summary to the author in your own words if you haven't already this session, and set stage4_audit_approved to true only once they give a clear, explicit approval to proceed to Compile - do not report current_stage as 5 until then, it will be ignored.]`;
+      system += `\n\n[STAGE 4 AUDIT PENDING - internal grounding only, never narrate this raw data to the author. ${formatStage4AuditSummary(stage4AuditBefore, "flagsOnly")} Present this summary to the author in your own words if you haven't already this session, and set stage4_audit_approved to true only once they give a clear, explicit approval to proceed to Compile - do not report current_stage as 5 until then, it will be ignored.]`;
     }
 
     // Conflict Resolution Protocol grounding (issue #47) - only while a
@@ -315,33 +326,52 @@ export async function POST(req: NextRequest) {
     let stage4AuditForResponse: P3Stage4Audit | null = stage4AuditBefore;
     let effectiveStage = delta.current_stage;
     try {
+      // issue #124: Stages 1-3 remain deliberately unenforced, so the
+      // model can self-report reaching Stage 4+ before anything is
+      // actually Confirmed. Guarding on `confirmedEntries.length > 0`
+      // here (option (a) of the three the issue laid out) means that
+      // premature self-report simply doesn't compute/persist an audit
+      // at all, rather than permanently locking in a vacuous-but-honest
+      // one (2 pass + 1 skipped) that would then gate Stage 5 forever
+      // on nothing. `!stage4AuditForResponse` still gates the whole
+      // block, so a real audit is simply deferred to whichever later
+      // turn first has >=1 Confirmed entry and current_stage>=4 - it's
+      // never permanently skipped. Rejected (b) recompute-on-change:
+      // correct in principle, but adds real complexity (tracking what
+      // changed since `generatedAt`, and deciding whether a changed
+      // Confirmed set should ever invalidate an *already-approved*
+      // audit) for a scenario with no known real-world incident yet.
+      // Rejected (c) accept-as-is: the honestly-labeled vacuous result
+      // is exactly the failure mode worth avoiding, not codifying.
       if (delta.current_stage >= 4 && !stage4AuditForResponse) {
         const confirmedEntries = existingEntries.filter((e) => e.status === "Confirmed");
-        let consistencyFindings: Stage4AuditFinding[];
-        try {
-          consistencyFindings = await runConsistencyCheck(anthropic, confirmedEntries);
-        } catch (consistencyErr) {
-          console.warn(`[world-chat] Stage 4 consistency check failed for turn ${turnId}:`, consistencyErr);
-          consistencyFindings = [
-            {
-              id: "consistency-error",
-              category: "consistency",
-              status: "flag",
-              detail: "The consistency pass couldn't complete - please try again before compiling.",
-            },
-          ];
+        if (confirmedEntries.length > 0) {
+          let consistencyFindings: Stage4AuditFinding[];
+          try {
+            consistencyFindings = await runConsistencyCheck(anthropic, confirmedEntries);
+          } catch (consistencyErr) {
+            console.warn(`[world-chat] Stage 4 consistency check failed for turn ${turnId}:`, consistencyErr);
+            consistencyFindings = [
+              {
+                id: "consistency-error",
+                category: "consistency",
+                status: "flag",
+                detail: "The consistency pass couldn't complete - please try again before compiling.",
+              },
+            ];
+          }
+          const newAudit: P3Stage4Audit = {
+            findings: [
+              ...checkDependencyCompleteness(confirmedEntries, existingEntries),
+              ...checkRedundancy(confirmedEntries),
+              ...consistencyFindings,
+            ],
+            generatedAt: new Date().toISOString(),
+            authorApproved: false,
+          };
+          await setP3Stage4Audit(storyId, newAudit);
+          stage4AuditForResponse = newAudit;
         }
-        const newAudit: P3Stage4Audit = {
-          findings: [
-            ...checkDependencyCompleteness(confirmedEntries),
-            ...checkRedundancy(confirmedEntries),
-            ...consistencyFindings,
-          ],
-          generatedAt: new Date().toISOString(),
-          authorApproved: false,
-        };
-        await setP3Stage4Audit(storyId, newAudit);
-        stage4AuditForResponse = newAudit;
       }
 
       if (delta.stage4_audit_approved && stage4AuditBefore && !stage4AuditBefore.authorApproved && stage4AuditForResponse) {
