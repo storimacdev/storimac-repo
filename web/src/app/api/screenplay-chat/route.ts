@@ -37,6 +37,7 @@ import {
 import { validateSceneDraft, type SceneDraftingValidation } from "@/lib/screenplayEngine/sceneDrafting";
 import { checkContinuityBeforeDraft, type ContinuityViolation } from "@/lib/screenplayEngine/continuityMatrix";
 import { validateSpecialProcessingPaths } from "@/lib/screenplayEngine/specialProcessingPaths";
+import { buildComplianceReport, formatScreenplayDelivery } from "@/lib/screenplayEngine/qaDelivery";
 
 export const runtime = "nodejs";
 
@@ -137,7 +138,7 @@ export async function POST(req: NextRequest) {
       const openLoopLines = continuityMatrix.openLoops
         .filter((l) => l.status === "open")
         .map((l) => `- [${l.id}] (${l.kind}) planted scene ${l.plantedSceneNumber}: ${l.description}`);
-      system += `\n\n[Phase 2 - Scene Drafting - internal grounding only. Scene ${existingScene.sceneNumber} is signed off. Draft it now in strict industry screenplay format per Sections 3-4: Strict Visual Discipline, active present tense, Lean Action Paragraphs, Performable Dialogue & Subtext, Enter Late/Leave Early, and the Conflict Mandate. Report draft_text, conflict_mandate, enter_late_leave_early, and continuity_requirements (every fact/physical-state this draft relies on) together this turn. If this scene uses a flashback or montage (Section 6), use BEGIN FLASHBACK:/END FLASHBACK. or BEGIN MONTAGE:/END MONTAGE. formatting and report special_processing (flashback justification, per-shot montage evolution, and any Open Loop ids this scene pays off via loops_to_close - a loop can only be closed if it was planted in an earlier Confirmed scene). Never alter a structural fact from the Project 4 blueprint (scene count, turning point, cast) without reporting structural_deviation - that halts drafting for the Conflict Intercept protocol rather than silently reinterpreting the blueprint.${
+      system += `\n\n[Phase 2 - Scene Drafting - internal grounding only. Scene ${existingScene.sceneNumber} is signed off. Draft it now in strict industry screenplay format per Sections 3-4: Strict Visual Discipline, active present tense, Lean Action Paragraphs, Performable Dialogue & Subtext, Enter Late/Leave Early, and the Conflict Mandate. Report draft_text, conflict_mandate, enter_late_leave_early, dialogue_voice_audit, and continuity_requirements (every fact/physical-state this draft relies on) together this turn. Once accepted, the app composes the Phase 3 split delivery (THE SCREENPLAY / COMPLIANCE REPORT) automatically - do not draft that split yourself. If this scene uses a flashback or montage (Section 6), use BEGIN FLASHBACK:/END FLASHBACK. or BEGIN MONTAGE:/END MONTAGE. formatting and report special_processing (flashback justification, per-shot montage evolution, and any Open Loop ids this scene pays off via loops_to_close - a loop can only be closed if it was planted in an earlier Confirmed scene). Never alter a structural fact from the Project 4 blueprint (scene count, turning point, cast) without reporting structural_deviation - that halts drafting for the Conflict Intercept protocol rather than silently reinterpreting the blueprint.${
         openLoopLines.length > 0 ? `\nOpen Loops currently tracked:\n${openLoopLines.join("\n")}` : ""
       }]`;
     }
@@ -163,6 +164,7 @@ export async function POST(req: NextRequest) {
     let continuityViolations: ContinuityViolation[] | null = null;
     let draftValidation: SceneDraftingValidation | null = null;
     let structuralDeviation: { deviates: boolean; explanation: string } | null = null;
+    let delivery: string | null = null;
 
     try {
       const sceneNumber = delta.scene_number ?? activeSceneNumber;
@@ -251,6 +253,22 @@ export async function POST(req: NextRequest) {
             const drafted = setDraftText(effectiveScene, delta.draft_text);
             scenes = upsertScene(scenes, drafted);
             effectiveScene = drafted;
+
+            // Phase 3 (issue #95): split delivery, composed
+            // deterministically from the checks already run above plus
+            // the model's Dialogue & Voice Audit self-report - never
+            // re-derives validateSceneDraft's judgment, just renders it.
+            const compliance = buildComplianceReport({
+              visualDisciplineFindings: validation.advisoryFindings.visualDiscipline,
+              leanParagraphFindings: validation.advisoryFindings.leanParagraphs,
+              dialogueVoiceAudit: {
+                subtextPresent: delta.dialogue_voice_audit?.subtext_present ?? false,
+                notes: delta.dialogue_voice_audit?.notes ?? "",
+              },
+              matrix: continuityMatrix,
+              sceneNumber: effectiveScene.sceneNumber,
+            });
+            delivery = formatScreenplayDelivery(delta.draft_text, compliance);
           }
         }
       }
@@ -287,6 +305,7 @@ export async function POST(req: NextRequest) {
       continuityViolations,
       draftValidation,
       structuralDeviation,
+      delivery,
       gaps: canon.gaps,
       deferredItems: delta.deferred_items,
     });
